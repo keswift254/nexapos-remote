@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show HardwareKeyboard, KeyEvent;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+import 'core/providers.dart';
 import 'domain/services/session_service.dart';
 import 'domain/services/sync_service.dart';
 import 'domain/services/license_service.dart';
@@ -129,6 +131,17 @@ GoRouter router(Ref ref) {
 }
 
 const _syncInterval = Duration(minutes: 2);
+// A shared shop terminal left logged in indefinitely is a real handoff
+// risk (one cashier's actions attributed to another, or anyone walking
+// up gets a logged-in admin session) - checked on its own, more frequent
+// cadence than _syncInterval since a 2-minute-granularity check could
+// let this run up to 2 minutes over the real timeout. Deliberately does
+// NOT touch CartNotifier (keepAlive, never cleared by logout - see its
+// own class doc) - an in-progress sale survives this exactly like it
+// survives a manual logout today, so the next person to log in (same
+// cashier or not) picks up where the cart was left, not an empty one.
+const _inactivityTimeout = Duration(minutes: 28);
+const _inactivityCheckInterval = Duration(seconds: 30);
 
 class NexaPosApp extends ConsumerStatefulWidget {
   const NexaPosApp({super.key});
@@ -151,27 +164,42 @@ class NexaPosApp extends ConsumerStatefulWidget {
 /// internet happens to be available".
 class _NexaPosAppState extends ConsumerState<NexaPosApp> with WidgetsBindingObserver {
   Timer? _timer;
+  Timer? _inactivityTimer;
+  DateTime? _lastActivity;
   bool _syncing = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _recordActivity();
     _runSync();
     ref.read(pendingPaystackSalesProvider.notifier).reconcile();
     _timer = Timer.periodic(_syncInterval, (_) => _runSync());
+    _inactivityTimer = Timer.periodic(_inactivityCheckInterval, (_) => _checkInactivity());
+    HardwareKeyboard.instance.addHandler(_onKeyEvent);
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    HardwareKeyboard.instance.removeHandler(_onKeyEvent);
     _timer?.cancel();
+    _inactivityTimer?.cancel();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _runSync();
+    // Bringing the window back into focus is itself a deliberate
+    // interaction - without this, a window left backgrounded past the
+    // timeout would log the user out the instant they click back in,
+    // rather than giving them the same 28 minutes from when they
+    // actually returned.
+    if (state == AppLifecycleState.resumed) {
+      _recordActivity();
+      _runSync();
+    }
   }
 
   Future<void> _runSync() async {
@@ -186,13 +214,37 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp> with WidgetsBindingObse
     }
   }
 
+  // Observes without consuming - returning false lets every key event
+  // continue on to whatever field/shortcut normally handles it, exactly
+  // as if this listener weren't here at all.
+  bool _onKeyEvent(KeyEvent event) {
+    _recordActivity();
+    return false;
+  }
+
+  void _recordActivity([PointerEvent? _]) => _lastActivity = ref.read(clockProvider).now();
+
+  void _checkInactivity() {
+    if (ref.read(sessionProvider) == null) return;
+    final lastActivity = _lastActivity;
+    if (lastActivity == null) return;
+    if (ref.read(clockProvider).now().difference(lastActivity) >= _inactivityTimeout) {
+      ref.read(sessionProvider.notifier).logout();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final router = ref.watch(routerProvider);
-    return MaterialApp.router(
-      title: 'NexaPOS',
-      theme: ThemeData(colorSchemeSeed: Colors.indigo, useMaterial3: true),
-      routerConfig: router,
+    return Listener(
+      onPointerDown: _recordActivity,
+      onPointerSignal: _recordActivity,
+      behavior: HitTestBehavior.translucent,
+      child: MaterialApp.router(
+        title: 'NexaPOS',
+        theme: ThemeData(colorSchemeSeed: Colors.indigo, useMaterial3: true),
+        routerConfig: router,
+      ),
     );
   }
 }
