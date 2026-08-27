@@ -253,24 +253,43 @@ class UpdateService {
 
   /// installDir is the live app - the one this very process is running
   /// out of - so nothing in this script can touch it until this process
-  /// (already gone by the time the timeout below elapses) has actually
-  /// released its file locks. Cleanup deliberately deletes stagingDir
-  /// last, and deliberately doesn't check xcopy's errorlevel before
-  /// relaunching: if the copy partially failed, relaunching whatever
-  /// resulted still gives the user something to see (and re-download
-  /// from the site as a fallback) rather than silently leaving the app
-  /// looking like it just vanished.
+  /// has actually released its file locks, which isn't instant just
+  /// because the process has called exit() (confirmed for real: a
+  /// deliberately-held exclusive lock on the exe reliably produces
+  /// xcopy's "Sharing violation" / exit code 4 for as long as the lock
+  /// is held). A single fixed wait then one xcopy attempt - the original
+  /// design - meant that if the OS hadn't released the exe's lock by
+  /// then, xcopy would still copy every OTHER file (the DLLs, data\)
+  /// but skip the exe, relaunching a stale exe next to brand-new
+  /// libraries. PackageInfo reads its version straight from the running
+  /// exe's own resource block, so the app would then look permanently
+  /// out of date to itself even though it had genuinely updated - this
+  /// is the exact "old version still there on reopen" failure mode the
+  /// logging below was originally added to help diagnose, but the
+  /// underlying race was never actually closed until now. Retries the
+  /// whole xcopy (not just the exe) up to 10 times, 1s apart, so a
+  /// still-copied DLL isn't left half-newer-half-older either.
+  ///
+  /// Uses `ping -n N 127.0.0.1` instead of `timeout` for the delays -
+  /// confirmed for real that `timeout` errors out immediately
+  /// ("Input redirection is not supported") when its stdin isn't a real
+  /// interactive console, which isn't guaranteed for a detached child
+  /// process; ping's delay doesn't depend on console/stdin at all.
+  ///
+  /// `%ERRORLEVEL%` deliberately isn't read directly inside the `for`
+  /// loop body - batch expands `%...%` once when a parenthesized block
+  /// is parsed, not fresh on each iteration, so it would silently freeze
+  /// at whatever ERRORLEVEL was before the loop even started (confirmed
+  /// for real - it read 1 unchanged through all 10 attempts against a
+  /// fix that was, per xcopy's own output, actually succeeding every
+  /// time). `setlocal enabledelayedexpansion` plus `!EC!` reads the
+  /// true per-iteration value instead.
   ///
   /// Logs each step to last_update_log.txt right next to the exe
   /// (survives stagingDir's own cleanup, since it's written to
   /// installDir instead) - this whole script runs invisibly in a
   /// detached process with no console the user or a debugger can watch,
-  /// so without this log a real failure here would be a total black
-  /// box. Written after a real report of "download completes, says
-  /// installing, then the old version is still there on reopen" that
-  /// turned out to be a version/binary mismatch, not a script bug - but
-  /// there was no way to be sure of that without one being ruled out
-  /// first, and no log existed to check.
+  /// so without this log a real failure here would be a total black box.
   String _windowsUpdaterScript({
     required String sourceDir,
     required String installDir,
@@ -279,11 +298,18 @@ class UpdateService {
   }) {
     final log = '$installDir\\last_update_log.txt';
     return '@echo off\r\n'
+        'setlocal enabledelayedexpansion\r\n'
         'echo [%DATE% %TIME%] Update starting > "$log"\r\n'
-        'timeout /t 2 /nobreak > nul\r\n'
-        'echo [%DATE% %TIME%] Copying "$sourceDir" to "$installDir" >> "$log"\r\n'
-        'xcopy "$sourceDir" "$installDir" /E /I /Y /Q >> "$log" 2>&1\r\n'
-        'echo [%DATE% %TIME%] xcopy exit code: %ERRORLEVEL% >> "$log"\r\n'
+        'ping -n 3 127.0.0.1 > nul\r\n'
+        'for /L %%i in (1,1,10) do (\r\n'
+        '    echo [%DATE% %TIME%] Copy attempt %%i - "$sourceDir" to "$installDir" >> "$log"\r\n'
+        '    xcopy "$sourceDir" "$installDir" /E /I /Y /Q >> "$log" 2>&1\r\n'
+        '    set EC=!ERRORLEVEL!\r\n'
+        '    echo [%DATE% %TIME%] xcopy exit code: !EC! >> "$log"\r\n'
+        '    if "!EC!"=="0" goto copydone\r\n'
+        '    ping -n 2 127.0.0.1 > nul\r\n'
+        ')\r\n'
+        ':copydone\r\n'
         'start "" "$installDir\\$exeName"\r\n'
         'echo [%DATE% %TIME%] Relaunched $exeName, cleaning up staging >> "$log"\r\n'
         'rmdir /S /Q "$stagingDir"\r\n';
