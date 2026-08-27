@@ -52,6 +52,7 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
   final _manualCodeOtherController = TextEditingController();
   bool _submittingOther = false;
   bool _leaving = false;
+  bool _resettingIdentity = false;
 
   RegistrationLookup? _existingRegistration;
 
@@ -334,6 +335,44 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
     }
   }
 
+  /// Escape hatch for a device_id that already has a server-side
+  /// registration this app has no way back into (e.g. one old enough to
+  /// predate registration_secret_hash existing at all - the ordinary
+  /// secret-matched recovery in register_device has nothing to match
+  /// against for those). Only touches this device's platform identity
+  /// (AppDatabase.regenerateDeviceIdentity) - all real local data
+  /// (products, sales, users, settings) is untouched, unlike "leave
+  /// this shop", since that data has nothing to do with the identity
+  /// problem being fixed here.
+  Future<void> _resetDeviceIdentity() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Reset this device\'s identity?'),
+        content: const Text(
+          'Only use this if registering keeps failing with "already registered" and there\'s no way to reconnect '
+          'to what it was registered as before. This gives the device a fresh identity to register with - it does '
+          'NOT touch any products, sales, users, or settings already on this device.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Reset identity')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _resettingIdentity = true);
+    try {
+      await ref.read(appDatabaseProvider).regenerateDeviceIdentity();
+      if (!mounted) return;
+      setState(() => _existingRegistration = null);
+      _showMessage('Ready - this device now has a fresh identity. Try registering again.');
+    } finally {
+      if (mounted) setState(() => _resettingIdentity = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final credentialsAsync = ref.watch(currentPaymentCredentialsProvider);
@@ -469,6 +508,18 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
             child: _submitting ? _smallSpinner() : const Text('Join'),
           ),
         ],
+        const SizedBox(height: 24),
+        Center(
+          child: TextButton(
+            onPressed: _resettingIdentity ? null : _resetDeviceIdentity,
+            child: _resettingIdentity
+                ? _smallSpinner()
+                : Text(
+                    'Registering keeps failing? Reset this device\'s identity',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+          ),
+        ),
       ],
     );
   }

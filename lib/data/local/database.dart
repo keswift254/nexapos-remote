@@ -239,6 +239,33 @@ class AppDatabase extends _$AppDatabase {
     );
   }
 
+  /// Escape hatch for a device whose device_id already has a server-side
+  /// registration this app has no way back into - e.g. one that
+  /// predates registration_secret_hash existing at all, so there's no
+  /// stored secret anywhere to recover against (the ordinary path for
+  /// that is register_device's own secret-matched recovery; this is for
+  /// when that's genuinely not possible). Generates a fresh
+  /// deviceId+registrationSecret pair, same as a brand-new install would
+  /// get, so the next registration attempt is a real, unclaimed
+  /// device_id instead of colliding with the old one - deliberately
+  /// does NOT touch any other table, unlike resetForFreshStart, since
+  /// this device's actual business data (products, sales, users,
+  /// settings) is real and has nothing to do with the identity problem
+  /// being fixed here. Also resets the sync cursors (SyncMetadataService
+  /// would otherwise hold onto counters from whatever this device_id
+  /// used to be associated with).
+  Future<void> regenerateDeviceIdentity() async {
+    const uuid = Uuid();
+    await (update(deviceMeta)..where((t) => t.id.equals('device'))).write(
+      DeviceMetaCompanion(
+        deviceId: Value(uuid.v4()),
+        registrationSecret: Value(uuid.v4()),
+        lastPushedLocalRev: const Value(0),
+        lastPulledChangeId: const Value(0),
+      ),
+    );
+  }
+
   /// Used by "leave shop" - wipes every table's business data, but
   /// deliberately keeps device_meta's identity columns (deviceId,
   /// registrationSecret) untouched: leave_shop on the server moves this
