@@ -1,7 +1,20 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+// key.properties is gitignored and holds real signing secrets - never
+// committed. Falls back to debug signing when it's absent (a fresh
+// clone on another machine, CI, etc.) rather than failing the build,
+// since only real release/Play Store builds need the upload key.
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
 android {
@@ -29,11 +42,44 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (keystorePropertiesFile.exists()) {
+            create("release") {
+                keyAlias = keystoreProperties["keyAlias"] as String
+                keyPassword = keystoreProperties["keyPassword"] as String
+                storeFile = file(keystoreProperties["storeFile"] as String)
+                storePassword = keystoreProperties["storePassword"] as String
+            }
+        }
+    }
+
+    // Play Store builds use the real upload key below - a fresh
+    // distribution channel, nothing installed from it yet. The
+    // direct-download build published to nexapos-site and installed via
+    // this app's own self-update mechanism deliberately keeps using the
+    // debug key every existing real install already has - Android
+    // refuses to install an update signed with a different key than
+    // what's already on the device, so switching it would silently
+    // break self-update for every current user.
+    //
+    // Gated on an explicit env var, NOT on which Gradle task got
+    // invoked - gradle.startParameter.taskNames looked like a clean way
+    // to tell `flutter build appbundle` (bundleRelease) apart from
+    // `flutter build apk` (assembleRelease) automatically, but tested it
+    // for real and it did NOT work as expected: a plain `flutter build
+    // apk --release` still picked up the upload-key signing. Caught via
+    // apksigner before anything got published, not left as a landmine -
+    // this explicit opt-in is deliberately impossible to trigger by
+    // accident.
+    val isPlayStoreBuild = System.getenv("NEXAPOS_PLAYSTORE_BUILD") == "true"
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (isPlayStoreBuild && keystorePropertiesFile.exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 }
