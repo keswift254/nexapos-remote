@@ -1,13 +1,16 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../../core/providers.dart';
 import '../../data/payments/paystack_gateway.dart' show PaystackException;
+import '../../data/payments/platform_http_client.dart' show nexaposPlatformBaseUrl;
 import '../../data/payments/platform_onboarding_gateway.dart';
 import '../../data/sync/lan_discovery.dart';
 import '../../domain/entities/paystack_credentials.dart';
 import '../../domain/services/paystack_credentials_service.dart';
 import '../../domain/services/sync_service.dart';
+import '../../app.dart' show hasAnyUsersProvider;
 import 'payment_settings_screen.dart' show currentPaymentCredentialsProvider;
 
 /// Reachable on its own from the dashboard's Settings menu - deliberately
@@ -27,8 +30,6 @@ class DeviceSyncScreen extends ConsumerStatefulWidget {
 
 class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
   final _deviceLabelController = TextEditingController();
-  final _newShopUrlController = TextEditingController(text: 'http://localhost/nexapos_platform/public/index.php');
-  final _manualUrlController = TextEditingController();
   final _manualCodeController = TextEditingController();
 
   bool _joinExisting = false;
@@ -48,17 +49,54 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
   List<DiscoveredHost> _discoveredOther = const [];
   LanHostScanner? _scannerOther;
   StreamSubscription<List<DiscoveredHost>>? _scanSubOther;
-  final _manualUrlOtherController = TextEditingController();
   final _manualCodeOtherController = TextEditingController();
   bool _submittingOther = false;
+  bool _leaving = false;
+
+  RegistrationLookup? _existingRegistration;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkExistingRegistration();
+  }
+
+  /// Fired unconditionally on open, whether or not this device already
+  /// looks configured - if it's already connected the result is simply
+  /// unused (_buildConnectedView shows instead), and if it's not, this
+  /// is what lets a device that lost its local api_key (but kept its own
+  /// registrationSecret, which survives independently - see
+  /// device_meta_table.dart) see what it was already registered as
+  /// instead of only finding out via a 409 after typing something and
+  /// submitting. Silently falls back to a blank form on any failure -
+  /// offline, or genuinely nothing registered yet look identical here,
+  /// and both mean "just show the normal form".
+  Future<void> _checkExistingRegistration() async {
+    try {
+      final deviceId = await ref.read(syncMetadataProvider).deviceId();
+      final registrationSecret = await ref.read(syncMetadataProvider).registrationSecret();
+      final lookup = await ref.read(platformOnboardingGatewayProvider).lookupRegistration(
+            baseUrl: nexaposPlatformBaseUrl,
+            deviceId: deviceId,
+            registrationSecret: registrationSecret,
+          );
+      if (!mounted || lookup == null) return;
+      setState(() {
+        _existingRegistration = lookup;
+        if (_deviceLabelController.text.isEmpty) {
+          _deviceLabelController.text = lookup.deviceLabel;
+        }
+      });
+    } catch (_) {
+      // Offline right now - _register()'s own recovery path still works
+      // once connectivity is back, this just means no pre-fill/banner.
+    }
+  }
 
   @override
   void dispose() {
     _deviceLabelController.dispose();
-    _newShopUrlController.dispose();
-    _manualUrlController.dispose();
     _manualCodeController.dispose();
-    _manualUrlOtherController.dispose();
     _manualCodeOtherController.dispose();
     _scanSub?.cancel();
     _scanner?.dispose();
@@ -94,23 +132,25 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
   Future<void> _registerNewShop() async {
     final label = _deviceLabelController.text.trim();
     if (label.isEmpty) return _showMessage('Enter a label for this device.');
-    await _register(baseUrl: _newShopUrlController.text.trim(), inviteCode: null);
+    await _register(baseUrl: nexaposPlatformBaseUrl, inviteCode: null);
   }
 
+  // host.baseUrl is deliberately ignored - every device talks to the
+  // same fixed nexaposPlatformBaseUrl now (see that constant's own
+  // comment), LAN discovery only still matters for finding the invite
+  // CODE nearby without having to type it.
   Future<void> _joinDiscovered(DiscoveredHost host) async {
     final label = _deviceLabelController.text.trim();
     if (label.isEmpty) return _showMessage('Enter a label for this device first.');
-    await _register(baseUrl: host.baseUrl, inviteCode: host.code);
+    await _register(baseUrl: nexaposPlatformBaseUrl, inviteCode: host.code);
   }
 
   Future<void> _joinManually() async {
     final label = _deviceLabelController.text.trim();
     if (label.isEmpty) return _showMessage('Enter a label for this device.');
-    final baseUrl = _manualUrlController.text.trim();
     final code = _manualCodeController.text.trim();
-    if (baseUrl.isEmpty) return _showMessage('Enter the shop server address.');
     if (code.isEmpty) return _showMessage('Enter the invite code.');
-    await _register(baseUrl: baseUrl, inviteCode: code);
+    await _register(baseUrl: nexaposPlatformBaseUrl, inviteCode: code);
   }
 
   Future<void> _register({required String baseUrl, required String? inviteCode}) async {
@@ -141,6 +181,13 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
           ? 'Connected - your data will sync with the rest of that shop shortly.'
           : 'This device is now set up as its own shop.');
       unawaited(_safeSyncNow());
+      // _register only ever runs from _buildRegisterView, i.e. while
+      // this device wasn't configured yet - that's also exactly the
+      // condition app.dart's mandatory /device-sync gate checks, so a
+      // fresh registration needs an explicit nudge forward (to /setup,
+      // in practice) rather than sitting on the connected view that now
+      // renders here until something else happens to navigate.
+      if (mounted) context.go('/');
     } catch (e) {
       _showMessage(e is PaystackException ? e.message : '$e');
     } finally {
@@ -209,16 +256,7 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
     if (mounted) setState(() { _scanningOther = false; _discoveredOther = const []; });
   }
 
-  Future<void> _joinOther(PaystackCredentials credentials, {required String baseUrl, required String code}) async {
-    // join_shop authenticates the caller via its existing api_key, which
-    // only the server this device is already registered against
-    // recognizes - a code from a shop hosted on a different server would
-    // just fail there with a confusing "invalid code" rather than actually
-    // reaching it, so catch that case with a clearer message instead.
-    if (baseUrl != credentials.baseUrl) {
-      _showMessage('That shop is on a different server than this device - switching servers isn\'t supported.');
-      return;
-    }
+  Future<void> _joinOther(PaystackCredentials credentials, {required String code}) async {
     setState(() => _submittingOther = true);
     try {
       await ref.read(platformOnboardingGatewayProvider).joinShop(
@@ -248,6 +286,54 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
     }
   }
 
+  /// leave_shop server-side hands this device a brand new, empty shop of
+  /// its own (same api_key - no need to re-register), so the local half
+  /// just has to match: wipe every business record and reset the sync
+  /// cursors that belonged to the shop just left, then send the user
+  /// through /setup again for the fresh shop (hasAnyUsersProvider is
+  /// correctly false now, since users was part of the wipe) rather than
+  /// leaving them sitting on this screen with a stale app state.
+  Future<void> _leaveShop(PaystackCredentials credentials) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Leave this shop?'),
+        content: const Text(
+          'This device will disconnect from its current shop. ALL local data on this device - products, sales, '
+          'inventory, everything - will be permanently deleted so it can start fresh as a new, empty shop. '
+          'This cannot be undone. Devices that stay in the current shop keep their data.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Leave and erase this device'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _leaving = true);
+    try {
+      await ref.read(platformOnboardingGatewayProvider).leaveShop(
+            baseUrl: credentials.baseUrl,
+            apiKey: credentials.apiKey,
+          );
+      await ref.read(appDatabaseProvider).resetForFreshStart();
+      await ref.read(syncMetadataProvider).resetCursors();
+      ref.invalidate(hasAnyUsersProvider);
+      if (!mounted) return;
+      _showMessage('Left that shop - this device is starting fresh.');
+      context.go('/');
+    } catch (e) {
+      _showMessage(e is PaystackException ? e.message : '$e');
+    } finally {
+      if (mounted) setState(() => _leaving = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final credentialsAsync = ref.watch(currentPaymentCredentialsProvider);
@@ -262,7 +348,18 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
     );
   }
 
+  // business_name is only set once a shop's owner fills in Payment
+  // Settings (save_settlement_details) - a shop that hasn't gotten
+  // there yet, or was never meant to (no interest in Paystack), leaves
+  // this null/empty, so the recovery banner needs a sensible fallback
+  // rather than showing an empty pair of quotes.
+  String get _existingShopName {
+    final name = _existingRegistration?.businessName ?? '';
+    return name.isEmpty ? 'that shop' : '"$name"';
+  }
+
   Widget _buildRegisterView() {
+    final existing = _existingRegistration;
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -271,8 +368,30 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
           style: Theme.of(context).textTheme.bodySmall,
         ),
         const SizedBox(height: 16),
+        if (existing != null) ...[
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: existing.isDisabled
+                  ? Theme.of(context).colorScheme.errorContainer
+                  : Theme.of(context).colorScheme.secondaryContainer,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              existing.isDisabled
+                  ? 'This device was disabled by $_existingShopName and can\'t reconnect with its current identity. '
+                      'Ask that shop\'s owner if this is a mistake, or reinstall the app to set this device up fresh.'
+                  : 'This device was already registered as "${existing.deviceLabel}" for $_existingShopName. '
+                      'Tap below to reconnect using that name, or change it first to update it.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
         TextField(
           controller: _deviceLabelController,
+          enabled: existing?.isDisabled != true,
           decoration: const InputDecoration(labelText: 'Label for this device (e.g. your shop name or counter)'),
         ),
         const SizedBox(height: 16),
@@ -293,13 +412,8 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
         ),
         const SizedBox(height: 16),
         if (!_joinExisting) ...[
-          TextField(
-            controller: _newShopUrlController,
-            decoration: const InputDecoration(labelText: 'Shop server address'),
-          ),
-          const SizedBox(height: 12),
           FilledButton(
-            onPressed: _submitting ? null : _registerNewShop,
+            onPressed: (_submitting || existing?.isDisabled == true) ? null : _registerNewShop,
             child: _submitting ? _smallSpinner() : const Text('Set up this device'),
           ),
         ] else ...[
@@ -332,9 +446,8 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
               Card(
                 child: ListTile(
                   title: Text(host.deviceLabel.isEmpty ? 'Nearby shop' : host.deviceLabel),
-                  subtitle: Text(host.baseUrl),
                   trailing: FilledButton(
-                    onPressed: _submitting ? null : () => _joinDiscovered(host),
+                    onPressed: (_submitting || existing?.isDisabled == true) ? null : () => _joinDiscovered(host),
                     child: const Text('Join'),
                   ),
                 ),
@@ -343,13 +456,8 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
           const SizedBox(height: 20),
           const Divider(),
           const SizedBox(height: 8),
-          Text('Or enter the details manually', style: Theme.of(context).textTheme.labelLarge),
+          Text('Or enter the invite code manually', style: Theme.of(context).textTheme.labelLarge),
           const SizedBox(height: 8),
-          TextField(
-            controller: _manualUrlController,
-            decoration: const InputDecoration(labelText: 'Shop server address'),
-          ),
-          const SizedBox(height: 12),
           TextField(
             controller: _manualCodeController,
             decoration: const InputDecoration(labelText: 'Invite code'),
@@ -357,7 +465,7 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
           ),
           const SizedBox(height: 12),
           FilledButton(
-            onPressed: _submitting ? null : _joinManually,
+            onPressed: (_submitting || existing?.isDisabled == true) ? null : _joinManually,
             child: _submitting ? _smallSpinner() : const Text('Join'),
           ),
         ],
@@ -459,21 +567,13 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
                     Card(
                       child: ListTile(
                         title: Text(host.deviceLabel.isEmpty ? 'Nearby shop' : host.deviceLabel),
-                        subtitle: Text(host.baseUrl),
                         trailing: FilledButton(
-                          onPressed: _submittingOther
-                              ? null
-                              : () => _joinOther(credentials, baseUrl: host.baseUrl, code: host.code),
+                          onPressed: _submittingOther ? null : () => _joinOther(credentials, code: host.code),
                           child: const Text('Join'),
                         ),
                       ),
                     ),
                 ],
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _manualUrlOtherController,
-                  decoration: const InputDecoration(labelText: 'Shop server address'),
-                ),
                 const SizedBox(height: 12),
                 TextField(
                   controller: _manualCodeOtherController,
@@ -485,15 +585,41 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
                   onPressed: _submittingOther
                       ? null
                       : () {
-                          final baseUrl = _manualUrlOtherController.text.trim();
                           final code = _manualCodeOtherController.text.trim();
-                          if (baseUrl.isEmpty || code.isEmpty) {
-                            _showMessage('Enter both the server address and the invite code.');
+                          if (code.isEmpty) {
+                            _showMessage('Enter the invite code.');
                             return;
                           }
-                          _joinOther(credentials, baseUrl: baseUrl, code: code);
+                          _joinOther(credentials, code: code);
                         },
                   child: _submittingOther ? _smallSpinner() : const Text('Join'),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Leave this shop', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 4),
+                Text(
+                  'Disconnects this device and permanently erases every product, sale, and other record stored '
+                  'on it, so it starts completely fresh - as its own new, empty shop. Data already synced to '
+                  'other devices in the current shop is not affected.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: _leaving ? null : () => _leaveShop(credentials),
+                  icon: Icon(Icons.logout, color: Theme.of(context).colorScheme.error),
+                  label: _leaving
+                      ? _smallSpinner()
+                      : Text('Leave this shop', style: TextStyle(color: Theme.of(context).colorScheme.error)),
                 ),
               ],
             ),

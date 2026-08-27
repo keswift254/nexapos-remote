@@ -239,6 +239,38 @@ class AppDatabase extends _$AppDatabase {
     );
   }
 
+  /// Used by "leave shop" - wipes every table's business data, but
+  /// deliberately keeps device_meta's identity columns (deviceId,
+  /// registrationSecret) untouched: leave_shop on the server moves this
+  /// SAME client row to a new, empty shop_id rather than creating a new
+  /// device, so the local identity that row is keyed by has to survive
+  /// too. roles is untouched too (not shop-specific, nothing to reset).
+  /// users ends up empty on purpose - that's what makes
+  /// hasAnyUsersProvider correctly re-show the setup wizard, same as a
+  /// genuine first run. Sync cursors are the caller's responsibility
+  /// (SyncMetadataService.resetCursors, same call join_shop already
+  /// makes) - not duplicated here.
+  ///
+  /// Delete order follows the real FK graph (children before the
+  /// parents they reference: payment_records/sale_items/stock_movements
+  /// before sales/products, sales/stock_movements/expenses before users,
+  /// products before categories) so foreign_keys=ON doesn't reject
+  /// anything mid-wipe.
+  Future<void> resetForFreshStart() async {
+    await transaction(() async {
+      await delete(paymentRecords).go();
+      await delete(saleItems).go();
+      await delete(stockMovements).go();
+      await delete(expenses).go();
+      await delete(sales).go();
+      await delete(products).go();
+      await delete(users).go();
+      await delete(categories).go();
+      await delete(businessSettings).go();
+      await _seedDefaultBusinessSettings();
+    });
+  }
+
   Future<void> _seedDefaultBusinessSettings() async {
     final now = DateTime.now().toUtc().toIso8601String();
     final deviceId = await _currentDeviceId();

@@ -5,7 +5,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nexapos_mobile/app.dart';
 import 'package:nexapos_mobile/core/providers.dart';
 import 'package:nexapos_mobile/data/local/database.dart';
+import 'package:nexapos_mobile/domain/entities/paystack_credentials.dart';
 import 'package:nexapos_mobile/domain/services/license_service.dart';
+import 'package:nexapos_mobile/features/settings/payment_settings_screen.dart' show currentPaymentCredentialsProvider;
 
 void main() {
   testWidgets('fresh install with no users lands on the setup screen', (tester) async {
@@ -17,9 +19,13 @@ void main() {
             ref.onDispose(db.close);
             return db;
           }),
-          // Setup/login is what this test exercises - licensing is covered
-          // separately by activation_flow_test.dart.
+          // Setup/login is what this test exercises - licensing and
+          // device-sync registration are covered separately.
           hasCachedLicenseProvider.overrideWith((ref) async => true),
+          currentPaymentCredentialsProvider.overrideWith(
+            (ref) async => const PaystackCredentials(
+                baseUrl: 'https://test.example/index.php', apiKey: 'test-api-key', currency: 'KES', defaultEmail: ''),
+          ),
         ],
         child: const NexaPosApp(),
       ),

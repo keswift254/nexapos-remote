@@ -7,7 +7,9 @@ import 'package:go_router/go_router.dart';
 import 'package:nexapos_mobile/app.dart';
 import 'package:nexapos_mobile/core/providers.dart';
 import 'package:nexapos_mobile/data/local/database.dart';
+import 'package:nexapos_mobile/domain/entities/paystack_credentials.dart';
 import 'package:nexapos_mobile/domain/services/license_service.dart';
+import 'package:nexapos_mobile/features/settings/payment_settings_screen.dart' show currentPaymentCredentialsProvider;
 
 void main() {
   testWidgets(
@@ -22,6 +24,10 @@ void main() {
               return db;
             }),
             hasCachedLicenseProvider.overrideWith((ref) async => true),
+            currentPaymentCredentialsProvider.overrideWith(
+              (ref) async => const PaystackCredentials(
+                  baseUrl: 'https://test.example/index.php', apiKey: 'test-api-key', currency: 'KES', defaultEmail: ''),
+            ),
           ],
           child: const NexaPosApp(),
         ),

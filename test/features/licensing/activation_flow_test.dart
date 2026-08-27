@@ -10,8 +10,17 @@ import 'package:nexapos_mobile/app.dart';
 import 'package:nexapos_mobile/core/providers.dart';
 import 'package:nexapos_mobile/data/licensing/license_gateway.dart';
 import 'package:nexapos_mobile/data/local/database.dart';
+import 'package:nexapos_mobile/domain/entities/paystack_credentials.dart';
 import 'package:nexapos_mobile/domain/services/license_service.dart';
+import 'package:nexapos_mobile/features/settings/payment_settings_screen.dart' show currentPaymentCredentialsProvider;
 import '../../support/fake_secure_storage.dart';
+
+// This test's concern is licensing, not device-sync registration - the
+// mandatory /device-sync gate that now sits right after /activate is
+// stubbed as already-satisfied so activating still lands directly on
+// /setup, same as before that gate existed.
+const _testCredentials =
+    PaystackCredentials(baseUrl: 'https://test.example/index.php', apiKey: 'test-api-key', currency: 'KES', defaultEmail: '');
 
 void main() {
   // hasCachedLicenseProvider awaits a real read - see
@@ -28,6 +37,7 @@ void main() {
             return db;
           }),
           licenseGatewayProvider.overrideWith((ref) => LicenseGateway(licenseClient)),
+          currentPaymentCredentialsProvider.overrideWith((ref) async => _testCredentials),
         ],
         child: const NexaPosApp(),
       ),

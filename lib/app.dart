@@ -23,7 +23,7 @@ import 'features/checkout/cart_screen.dart';
 import 'features/checkout/receipt_screen.dart';
 import 'features/checkout/pending_sales_screen.dart';
 import 'domain/services/pending_sales_notifier.dart';
-import 'features/settings/payment_settings_screen.dart';
+import 'features/settings/payment_settings_screen.dart' show currentPaymentCredentialsProvider, PaymentSettingsScreen;
 import 'features/settings/business_settings_screen.dart';
 import 'features/settings/device_sync_screen.dart';
 import 'features/settings/update_screen.dart';
@@ -60,6 +60,26 @@ Future<String?> _redirect(Ref ref, String location) async {
   if (location == '/activate') {
     return '/';
   }
+
+  // Device Sync registration (register_device) used to be an optional,
+  // admin-only settings action - now mandatory for every device, right
+  // after license and before local setup/login, mirroring the license
+  // gate above. A device that just left its shop (DeviceSyncScreen's
+  // "Leave this shop") stays configured (leave_shop keeps api_key
+  // valid, it just moves shop_id) so this gate passes straight through
+  // for it and the hasUsers check below is what actually catches it,
+  // sending it to /setup for its new shop instead of back through
+  // registration it doesn't need to repeat.
+  final credentials = await ref.read(currentPaymentCredentialsProvider.future);
+  if (!credentials.isConfigured) {
+    return location == '/device-sync' ? null : '/device-sync';
+  }
+  // Deliberately no "bounce away from /device-sync once configured" rule
+  // here, unlike /activate above: that route is a pure one-time gate,
+  // but this one stays a real, current settings destination afterward
+  // (generate invite, join a different shop, leave this shop) - forcing
+  // people off it every time they navigate there would break all of
+  // that, not just the first-run registration step.
 
   final hasUsers = await ref.read(hasAnyUsersProvider.future);
   final user = ref.read(sessionProvider);

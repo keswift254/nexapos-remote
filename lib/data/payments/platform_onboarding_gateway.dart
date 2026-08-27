@@ -12,6 +12,13 @@ class DeviceRegistration {
   const DeviceRegistration(this.apiKey);
 }
 
+class RegistrationLookup {
+  final String deviceLabel;
+  final String businessName;
+  final bool isDisabled;
+  const RegistrationLookup({required this.deviceLabel, required this.businessName, required this.isDisabled});
+}
+
 class InviteResult {
   final String code;
   final String expiresAt;
@@ -115,11 +122,40 @@ class PlatformOnboardingGateway {
     return DeviceRegistration(apiKey);
   }
 
+  /// Read-only - lets the registration screen show what this device is
+  /// already registered as (label, shop) before the user types anything,
+  /// instead of only finding out via registerDevice's 409. Returns null
+  /// for "not registered" rather than throwing, since that's the normal,
+  /// expected outcome for a genuinely new device, not an error -
+  /// registration_lookup answers that with a 404, and platformRequest
+  /// itself throws PaystackException for any >=400 response before this
+  /// ever sees the body, so that's what's actually caught here.
+  Future<RegistrationLookup?> lookupRegistration({
+    required String baseUrl,
+    required String deviceId,
+    required String registrationSecret,
+  }) async {
+    final Map<String, dynamic> response;
+    try {
+      response = await platformRequest(
+        _client,
+        'POST',
+        'registration_lookup',
+        baseUrl,
+        body: {'device_id': deviceId, 'registration_secret': registrationSecret},
+      );
+    } on PaystackException {
+      return null;
+    }
+    return RegistrationLookup(
+      deviceLabel: (response['device_label'] as String? ?? '').trim(),
+      businessName: (response['business_name'] as String? ?? '').trim(),
+      isDisabled: response['is_disabled'] == true,
+    );
+  }
+
   /// Lets an already-registered device join an existing shop's sync
-  /// group via a code generated on another device (see [generateInvite])
-  /// - deliberately not a parameter on [registerDevice] itself, since
-  /// that endpoint 409s for any device outside its own 10-minute
-  /// registration grace window, before an invite code would ever be read.
+  /// group via a code generated on another device (see [generateInvite]).
   Future<void> joinShop({required String baseUrl, required String apiKey, required String inviteCode}) async {
     final response = await platformRequest(
       _client,
@@ -131,6 +167,19 @@ class PlatformOnboardingGateway {
     );
     if (response['success'] != true) {
       throw PaystackException(platformResponseMessage(response, 'Could not join that shop.'));
+    }
+  }
+
+  /// Detaches this device from its current shop and hands back a brand
+  /// new, empty one it owns - the server-side half of "leave a shop".
+  /// api_key stays valid (same device, same credential, just a
+  /// different shop_id now) - the caller is responsible for wiping this
+  /// device's own local business data and sync cursors to match, since
+  /// none of that is meaningful against the new shop_id either.
+  Future<void> leaveShop({required String baseUrl, required String apiKey}) async {
+    final response = await platformRequest(_client, 'POST', 'leave_shop', baseUrl, apiKey: apiKey);
+    if (response['success'] != true) {
+      throw PaystackException(platformResponseMessage(response, 'Could not leave that shop.'));
     }
   }
 
