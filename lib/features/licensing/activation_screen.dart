@@ -73,7 +73,7 @@ class _ActivationScreenState extends ConsumerState<ActivationScreen> {
                   ),
                   const SizedBox(height: 8),
                   const Text(
-                    'Enter the license key you received after purchase. This only needs to be done once on this device.',
+                    'Enter the license key you received after purchase.',
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 24),
@@ -97,7 +97,13 @@ class _ActivationScreenState extends ConsumerState<ActivationScreen> {
                             height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
                         : const Text('Activate'),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 20),
+                  Text(
+                    "Don't have a license key? Tap the WhatsApp button below to chat with our agent and get one.",
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 12),
                   ElevatedButton.icon(
                     onPressed: _openWhatsApp,
                     icon: const Icon(Icons.chat_bubble),
