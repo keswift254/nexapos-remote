@@ -339,35 +339,48 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
   /// registration this app has no way back into (e.g. one old enough to
   /// predate registration_secret_hash existing at all - the ordinary
   /// secret-matched recovery in register_device has nothing to match
-  /// against for those). Only touches this device's platform identity
-  /// (AppDatabase.regenerateDeviceIdentity) - all real local data
-  /// (products, sales, users, settings) is untouched, unlike "leave
-  /// this shop", since that data has nothing to do with the identity
-  /// problem being fixed here.
+  /// against for those). Identity-only (AppDatabase.regenerateDeviceIdentity)
+  /// leaves every real local table untouched - for a device whose local
+  /// data still belongs to whatever it used to be registered as, that's
+  /// the right default. Erasing data too reuses resetForFreshStart, the
+  /// exact same wipe "leave this shop" already uses, for a device that
+  /// wants an actual clean slate, not just a working registration -
+  /// null means cancelled, false means identity only, true means both.
   Future<void> _resetDeviceIdentity() async {
-    final confirmed = await showDialog<bool>(
+    final choice = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Reset this device\'s identity?'),
         content: const Text(
           'Only use this if registering keeps failing with "already registered" and there\'s no way to reconnect '
-          'to what it was registered as before. This gives the device a fresh identity to register with - it does '
-          'NOT touch any products, sales, users, or settings already on this device.',
+          'to what it was registered as before. This gives the device a fresh identity to register with.\n\n'
+          'Choose whether to keep this device\'s current products, sales, users, and settings, or erase them too '
+          'so it starts as a completely fresh shop.',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Reset identity')),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Reset identity only')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Reset identity + erase data'),
+          ),
         ],
       ),
     );
-    if (confirmed != true) return;
+    if (choice == null) return;
 
     setState(() => _resettingIdentity = true);
     try {
+      if (choice) {
+        await ref.read(appDatabaseProvider).resetForFreshStart();
+      }
       await ref.read(appDatabaseProvider).regenerateDeviceIdentity();
       if (!mounted) return;
       setState(() => _existingRegistration = null);
-      _showMessage('Ready - this device now has a fresh identity. Try registering again.');
+      _showMessage(choice
+          ? 'Ready - this device is starting as a completely fresh shop. Try registering again.'
+          : 'Ready - this device now has a fresh identity. Try registering again.');
     } finally {
       if (mounted) setState(() => _resettingIdentity = false);
     }
