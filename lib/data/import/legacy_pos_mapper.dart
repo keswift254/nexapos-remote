@@ -12,10 +12,12 @@ class LegacyPosMapper {
   String id(String table, Object value) =>
       const Uuid().v5(Namespace.url.value, '$source/$table/$value');
 
-  static int money(Object? value) {
+  static int money(Object? value, {String? field}) {
     final match = RegExp(r'^(-?)(\d+)(?:\.(\d{1,2}))?$').firstMatch('$value');
     if (match == null) {
-      throw FormatException('Unsupported currency amount: $value');
+      throw FormatException(
+        'Unsupported currency amount${field == null ? '' : ' in $field'}: $value',
+      );
     }
     final amount =
         int.parse(match[2]!) * 100 +
@@ -194,7 +196,12 @@ class LegacyPosMapper {
         'status': row['status'],
       });
     }
+    var missingItemCosts = 0;
     for (final row in rows('sale_items')) {
+      // The PHP schema permits unknown historical item costs. Keep those
+      // sales, disclose the zero-cost conversion, and never use today's cost.
+      final cost = row['cost_price'];
+      if (cost == null) missingItemCosts++;
       output['sale_items']!.add({
         ...base(
           'sale_items',
@@ -208,7 +215,9 @@ class LegacyPosMapper {
         'item_name': row['item_name'],
         'quantity': integer(row['quantity']),
         'unit_price_cents': money(row['unit_price']),
-        'cost_price_cents': money(row['cost_price']),
+        'cost_price_cents': cost == null
+            ? 0
+            : money(cost, field: 'sale_items[${row['id']}].cost_price'),
         'line_total_cents': money(row['line_total']),
       });
     }
@@ -276,6 +285,9 @@ class LegacyPosMapper {
       source: source,
       notes: [
         'Reports are rebuilt from the imported sales, line items, costs and expenses.',
+        if (missingItemCosts > 0)
+          '$missingItemCosts historical sale items have no recorded cost price. '
+              'They are imported with zero cost; profit reports may overstate profit for these items.',
         'Historical staff remain disabled. Existing NexaPOS administrator access is preserved.',
         'Product images and gateway credentials are not migrated from the PHP installation.',
         'Legacy timestamps use UTC${utcOffsetHours >= 0 ? '+' : ''}$utcOffsetHours.',

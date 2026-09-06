@@ -35,7 +35,7 @@ Map<String, dynamic> legacyFixture() => {
       },
     ],
     'sales': [
-      {
+      <String, dynamic>{
         'id': 1,
         'sale_number': 'S001',
         'user_id': 1,
@@ -49,7 +49,7 @@ Map<String, dynamic> legacyFixture() => {
       },
     ],
     'sale_items': [
-      {
+      <String, dynamic>{
         'id': 1,
         'sale_id': 1,
         'product_id': 1,
@@ -125,6 +125,49 @@ void main() {
     );
     expect(() => LegacyPosMapper.money('1.001'), throwsFormatException);
     expect(LegacyPosMapper.money('123.45'), 12345);
+  });
+
+  test(
+    'nullable legacy item costs preserve sales and disclose unknown costs',
+    () async {
+      final fixture = legacyFixture();
+      final item =
+          ((fixture['tables'] as Map)['sale_items'] as List).single as Map;
+      item['cost_price'] = null;
+      final archive = LegacyPosMapper('fixture').convert(fixture);
+      expect(archive.tables['sale_items']!.single['cost_price_cents'], 0);
+      expect(archive.notes.join(' '), contains('1 historical sale items'));
+      expect(archive.notes.join(' '), contains('may overstate profit'));
+      await archive.mergeInto(db);
+      expect((await db.select(db.sales).getSingle()).totalCents, 2500);
+      expect((await db.select(db.saleItems).getSingle()).lineTotalCents, 2500);
+      expect((await db.select(db.saleItems).getSingle()).costPriceCents, 0);
+      expect((await db.select(db.products).getSingle()).costPriceCents, 520);
+      expect((await archive.mergeInto(db)).values.every((n) => n == 0), isTrue);
+    },
+  );
+
+  test('malformed item costs and missing required amounts still fail', () {
+    final invalid = legacyFixture();
+    ((invalid['tables'] as Map)['sale_items'] as List).single['cost_price'] =
+        'bad';
+    expect(
+      () => LegacyPosMapper('fixture').convert(invalid),
+      throwsA(
+        isA<FormatException>().having(
+          (e) => e.message,
+          'message',
+          contains('sale_items[1].cost_price'),
+        ),
+      ),
+    );
+    final missing = legacyFixture();
+    ((missing['tables'] as Map)['sales'] as List).single['total'] = null;
+    expect(
+      () => LegacyPosMapper('fixture').convert(missing),
+      throwsFormatException,
+    );
+    expect(() => LegacyPosMapper.money(null), throwsFormatException);
   });
 
   test(
