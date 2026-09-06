@@ -14,8 +14,9 @@ class LegacyPosMapper {
 
   static int money(Object? value) {
     final match = RegExp(r'^(-?)(\d+)(?:\.(\d{1,2}))?$').firstMatch('$value');
-    if (match == null)
+    if (match == null) {
       throw FormatException('Unsupported currency amount: $value');
+    }
     final amount =
         int.parse(match[2]!) * 100 +
         int.parse((match[3] ?? '').padRight(2, '0'));
@@ -29,16 +30,18 @@ class LegacyPosMapper {
   }
 
   String timestamp(Object? value) {
-    if (value == null)
+    if (value == null) {
       throw const FormatException(
         'Source is missing a required transaction timestamp.',
       );
+    }
     final text = value.toString().replaceFirst(' ', 'T');
     final hasZone =
         text.endsWith('Z') || RegExp(r'[+-]\d\d:\d\d$').hasMatch(text);
     final parsed = DateTime.tryParse(hasZone ? text : '${text}Z');
-    if (parsed == null)
+    if (parsed == null) {
       throw FormatException('Invalid source timestamp: $value');
+    }
     return (hasZone
             ? parsed.toUtc()
             : parsed.subtract(Duration(hours: utcOffsetHours)))
@@ -71,10 +74,11 @@ class LegacyPosMapper {
         .map((r) => Map<String, dynamic>.from(r as Map))
         .toList();
     for (final required in ['users', 'products', 'sales', 'sale_items']) {
-      if (input[required] is! List)
+      if (input[required] is! List) {
         throw FormatException(
           'This is not a supported NexaPOS database: missing $required.',
         );
+      }
     }
     final output = {for (final t in archiveTables) t: <Map<String, dynamic>>[]};
     const epoch = '1970-01-01T00:00:00.000Z';
@@ -122,8 +126,9 @@ class LegacyPosMapper {
     }
     for (final row in rows('users')) {
       final role = roles[row['role_id'].toString()];
-      if (role == null)
+      if (role == null) {
         throw const FormatException('Source user has an unknown role.');
+      }
       output['users']!.add({
         ...base('users', row),
         'role_id': role,

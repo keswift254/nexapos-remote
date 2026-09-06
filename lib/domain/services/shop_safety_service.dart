@@ -38,14 +38,16 @@ class ShopSafetyService {
     final action = inviteCode == null ? 'Leave this shop' : 'Switch shop';
     await security.consume(approval, action);
     return sync.exclusive(() async {
-      if (await sync.hasPendingShopChange)
+      if (await sync.hasPendingShopChange) {
         throw StateError('Resolve the interrupted shop change first.');
+      }
       final status = await gateway.getClientStatus(
         baseUrl: credentials.baseUrl,
         apiKey: credentials.apiKey,
       );
-      if (status.shopId <= 0)
+      if (status.shopId <= 0) {
         throw StateError('Update the platform server before changing shops.');
+      }
       // Persist before the remote mutation. A timeout is ambiguous, so leave
       // this journal in place until the current server membership is checked.
       await db.customStatement(
@@ -124,8 +126,9 @@ class ShopSafetyService {
         baseUrl: credentials.baseUrl,
         apiKey: credentials.apiKey,
       );
-      if (status.shopId <= 0)
+      if (status.shopId <= 0) {
         throw StateError('The server did not return the current shop.');
+      }
       if (source == status.shopId) {
         await db.customStatement(
           "DELETE FROM local_safety_state WHERE id='shop_change'",
@@ -144,8 +147,9 @@ class ShopSafetyService {
   ) async {
     await security.consume(approval, 'Import shop data');
     return sync.exclusive(() async {
-      if (await sync.hasPendingShopChange)
+      if (await sync.hasPendingShopChange) {
         throw StateError('Resolve the interrupted shop change first.');
+      }
       await archive.validate();
       if (!await saveRecovery(await ShopArchive.capture(db))) return null;
       return archive.mergeInto(db);

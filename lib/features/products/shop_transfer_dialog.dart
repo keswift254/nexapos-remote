@@ -64,11 +64,12 @@ class _ShopTransferDialogState extends ConsumerState<ShopTransferDialog> {
     try {
       await task();
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           failed = true;
           message = e.toString();
         });
+      }
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -85,8 +86,9 @@ class _ShopTransferDialogState extends ConsumerState<ShopTransferDialog> {
       port: int.tryParse(port.text) ?? 0,
     );
     final timezone = int.tryParse(offset.text);
-    if (timezone == null || timezone < -12 || timezone > 14)
+    if (timezone == null || timezone < -12 || timezone > 14) {
       throw StateError('Invalid source UTC offset.');
+    }
     final candidate = LegacyPosMapper(
       raw['source'] as String,
       utcOffsetHours: timezone,
@@ -102,8 +104,9 @@ class _ShopTransferDialogState extends ConsumerState<ShopTransferDialog> {
       allowedExtensions: ['nexabackup'],
     );
     if (picked == null) return;
-    if (await picked.length() > maxArchiveBytes)
+    if (await picked.length() > maxArchiveBytes) {
       throw StateError('Backup exceeds the supported size.');
+    }
     final candidate = await ArchiveEncryption.decode(
       await picked.readAsBytes(),
       archivePassword.text,
@@ -150,11 +153,12 @@ class _ShopTransferDialogState extends ConsumerState<ShopTransferDialog> {
       final archive = await ShopArchive.capture(ref.read(appDatabaseProvider));
       if (!mounted) return;
       final saved = await saveRecoveryArchive(context, archive);
-      if (mounted && saved)
+      if (mounted && saved) {
         setState(
           () => message =
               'Encrypted backup saved. Keep its password for recovery.',
         );
+      }
     });
   });
 
@@ -215,11 +219,12 @@ class _ShopTransferDialogState extends ConsumerState<ShopTransferDialog> {
                               final result = await LegacyPosReader().inspect(
                                 url.text,
                               );
-                              if (mounted)
+                              if (mounted) {
                                 setState(() {
                                   message = result;
                                   sourceConnected = true;
                                 });
+                              }
                             }),
                       icon: const Icon(Icons.search),
                       label: const Text('Inspect source'),

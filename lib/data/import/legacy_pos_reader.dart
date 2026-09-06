@@ -30,21 +30,24 @@ class LegacyPosReader {
       final response = await request.close().timeout(
         const Duration(seconds: 15),
       );
-      if (response.statusCode != 200)
+      if (response.statusCode != 200) {
         throw StateError(
           'POS returned HTTP ${response.statusCode}. Check the login URL.',
         );
+      }
       final bytes = <int>[];
       await for (final chunk in response.timeout(const Duration(seconds: 15))) {
         bytes.addAll(chunk);
-        if (bytes.length > 1024 * 1024)
+        if (bytes.length > 1024 * 1024) {
           throw StateError('POS page exceeds the supported size.');
+        }
       }
       final html = utf8.decode(bytes, allowMalformed: true);
-      if (!html.contains('NexaPOS'))
+      if (!html.contains('NexaPOS')) {
         throw StateError(
           'This POS needs a supported migration adapter or export.',
         );
+      }
       return 'NexaPOS browser edition detected. Connect its local database to preview migration.';
     } finally {
       client.close(force: true);
@@ -60,8 +63,9 @@ class LegacyPosReader {
     int port = 3306,
   }) async {
     await inspect(url);
-    if (!Platform.isWindows)
+    if (!Platform.isWindows) {
       throw UnsupportedError('Import an XAMPP database from the Windows app.');
+    }
     if (!RegExp(r'^[A-Za-z0-9_]+$').hasMatch(database) ||
         port < 1 ||
         port > 65535) {
@@ -100,10 +104,11 @@ class LegacyPosReader {
       }
       final exit = await process.exitCode;
       await errors;
-      if (exit != 0)
+      if (exit != 0) {
         throw StateError(
           'Cannot read the source database. Check credentials, database name, and read permissions.',
         );
+      }
       final data = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
       data['source'] =
           'legacy:${sha256.convert(utf8.encode('${localUri(url).origin}/$database'))}';

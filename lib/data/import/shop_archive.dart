@@ -88,8 +88,9 @@ class ShopArchive {
         final file = File(path);
         if (!await file.exists()) continue;
         imageBytes += await file.length();
-        if (imageBytes > 32 * 1024 * 1024)
+        if (imageBytes > 32 * 1024 * 1024) {
           throw StateError('Product images exceed the 32 MiB backup limit.');
+        }
         images[row['id'] as String] = base64Encode(await file.readAsBytes());
       }
       return ShopArchive(
@@ -151,17 +152,19 @@ class ShopArchive {
         final broken = await scratch
             .customSelect('PRAGMA foreign_key_check')
             .get();
-        if (broken.isNotEmpty)
+        if (broken.isNotEmpty) {
           throw const FormatException(
             'Backup contains missing related records.',
           );
+        }
         final stock = await scratch.customSelect('''SELECT p.id FROM products p
           WHERE p.stock_qty != (SELECT COALESCE(SUM(m.quantity),0) FROM stock_movements m
           WHERE m.product_id=p.id AND m.deleted_at IS NULL)''').get();
-        if (stock.isNotEmpty)
+        if (stock.isNotEmpty) {
           throw const FormatException(
             'Inventory totals do not match stock history.',
           );
+        }
       });
       final normalized = <String, List<Map<String, dynamic>>>{};
       for (final table in archiveTables) {
@@ -283,8 +286,9 @@ class ShopArchive {
                   variables: [Variable<String>(original['username'] as String)],
                 )
                 .get();
-            if (duplicate.isNotEmpty)
+            if (duplicate.isNotEmpty) {
               throw StateError('An imported username already exists.');
+            }
           }
           final uniqueField = t == 'products'
               ? 'sku'
@@ -300,10 +304,11 @@ class ShopArchive {
                   ],
                 )
                 .get();
-            if (duplicates.isNotEmpty)
+            if (duplicates.isNotEmpty) {
               throw StateError(
                 'An existing $uniqueField conflicts with the import.',
               );
+            }
           }
           final row = Map<String, dynamic>.from(original)
             ..['local_rev'] = await meta.nextLocalRev()
@@ -344,15 +349,17 @@ Future<void> insertRow(
 
 class ArchiveEncryption {
   static Future<Uint8List> encode(ShopArchive archive, String password) async {
-    if (password.length < 12)
+    if (password.length < 12) {
       throw ArgumentError(
         'Backup password must contain at least 12 characters.',
       );
+    }
     final json = archive.toJson();
     return Isolate.run(() async {
       final plaintext = utf8.encode(jsonEncode(json));
-      if (plaintext.length > maxArchiveBytes ~/ 2)
+      if (plaintext.length > maxArchiveBytes ~/ 2) {
         throw StateError('Backup exceeds the supported size.');
+      }
       final cipher = AesGcm.with256bits();
       final salt = cipher.newNonce();
       final key = await _derive(password, salt);
@@ -377,8 +384,9 @@ class ArchiveEncryption {
   }
 
   static Future<ShopArchive> decode(Uint8List bytes, String password) async {
-    if (bytes.length > maxArchiveBytes)
+    if (bytes.length > maxArchiveBytes) {
       throw const FormatException('Backup exceeds the supported size.');
+    }
     final result = await Isolate.run(() async {
       final envelope = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
       if (envelope['format'] != 'nexapos.encrypted' ||
