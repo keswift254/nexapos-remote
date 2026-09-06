@@ -162,6 +162,27 @@ class _ShopTransferDialogState extends ConsumerState<ShopTransferDialog> {
     });
   });
 
+  Future<void> _showDatabasePasswordHelp() => showDialog<void>(
+    context: context,
+    builder: (_) => AlertDialog(
+      title: const Text('Database password help'),
+      content: const Text(
+        'NexaPOS cannot bypass MySQL authentication. On many local XAMPP '
+        'installations the root password is blank, so try leaving this field '
+        'empty. If that fails, open phpMyAdmin or XAMPP security settings and '
+        'check the root account. Only the owner or an administrator of that '
+        'computer should reset the password; changing it can affect other '
+        'local applications.',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Close'),
+        ),
+      ],
+    ),
+  );
+
   @override
   Widget build(BuildContext context) => PopScope(
     canPop: !busy,
@@ -266,6 +287,14 @@ class _ShopTransferDialogState extends ConsumerState<ShopTransferDialog> {
                       obscureText: true,
                       decoration: const InputDecoration(
                         labelText: 'Database password',
+                      ),
+                    ),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: busy ? null : _showDatabasePasswordHelp,
+                        icon: const Icon(Icons.help_outline),
+                        label: const Text("I don't know this password"),
                       ),
                     ),
                     TextField(

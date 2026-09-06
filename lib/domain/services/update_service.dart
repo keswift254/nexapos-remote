@@ -172,8 +172,9 @@ class UpdateService {
             info.windowsInstallerUrl,
             setupFile,
             onProgress: (received, total) {
-              if (total != null && total > 0)
+              if (total != null && total > 0) {
                 onProgress?.call(received / total * 0.9);
+              }
             },
           );
       final checksumError = await _verifyChecksum(
@@ -203,10 +204,11 @@ class UpdateService {
     LatestVersionInfo info,
     void Function(double)? onProgress,
   ) async {
-    if (info.windowsUrl.isEmpty)
+    if (info.windowsUrl.isEmpty) {
       return const Result.failure(
         'No Windows download is available for this update.',
       );
+    }
     try {
       final tempDir = await getTemporaryDirectory();
       final stagingDir = Directory(path.join(tempDir.path, 'nexapos_update'));
@@ -222,8 +224,9 @@ class UpdateService {
             onProgress: (received, total) {
               // Reserve the last 10% of the bar for extract+handoff, which
               // have no byte-level progress of their own to report.
-              if (total != null && total > 0)
+              if (total != null && total > 0) {
                 onProgress?.call(received / total * 0.9);
+              }
             },
           );
 
@@ -291,10 +294,11 @@ class UpdateService {
     LatestVersionInfo info,
     void Function(double)? onProgress,
   ) async {
-    if (info.androidUrl.isEmpty)
+    if (info.androidUrl.isEmpty) {
       return const Result.failure(
         'No Android download is available for this update.',
       );
+    }
     try {
       final tempDir = await getTemporaryDirectory();
       final apkFile = File(path.join(tempDir.path, 'NexaPOS-update.apk'));
@@ -304,8 +308,9 @@ class UpdateService {
             info.androidUrl,
             apkFile,
             onProgress: (received, total) {
-              if (total != null && total > 0)
+              if (total != null && total > 0) {
                 onProgress?.call(received / total);
+              }
             },
           );
 

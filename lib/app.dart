@@ -1,9 +1,11 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HardwareKeyboard, KeyEvent;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+
 import 'core/providers.dart';
 import 'domain/services/session_service.dart';
 import 'domain/services/sync_service.dart';
@@ -23,13 +25,15 @@ import 'features/checkout/cart_screen.dart';
 import 'features/checkout/receipt_screen.dart';
 import 'features/checkout/pending_sales_screen.dart';
 import 'domain/services/pending_sales_notifier.dart';
-import 'features/settings/payment_settings_screen.dart' show currentPaymentCredentialsProvider, PaymentSettingsScreen;
+import 'features/settings/payment_settings_screen.dart'
+    show currentPaymentCredentialsProvider, PaymentSettingsScreen;
 import 'features/settings/business_settings_screen.dart';
 import 'features/settings/device_sync_screen.dart';
 import 'features/settings/update_screen.dart';
 import 'features/expenses/expenses_screen.dart';
 import 'features/reports/reports_screen.dart';
 import 'domain/services/update_service.dart';
+import 'domain/services/automatic_backup_service.dart';
 
 part 'app.g.dart';
 
@@ -108,7 +112,9 @@ Future<String?> _redirect(Ref ref, String location) async {
     return '/';
   }
   const inventoryRoles = {UserRole.admin, UserRole.manager};
-  if ((location == '/categories' || location == '/products' || location == '/expenses') &&
+  if ((location == '/categories' ||
+          location == '/products' ||
+          location == '/expenses') &&
       !inventoryRoles.contains(user.role)) {
     return '/';
   }
@@ -128,30 +134,65 @@ GoRouter router(Ref ref) {
     refreshListenable: _RouterRefreshNotifier(ref),
     redirect: (context, state) => _redirect(ref, state.matchedLocation),
     routes: [
-      GoRoute(path: '/activate', builder: (context, state) => const ActivationScreen()),
+      GoRoute(
+        path: '/activate',
+        builder: (context, state) => const ActivationScreen(),
+      ),
       GoRoute(path: '/setup', builder: (context, state) => const SetupScreen()),
       GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
       GoRoute(path: '/', builder: (context, state) => const DashboardScreen()),
       GoRoute(path: '/users', builder: (context, state) => const UsersScreen()),
-      GoRoute(path: '/categories', builder: (context, state) => const CategoriesScreen()),
+      GoRoute(
+        path: '/categories',
+        builder: (context, state) => const CategoriesScreen(),
+      ),
       GoRoute(
         path: '/products',
-        builder: (context, state) =>
-            ProductsScreen(lowStockOnly: state.uri.queryParameters['lowStockOnly'] == 'true'),
+        builder: (context, state) => ProductsScreen(
+          lowStockOnly: state.uri.queryParameters['lowStockOnly'] == 'true',
+        ),
       ),
-      GoRoute(path: '/new-sale', builder: (context, state) => const NewSaleScreen()),
-      GoRoute(path: '/checkout/cart', builder: (context, state) => const CartScreen()),
+      GoRoute(
+        path: '/new-sale',
+        builder: (context, state) => const NewSaleScreen(),
+      ),
+      GoRoute(
+        path: '/checkout/cart',
+        builder: (context, state) => const CartScreen(),
+      ),
       GoRoute(
         path: '/receipt/:saleId',
-        builder: (context, state) => ReceiptScreen(saleId: state.pathParameters['saleId']!),
+        builder: (context, state) =>
+            ReceiptScreen(saleId: state.pathParameters['saleId']!),
       ),
-      GoRoute(path: '/payment-settings', builder: (context, state) => const PaymentSettingsScreen()),
-      GoRoute(path: '/business-settings', builder: (context, state) => const BusinessSettingsScreen()),
-      GoRoute(path: '/device-sync', builder: (context, state) => const DeviceSyncScreen()),
-      GoRoute(path: '/update', builder: (context, state) => const UpdateScreen()),
-      GoRoute(path: '/expenses', builder: (context, state) => const ExpensesScreen()),
-      GoRoute(path: '/reports', builder: (context, state) => const ReportsScreen()),
-      GoRoute(path: '/pending-sales', builder: (context, state) => const PendingSalesScreen()),
+      GoRoute(
+        path: '/payment-settings',
+        builder: (context, state) => const PaymentSettingsScreen(),
+      ),
+      GoRoute(
+        path: '/business-settings',
+        builder: (context, state) => const BusinessSettingsScreen(),
+      ),
+      GoRoute(
+        path: '/device-sync',
+        builder: (context, state) => const DeviceSyncScreen(),
+      ),
+      GoRoute(
+        path: '/update',
+        builder: (context, state) => const UpdateScreen(),
+      ),
+      GoRoute(
+        path: '/expenses',
+        builder: (context, state) => const ExpensesScreen(),
+      ),
+      GoRoute(
+        path: '/reports',
+        builder: (context, state) => const ReportsScreen(),
+      ),
+      GoRoute(
+        path: '/pending-sales',
+        builder: (context, state) => const PendingSalesScreen(),
+      ),
     ],
   );
 }
@@ -188,7 +229,8 @@ class NexaPosApp extends ConsumerStatefulWidget {
 /// - piggybacking on this existing cadence rather than each running its
 /// own timer, per the licensing design's "silently re-check whenever
 /// internet happens to be available".
-class _NexaPosAppState extends ConsumerState<NexaPosApp> with WidgetsBindingObserver {
+class _NexaPosAppState extends ConsumerState<NexaPosApp>
+    with WidgetsBindingObserver {
   Timer? _timer;
   Timer? _inactivityTimer;
   DateTime? _lastActivity;
@@ -202,7 +244,10 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp> with WidgetsBindingObse
     _runSync();
     ref.read(pendingPaystackSalesProvider.notifier).reconcile();
     _timer = Timer.periodic(_syncInterval, (_) => _runSync());
-    _inactivityTimer = Timer.periodic(_inactivityCheckInterval, (_) => _checkInactivity());
+    _inactivityTimer = Timer.periodic(
+      _inactivityCheckInterval,
+      (_) => _checkInactivity(),
+    );
     HardwareKeyboard.instance.addHandler(_onKeyEvent);
   }
 
@@ -235,6 +280,9 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp> with WidgetsBindingObse
       await ref.read(syncServiceProvider).runSyncCycle();
       await ref.read(licenseServiceProvider).backgroundVerify();
       await ref.read(updateAvailabilityProvider.notifier).check();
+      if (ref.read(sessionProvider) != null) {
+        await ref.read(automaticBackupServiceProvider).runIfDue();
+      }
     } finally {
       _syncing = false;
     }
@@ -248,13 +296,15 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp> with WidgetsBindingObse
     return false;
   }
 
-  void _recordActivity([PointerEvent? _]) => _lastActivity = ref.read(clockProvider).now();
+  void _recordActivity([PointerEvent? _]) =>
+      _lastActivity = ref.read(clockProvider).now();
 
   void _checkInactivity() {
     if (ref.read(sessionProvider) == null) return;
     final lastActivity = _lastActivity;
     if (lastActivity == null) return;
-    if (ref.read(clockProvider).now().difference(lastActivity) >= _inactivityTimeout) {
+    if (ref.read(clockProvider).now().difference(lastActivity) >=
+        _inactivityTimeout) {
       ref.read(sessionProvider.notifier).logout();
     }
   }

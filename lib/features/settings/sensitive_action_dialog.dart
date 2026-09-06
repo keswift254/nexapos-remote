@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../domain/services/sensitive_action_service.dart';
 import '../../domain/services/session_service.dart';
@@ -95,7 +98,35 @@ class _ApprovalDialogState extends ConsumerState<_ApprovalDialog> {
                   'Add NexaPOS to your authenticator using this setup key. Keep a secure copy for recovery.',
                 ),
                 const SizedBox(height: 8),
-                SelectableText(secret!),
+                Center(
+                  child: QrImageView(
+                    data: _otpUri(
+                      secret!,
+                      ref.read(sessionProvider)?.username ?? 'admin',
+                    ),
+                    size: 180,
+                    backgroundColor: Colors.white,
+                    errorCorrectionLevel: QrErrorCorrectLevel.M,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(child: SelectableText(secret!)),
+                    IconButton(
+                      tooltip: 'Copy setup key',
+                      onPressed: () async {
+                        await Clipboard.setData(ClipboardData(text: secret!));
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Setup key copied.')),
+                          );
+                        }
+                      },
+                      icon: const Icon(Icons.copy_outlined),
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 8),
               ],
               TextField(
@@ -109,6 +140,12 @@ class _ApprovalDialogState extends ConsumerState<_ApprovalDialog> {
                 onSubmitted: (_) => busy ? null : verify(),
               ),
             ],
+            if (verifiedPassword)
+              TextButton.icon(
+                onPressed: busy ? null : () => _showRecoveryHelp(context),
+                icon: const Icon(Icons.help_outline),
+                label: const Text('Lost access to your authenticator?'),
+              ),
             if (error != null)
               Padding(
                 padding: const EdgeInsets.only(top: 12),
@@ -137,5 +174,38 @@ class _ApprovalDialogState extends ConsumerState<_ApprovalDialog> {
         ),
       ),
     ],
+  );
+
+  String _otpUri(String secret, String username) {
+    final label = Uri.encodeComponent('NexaPOS:$username');
+    final issuer = Uri.encodeComponent('NexaPOS');
+    return 'otpauth://totp/$label?secret=$secret&issuer=$issuer&algorithm=SHA1&digits=6&period=30';
+  }
+
+  Future<void> _showRecoveryHelp(BuildContext context) => showDialog<void>(
+    context: context,
+    builder: (_) => AlertDialog(
+      title: const Text('Authenticator recovery'),
+      content: const Text(
+        'Use the saved setup key to add NexaPOS to a new authenticator. '
+        'If the key is unavailable, contact the shop owner or NexaPOS support. '
+        'A reset must be approved by an administrator after verifying ownership; '
+        'there is no safe password-only bypass.',
+      ),
+      actions: [
+        TextButton.icon(
+          onPressed: () => launchUrl(
+            Uri.parse('https://wa.me/message/M5SGWZ664XJ4C1'),
+            mode: LaunchMode.externalApplication,
+          ),
+          icon: const Icon(Icons.chat_outlined),
+          label: const Text('Contact support'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Close'),
+        ),
+      ],
+    ),
   );
 }

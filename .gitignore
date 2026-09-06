@@ -47,5 +47,9 @@ app.*.map.json
 /android/build/
 /android/.gradle/
 
+# Standalone Windows installer project build artifacts
+/windows/setup/bin/
+/windows/setup/obj/
+
 # Widget Preview related
 .widget_preview/
