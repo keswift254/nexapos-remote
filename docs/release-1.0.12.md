@@ -2,6 +2,8 @@
 
 ## Device safety
 
+- Check for Updates, update notifications and the update screen are available to every signed-in role, including cashier and manager. Administrative settings remain restricted. Opening the screen checks availability; installation still requires the user's explicit download/install action.
+
 - Leaving or switching an established shop requires the current active administrator's password and an authenticator code, followed by a saved encrypted recovery backup. Cancelling or failing the backup leaves data intact.
 - Inviting devices, unregistering, importing and creating backups require administrator verification. The platform separately restricts invitation creation to the shop-owner device.
 - The authenticator is enrolled per administrator on each device. Keep a secure copy of the setup key. This factor is not exported, synced, or enforced by the platform's device API; it protects these actions in the updated client. First enrollment requires the administrator password.
@@ -31,3 +33,7 @@ Limits: 256 MiB encrypted backup, 128 MiB source export, 32 MiB product images. 
 5. Keep the platform legacy sync limit at 1000 until older clients have upgraded to the client that sends batches of 200. Then lower it to 200.
 
 iOS packaging, signing and device testing follow the verified Windows/Android release. No iOS build is included in this candidate.
+
+## Owner's release preference
+
+Build and commit releases in separate folders on G:. Upload the verified artifacts to the download website and publish the version metadata after verification. Never replace, launch an updater against, or close the owner's currently running Windows installation during development or publication. The owner installs manually through Check for Updates. A source commit alone does not publish a binary, and unchanged download hashes must not be relabeled as a newer version.

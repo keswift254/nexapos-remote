@@ -159,11 +159,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 tooltip: 'Sync now',
                 onPressed: _manualSyncing ? null : _manualRefresh,
               ),
-            // Same admin-only gating as the banner below and the /update
-            // route guard itself (app.dart) - a non-admin could never
-            // reach the update screen this points at, so there's nothing
-            // useful for this icon to do for them.
-            if (availableUpdate != null && user?.role == UserRole.admin)
+            if (availableUpdate != null && user != null)
               IconButton(
                 icon: Badge(
                   smallSize: 8,
@@ -180,6 +176,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             tooltip: 'Reports',
             onPressed: () => context.push('/reports'),
           ),
+          if (user != null && user.role != UserRole.admin)
+            IconButton(
+              icon: const Icon(Icons.system_update_alt),
+              tooltip: 'Check for Updates',
+              onPressed: () => context.push('/update'),
+            ),
           if (user?.role == UserRole.admin)
             PopupMenuButton<String>(
               icon: const Icon(Icons.settings_outlined),
@@ -246,7 +248,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                       ),
                     ),
                   ],
-                  if (availableUpdate != null && user.role == UserRole.admin) ...[
+                  if (availableUpdate != null) ...[
                     const SizedBox(height: 12),
                     Card(
                       color: Theme.of(context).colorScheme.primaryContainer,

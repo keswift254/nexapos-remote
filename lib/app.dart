@@ -114,8 +114,7 @@ Future<String?> _redirect(Ref ref, String location) async {
   }
   if ((location == '/payment-settings' ||
           location == '/business-settings' ||
-          location == '/device-sync' ||
-          location == '/update') &&
+          location == '/device-sync') &&
       user.role != UserRole.admin) {
     return '/';
   }
