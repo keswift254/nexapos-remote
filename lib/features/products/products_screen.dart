@@ -12,6 +12,8 @@ import '../../domain/services/product_service.dart';
 import '../../domain/services/session_service.dart';
 import 'product_form_sheet.dart';
 import 'stock_adjustment_sheet.dart';
+import 'shop_transfer_dialog.dart';
+import '../../domain/entities/user_role.dart';
 
 part 'products_screen.g.dart';
 
@@ -71,6 +73,15 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
           'included it keep showing correctly - this only affects new sales.',
         ),
         actions: [
+          if (ref.watch(sessionProvider)?.role == UserRole.admin)
+            IconButton(icon: const Icon(Icons.backup_outlined),
+              tooltip: 'Import all data from another POS / Backup and restore',
+              onPressed: () async {
+                await showDialog<void>(context: context, barrierDismissible: false,
+                  builder: (_) => const ShopTransferDialog());
+                ref.invalidate(allProductsProvider);
+                ref.invalidate(productFormCategoriesProvider);
+              }),
           TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
           FilledButton.tonal(
             style: FilledButton.styleFrom(foregroundColor: Theme.of(dialogContext).colorScheme.error),

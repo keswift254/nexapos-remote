@@ -35,7 +35,7 @@ int get hashCode => Object.hash(runtimeType,baseUrl,apiKey,currency,defaultEmail
 
 @override
 String toString() {
-  return 'PaystackCredentials(baseUrl: $baseUrl, apiKey: $apiKey, currency: $currency, defaultEmail: $defaultEmail)';
+  return 'PaystackCredentials(baseUrl: $baseUrl, apiKey: [REDACTED], currency: $currency, defaultEmail: [REDACTED])';
 }
 
 
@@ -237,7 +237,7 @@ int get hashCode => Object.hash(runtimeType,baseUrl,apiKey,currency,defaultEmail
 
 @override
 String toString() {
-  return 'PaystackCredentials(baseUrl: $baseUrl, apiKey: $apiKey, currency: $currency, defaultEmail: $defaultEmail)';
+  return 'PaystackCredentials(baseUrl: $baseUrl, apiKey: [REDACTED], currency: $currency, defaultEmail: [REDACTED])';
 }
 
 

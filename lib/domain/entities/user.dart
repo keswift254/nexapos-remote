@@ -19,4 +19,8 @@ abstract class User with _$User {
   const User._();
 
   bool get isActive => status == 'active';
+
+  @override
+  String toString() =>
+      'User(id: $id, role: $role, username: $username, passwordHash: [REDACTED], status: $status)';
 }

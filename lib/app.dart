@@ -82,6 +82,9 @@ Future<String?> _redirect(Ref ref, String location) async {
   // that, not just the first-run registration step.
 
   final hasUsers = await ref.read(hasAnyUsersProvider.future);
+  if (await ref.read(syncServiceProvider).needsInitialPull) {
+    return location == '/device-sync' ? null : '/device-sync';
+  }
   final user = ref.read(sessionProvider);
   final loggedIn = user != null;
 
@@ -93,6 +96,10 @@ Future<String?> _redirect(Ref ref, String location) async {
   }
   if (!loggedIn) {
     return location == '/login' ? null : '/login';
+  }
+  if (await ref.read(syncServiceProvider).hasPendingShopChange) {
+    final destination = user.role == UserRole.admin ? '/device-sync' : '/login';
+    return location == destination ? null : destination;
   }
   if (location == '/login') {
     return '/';

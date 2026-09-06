@@ -35,7 +35,7 @@ int get hashCode => Object.hash(runtimeType,id,role,name,username,email,password
 
 @override
 String toString() {
-  return 'User(id: $id, role: $role, name: $name, username: $username, email: $email, passwordHash: $passwordHash, phone: $phone, status: $status)';
+  return 'User(id: $id, role: $role, username: $username, passwordHash: [REDACTED], status: $status)';
 }
 
 
@@ -245,7 +245,7 @@ int get hashCode => Object.hash(runtimeType,id,role,name,username,email,password
 
 @override
 String toString() {
-  return 'User(id: $id, role: $role, name: $name, username: $username, email: $email, passwordHash: $passwordHash, phone: $phone, status: $status)';
+  return 'User(id: $id, role: $role, username: $username, passwordHash: [REDACTED], status: $status)';
 }
 
 

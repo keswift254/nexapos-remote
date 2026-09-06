@@ -58,9 +58,10 @@ Future<void> migrateToEncryptedIfNeeded(File dbFile, String key) async {
 
   // Back up before touching anything real - a rekey that's interrupted
   // partway (power loss, the process being killed) must never be the
-  // only copy of a shop's actual data. Left in place afterward rather
-  // than deleted; harmless, and gives a real fallback if the rekey
-  // result somehow fails its own verification below.
+  // only copy of a shop's actual data. The backup is deleted only after
+  // the encrypted database has been reopened and verified below. Keeping
+  // it after a successful migration would leave the entire database in
+  // plaintext next to the encrypted copy and defeat this feature.
   final backup = File('${dbFile.path}.pre-encryption-backup');
   await dbFile.copy(backup.path);
 
@@ -84,4 +85,6 @@ Future<void> migrateToEncryptedIfNeeded(File dbFile, String key) async {
   } finally {
     verify.close();
   }
+
+  await backup.delete();
 }

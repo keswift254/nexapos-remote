@@ -52,6 +52,18 @@ void main() {
     });
   });
 
+  group('publishedChecksumError', () {
+    test('rejects a missing or malformed checksum', () {
+      expect(publishedChecksumError(null), isNotNull);
+      expect(publishedChecksumError('abc123'), isNotNull);
+    });
+
+    test('accepts a full SHA-256 checksum', () {
+      expect(publishedChecksumError(List.filled(64, 'a').join()), isNull);
+      expect(publishedChecksumError(List.filled(4, 'ABCDEF0123456789').join()), isNull);
+    });
+  });
+
   group('UpdateService.checkForUpdate', () {
     ProviderContainer buildContainer(http.Client updateClient) {
       final container = ProviderContainer(overrides: [

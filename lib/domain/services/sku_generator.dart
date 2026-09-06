@@ -6,7 +6,7 @@ import '../repositories/product_repository.dart';
 /// (xlsx import) so both creation paths mint SKUs the same way instead
 /// of drifting into two different formats.
 class SkuGenerator {
-  static final _random = Random();
+  static final _random = Random.secure();
 
   static Future<String> generate(
     String seed,

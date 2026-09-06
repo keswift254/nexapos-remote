@@ -30,11 +30,9 @@ class LatestVersionInfo {
   // Hex-encoded SHA-256 of the exact file at windowsUrl/androidUrl,
   // computed by whoever cuts the release (see generator.html's publish
   // card) and checked against the downloaded bytes before anything is
-  // extracted or installed - see UpdateService.install(). Nullable so a
-  // version published before this existed doesn't crash parsing; the
-  // install path treats an absent hash as "skip verification", not as
-  // a failure, since older/rolled-back server data shouldn't brick
-  // updating.
+  // extracted or installed - see UpdateService.install(). Nullable only
+  // so old server rows can still be parsed and shown; install refuses a
+  // release whose checksum is absent or malformed.
   final String? windowsSha256;
   final String? androidSha256;
 
@@ -55,6 +53,8 @@ class LatestVersionInfo {
 /// LicenseGateway does for the JSON call; the actual file download is
 /// separate (see [downloadTo]) since that's a raw byte stream, not JSON.
 class UpdateGateway {
+  static const int maxDownloadBytes = 512 * 1024 * 1024;
+
   final http.Client _client;
 
   UpdateGateway([http.Client? client]) : _client = client ?? http.Client();
@@ -122,21 +122,32 @@ class UpdateGateway {
     if (response.statusCode >= 400) {
       throw UpdateException('Could not download the update (server said ${response.statusCode}).');
     }
+    if (response.contentLength != null && response.contentLength! > maxDownloadBytes) {
+      throw const UpdateException('The update download is unexpectedly large - refusing to save it.');
+    }
 
     await destination.parent.create(recursive: true);
     final sink = destination.openWrite();
     var received = 0;
     try {
       await for (final chunk in response.stream) {
-        sink.add(chunk);
         received += chunk.length;
+        if (received > maxDownloadBytes) {
+          throw const UpdateException('The update download is unexpectedly large - refusing to save it.');
+        }
+        sink.add(chunk);
         onProgress?.call(received, response.contentLength);
       }
       await sink.flush();
     } on SocketException {
-      throw const UpdateOfflineException();
-    } finally {
       await sink.close();
+      if (await destination.exists()) await destination.delete();
+      throw const UpdateOfflineException();
+    } catch (_) {
+      await sink.close();
+      if (await destination.exists()) await destination.delete();
+      rethrow;
     }
+    await sink.close();
   }
 }

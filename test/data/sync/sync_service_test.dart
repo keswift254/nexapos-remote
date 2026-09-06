@@ -129,6 +129,30 @@ void main() {
 
       expect(await syncMeta.lastPushedLocalRev(), expectedRev);
     });
+
+    test('splits large pushes into bounded batches and advances after each acknowledgement', () async {
+      final categoryRepository =
+          CategoryRepositoryImpl(db, db.categoriesDao, syncMeta, const SystemClock(), UuidIdGenerator());
+      for (var i = 0; i < 205; i++) {
+        await categoryRepository.create(Category(id: '', name: 'Category $i', status: 'active'));
+      }
+      final expectedRev = await syncMeta.nextLocalRev() - 1;
+      final batchSizes = <int>[];
+
+      final service = buildService(MockClient((request) async {
+        final body = jsonDecode(request.body) as Map<String, dynamic>;
+        final changes = body['changes'] as List;
+        batchSizes.add(changes.length);
+        return http.Response(jsonEncode({'success': true, 'count': changes.length}), 200);
+      }));
+
+      await service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+
+      expect(batchSizes.length, greaterThan(1));
+      expect(batchSizes.every((size) => size <= 200), isTrue);
+      expect(batchSizes.reduce((a, b) => a + b), greaterThanOrEqualTo(205));
+      expect(await syncMeta.lastPushedLocalRev(), expectedRev);
+    });
   });
 
   group('pullRemoteChanges - last-write-wins', () {

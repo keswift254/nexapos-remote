@@ -66,13 +66,27 @@ void main() {
       plain.close();
 
       final headerBefore = await dbFile.openRead(0, 16).first;
-      expect(String.fromCharCodes(headerBefore), startsWith('SQLite format 3'), reason: 'sanity check on the test setup itself');
+      expect(
+        String.fromCharCodes(headerBefore),
+        startsWith('SQLite format 3'),
+        reason: 'sanity check on the test setup itself',
+      );
 
       const key = 'a-real-32-byte-hex-style-test-key';
       await migrateToEncryptedIfNeeded(dbFile, key);
 
+      expect(
+        await File('${dbFile.path}.pre-encryption-backup').exists(),
+        isFalse,
+        reason: 'a successful migration must not leave a plaintext copy behind',
+      );
+
       final headerAfter = await dbFile.openRead(0, 16).first;
-      expect(String.fromCharCodes(headerAfter), isNot(startsWith('SQLite format 3')), reason: 'file should no longer look like plain SQLite');
+      expect(
+        String.fromCharCodes(headerAfter),
+        isNot(startsWith('SQLite format 3')),
+        reason: 'file should no longer look like plain SQLite',
+      );
 
       // The actual point: real data survives, readable with the real key.
       final reopened = sqlite3.open(dbFile.path);

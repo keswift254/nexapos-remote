@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import '../../domain/services/sensitive_action_service.dart';
+import '../../domain/services/sync_service.dart';
+import 'sensitive_action_dialog.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../core/providers.dart';
@@ -215,6 +218,14 @@ class _PaymentSettingsScreenState extends ConsumerState<PaymentSettingsScreen> {
       ),
     );
     if (confirmed != true) return;
+    if (!mounted) return;
+    final approval = await requestSensitiveApproval(context, action: 'Unregister device');
+    if (approval == null) return;
+    await ref.read(sensitiveActionProvider).consume(approval, 'Unregister device');
+    if (await ref.read(syncServiceProvider).hasPendingShopChange) {
+      _showError('Resolve the interrupted shop change before unregistering.');
+      return;
+    }
     await ref.read(paystackCredentialsServiceProvider).clearRegistration();
     ref.invalidate(currentPaymentCredentialsProvider);
   }

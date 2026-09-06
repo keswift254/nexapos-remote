@@ -34,6 +34,7 @@ class SettlementResult {
 }
 
 class ClientStatus {
+  final int shopId;
   final String status;
   final String businessName;
   final String settlementType;
@@ -52,6 +53,7 @@ class ClientStatus {
   final bool isOwner;
 
   const ClientStatus({
+    this.shopId = 0,
     required this.status,
     required this.businessName,
     required this.settlementType,
@@ -242,6 +244,7 @@ class PlatformOnboardingGateway {
       throw PaystackException(platformResponseMessage(response, 'Could not load your payment settings.'));
     }
     return ClientStatus(
+      shopId: (response['shop_id'] as num? ?? 0).toInt(),
       status: (response['status'] as String? ?? '').trim(),
       businessName: (response['business_name'] as String? ?? '').trim(),
       settlementType: (response['settlement_type'] as String? ?? '').trim(),

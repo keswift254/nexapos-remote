@@ -49,6 +49,16 @@ bool isNewerVersion(String latest, String current) {
   return false;
 }
 
+String? publishedChecksumError(String? expectedHex) {
+  if (expectedHex == null || expectedHex.isEmpty) {
+    return 'This update has no integrity checksum and cannot be installed safely. Contact support.';
+  }
+  if (!RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(expectedHex)) {
+    return 'This update has an invalid integrity checksum and cannot be installed safely. Contact support.';
+  }
+  return null;
+}
+
 /// Remembers the last background check's result so the dashboard banner
 /// (see dashboard_screen.dart) can show it reactively without every
 /// screen re-querying the server itself - mirrors
@@ -227,15 +237,16 @@ class UpdateService {
   /// than what the vendor actually published - none of that is stopped
   /// by HTTPS transport alone, which only protects against tampering
   /// *in transit* to whatever host answers for the URL, not the
-  /// integrity of that host's own content. Deliberately does NOT fail
-  /// when [expectedHex] is null - an older/rolled-back server response
-  /// without a hash published yet must not brick updating entirely; it
-  /// just means this specific safeguard is unavailable for that build.
+  /// integrity of that host's own content. A missing or malformed hash
+  /// is a hard failure: installing executable code without the promised
+  /// integrity check is more dangerous than asking the user to contact
+  /// support for an old or incorrectly-published release.
   Future<String?> _verifyChecksum(File file, String? expectedHex) async {
-    if (expectedHex == null) return null;
+    final metadataError = publishedChecksumError(expectedHex);
+    if (metadataError != null) return metadataError;
     final digest = await sha256.bind(file.openRead()).first;
     final actualHex = digest.toString();
-    if (actualHex.toLowerCase() != expectedHex.toLowerCase()) {
+    if (actualHex.toLowerCase() != expectedHex!.toLowerCase()) {
       return 'The downloaded update failed an integrity check and was not installed. '
           'This could mean a network problem corrupted the download - try again, or contact support if it keeps happening.';
     }
@@ -309,9 +320,14 @@ class UpdateService {
         '    if "!EC!"=="0" goto copydone\r\n'
         '    ping -n 2 127.0.0.1 > nul\r\n'
         ')\r\n'
+        'goto copyfailed\r\n'
         ':copydone\r\n'
         'start "" "$installDir\\$exeName"\r\n'
         'echo [%DATE% %TIME%] Relaunched $exeName, cleaning up staging >> "$log"\r\n'
-        'rmdir /S /Q "$stagingDir"\r\n';
+        'rmdir /S /Q "$stagingDir"\r\n'
+        'exit /B 0\r\n'
+        ':copyfailed\r\n'
+        'echo [%DATE% %TIME%] Update failed after all copy attempts; app was not relaunched >> "$log"\r\n'
+        'exit /B 1\r\n';
   }
 }

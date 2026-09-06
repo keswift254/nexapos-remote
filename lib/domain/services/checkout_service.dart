@@ -110,7 +110,7 @@ class CheckoutService {
     final shortCode = deviceId.replaceAll('-', '').substring(0, 6).toUpperCase();
     final timestamp = DateFormat('yyyyMMddHHmmss').format(_clock.now());
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    final random = Random();
+    final random = Random.secure();
     final suffix = List.generate(4, (_) => chars[random.nextInt(chars.length)]).join();
     return '$shortCode-$timestamp-$suffix';
   }

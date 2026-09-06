@@ -10,7 +10,15 @@ import '../../data/sync/lan_discovery.dart';
 import '../../domain/entities/paystack_credentials.dart';
 import '../../domain/services/paystack_credentials_service.dart';
 import '../../domain/services/sync_service.dart';
+import '../../domain/services/auth_service.dart';
+import '../../domain/services/session_service.dart';
+import '../../domain/services/shop_safety_service.dart';
+import '../../domain/services/sensitive_action_service.dart';
+import 'sensitive_action_dialog.dart';
+import 'save_recovery.dart';
 import '../../app.dart' show hasAnyUsersProvider;
+import '../checkout/cart_notifier.dart';
+import '../../domain/services/pending_sales_notifier.dart';
 import 'payment_settings_screen.dart' show currentPaymentCredentialsProvider;
 
 /// Reachable on its own from the dashboard's Settings menu - deliberately
@@ -157,6 +165,10 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
   Future<void> _register({required String baseUrl, required String? inviteCode}) async {
     setState(() => _submitting = true);
     try {
+      await ref.read(syncServiceProvider).exclusive(() async {
+      if (inviteCode != null && await ref.read(authServiceProvider).hasAnyUsers()) {
+        throw StateError('Reconnect the existing shop first, then use Switch shop to preserve a recovery backup.');
+      }
       final deviceId = await ref.read(syncMetadataProvider).deviceId();
       final registrationSecret = await ref.read(syncMetadataProvider).registrationSecret();
       final registration = await ref.read(platformOnboardingGatewayProvider).registerDevice(
@@ -165,23 +177,26 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
             deviceLabel: _deviceLabelController.text.trim(),
             registrationSecret: registrationSecret,
           );
+      await ref.read(paystackCredentialsServiceProvider).save(
+          PaystackCredentials(baseUrl: baseUrl, apiKey: registration.apiKey, currency: 'KES', defaultEmail: ''));
       if (inviteCode != null) {
+        final status = await ref.read(platformOnboardingGatewayProvider).getClientStatus(
+            baseUrl: baseUrl, apiKey: registration.apiKey);
+        await ref.read(syncServiceProvider).prepareInitialJoin(status.shopId);
         await ref.read(platformOnboardingGatewayProvider).joinShop(
               baseUrl: baseUrl,
               apiKey: registration.apiKey,
               inviteCode: inviteCode,
             );
-        await ref.read(syncMetadataProvider).resetCursors();
       }
-      await ref
-          .read(paystackCredentialsServiceProvider)
-          .save(PaystackCredentials(baseUrl: baseUrl, apiKey: registration.apiKey, currency: 'KES', defaultEmail: ''));
       await ref.read(paystackCredentialsServiceProvider).saveDeviceLabel(_deviceLabelController.text.trim());
+      });
       ref.invalidate(currentPaymentCredentialsProvider);
       _showMessage(inviteCode != null
           ? 'Connected - your data will sync with the rest of that shop shortly.'
           : 'This device is now set up as its own shop.');
-      unawaited(_safeSyncNow());
+      await _safeSyncNow();
+      ref.invalidate(hasAnyUsersProvider);
       // _register only ever runs from _buildRegisterView, i.e. while
       // this device wasn't configured yet - that's also exactly the
       // condition app.dart's mandatory /device-sync gate checks, so a
@@ -190,6 +205,7 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
       // renders here until something else happens to navigate.
       if (mounted) context.go('/');
     } catch (e) {
+      ref.invalidate(currentPaymentCredentialsProvider);
       _showMessage(e is PaystackException ? e.message : '$e');
     } finally {
       if (mounted) setState(() => _submitting = false);
@@ -199,8 +215,11 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
   // --- Already connected: add another device, or join a different shop ---
 
   Future<void> _generateInvite(PaystackCredentials credentials) async {
+    final approval = await requestSensitiveApproval(context, action: 'Invite a device');
+    if (approval == null) return;
     setState(() => _generating = true);
     try {
+      await ref.read(sensitiveActionProvider).consume(approval, 'Invite a device');
       final invite = await ref
           .read(platformOnboardingGatewayProvider)
           .generateInvite(baseUrl: credentials.baseUrl, apiKey: credentials.apiKey);
@@ -258,16 +277,14 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
   }
 
   Future<void> _joinOther(PaystackCredentials credentials, {required String code}) async {
+    final approval = await requestSensitiveApproval(context, action: 'Switch shop');
+    if (approval == null || !mounted) return;
     setState(() => _submittingOther = true);
     try {
-      await ref.read(platformOnboardingGatewayProvider).joinShop(
-            baseUrl: credentials.baseUrl,
-            apiKey: credentials.apiKey,
-            inviteCode: code,
-          );
-      await ref.read(syncMetadataProvider).resetCursors();
-      _showMessage('Joined - your data will sync with the rest of that shop shortly.');
-      unawaited(_safeSyncNow());
+      final changed = await ref.read(shopSafetyProvider).changeShop(
+        approval: approval, credentials: credentials, inviteCode: code,
+        saveRecovery: (archive) => saveRecoveryArchive(context, archive));
+      if (changed) await _afterShopChange();
     } catch (e) {
       _showMessage(e is PaystackException ? e.message : '$e');
     } finally {
@@ -300,34 +317,30 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
       builder: (context) => AlertDialog(
         title: const Text('Leave this shop?'),
         content: const Text(
-          'This device will disconnect from its current shop. ALL local data on this device - products, sales, '
-          'inventory, everything - will be permanently deleted so it can start fresh as a new, empty shop. '
-          'This cannot be undone. Devices that stay in the current shop keep their data.',
+          'This device will start a new, empty shop. Administrator verification and an encrypted '
+          'recovery backup are required before its local records are removed. Keep the backup password.',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Leave and erase this device'),
+            child: const Text('Continue to verification'),
           ),
         ],
       ),
     );
     if (confirmed != true) return;
+    if (!mounted) return;
+    final approval = await requestSensitiveApproval(context, action: 'Leave this shop');
+    if (approval == null || !mounted) return;
 
     setState(() => _leaving = true);
     try {
-      await ref.read(platformOnboardingGatewayProvider).leaveShop(
-            baseUrl: credentials.baseUrl,
-            apiKey: credentials.apiKey,
-          );
-      await ref.read(appDatabaseProvider).resetForFreshStart();
-      await ref.read(syncMetadataProvider).resetCursors();
-      ref.invalidate(hasAnyUsersProvider);
-      if (!mounted) return;
-      _showMessage('Left that shop - this device is starting fresh.');
-      context.go('/');
+      final changed = await ref.read(shopSafetyProvider).changeShop(
+        approval: approval, credentials: credentials,
+        saveRecovery: (archive) => saveRecoveryArchive(context, archive));
+      if (changed) await _afterShopChange();
     } catch (e) {
       _showMessage(e is PaystackException ? e.message : '$e');
     } finally {
@@ -347,6 +360,17 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
   /// wants an actual clean slate, not just a working registration -
   /// null means cancelled, false means identity only, true means both.
   Future<void> _resetDeviceIdentity() async {
+    final db = ref.read(appDatabaseProvider);
+    final records = await db.customSelect('SELECT (SELECT COUNT(*) FROM users) + '
+      '(SELECT COUNT(*) FROM products) + (SELECT COUNT(*) FROM sales) + '
+      '(SELECT COUNT(*) FROM expenses) + (SELECT COUNT(*) FROM categories) + '
+      '(SELECT COUNT(*) FROM stock_movements) + (SELECT COUNT(*) FROM payment_records) + '
+      '(SELECT COUNT(*) FROM sale_items) AS count').getSingle();
+    if (records.read<int>('count') > 0) {
+      _showMessage('This device contains shop data. Reconnect it or contact the shop administrator; identity reset is blocked.');
+      return;
+    }
+    if (!mounted) return;
     final choice = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -543,6 +567,29 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Sync status'),
+          subtitle: Text(ref.read(syncServiceProvider).lastError ??
+            (ref.read(syncServiceProvider).lastSuccess == null ? 'No successful sync in this session.' :
+            'Last successful sync: ${ref.read(syncServiceProvider).lastSuccess!.toLocal()}')),
+          trailing: IconButton(tooltip: 'Sync now', icon: const Icon(Icons.sync),
+            onPressed: (_leaving || _submittingOther) ? null : () async {
+              final wasJoining = await ref.read(syncServiceProvider).needsInitialPull;
+              await _safeSyncNow();
+              if (wasJoining && mounted && !await ref.read(syncServiceProvider).needsInitialPull) {
+                ref.invalidate(hasAnyUsersProvider);
+                if (mounted) context.go('/');
+              }
+              if (mounted) setState(() {});
+            }),
+        ),
+        FutureBuilder<bool>(future: ref.read(syncServiceProvider).hasPendingShopChange,
+          builder: (context, snapshot) => snapshot.data == true ? ListTile(
+            title: const Text('Interrupted shop change'),
+            subtitle: const Text('Sync is paused. The recovery backup contains the previous shop data.'),
+            trailing: TextButton(onPressed: () => _resolveChange(credentials), child: const Text('Resolve')),
+          ) : const SizedBox.shrink()),
         Card(
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -672,9 +719,8 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
                 Text('Leave this shop', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 4),
                 Text(
-                  'Disconnects this device and permanently erases every product, sale, and other record stored '
-                  'on it, so it starts completely fresh - as its own new, empty shop. Data already synced to '
-                  'other devices in the current shop is not affected.',
+                  'Starts a new shop on this device after administrator password, authenticator code, '
+                  'and a saved recovery backup. Other devices keep their existing records.',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
                 const SizedBox(height: 12),
@@ -695,4 +741,23 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
 
   Widget _smallSpinner() =>
       const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2));
+
+  Future<void> _afterShopChange() async {
+    ref.read(cartProvider.notifier).clear();
+    ref.invalidate(pendingPaystackSalesProvider);
+    await ref.read(sessionProvider.notifier).logout();
+    await _safeSyncNow();
+    ref.invalidate(hasAnyUsersProvider);
+    if (mounted) context.go('/');
+  }
+
+  Future<void> _resolveChange(PaystackCredentials credentials) async {
+    final approval = await requestSensitiveApproval(context, action: 'Resolve shop change');
+    if (approval == null) return;
+    try {
+      final changed = await ref.read(shopSafetyProvider).resolveChange(approval, credentials);
+      if (changed) { await _afterShopChange(); }
+      else if (mounted) { setState(() {}); }
+    } catch (e) { _showMessage(e.toString()); }
+  }
 }

@@ -25,4 +25,8 @@ abstract class PaystackCredentials with _$PaystackCredentials {
   const PaystackCredentials._();
 
   bool get isConfigured => baseUrl.trim().isNotEmpty && apiKey.trim().isNotEmpty;
+
+  @override
+  String toString() =>
+      'PaystackCredentials(baseUrl: $baseUrl, apiKey: [REDACTED], currency: $currency, defaultEmail: [REDACTED])';
 }

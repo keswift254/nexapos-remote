@@ -56,8 +56,8 @@ class AuthService {
   }) async {
     if (name.trim().isEmpty) return const Result.failure('Enter a name.');
     if (username.trim().isEmpty) return const Result.failure('Enter a username.');
-    if (password.length < 6) {
-      return const Result.failure('Password must be at least 6 characters.');
+    if (password.length < 8) {
+      return const Result.failure('Password must be at least 8 characters.');
     }
     final existing = await _userRepository.findByUsername(username.trim());
     if (existing != null) {
@@ -96,8 +96,8 @@ class AuthService {
   }) async {
     if (name.trim().isEmpty) return const Result.failure('Enter a name.');
     if (username.trim().isEmpty) return const Result.failure('Enter a username.');
-    if (newPassword != null && newPassword.isNotEmpty && newPassword.length < 6) {
-      return const Result.failure('Password must be at least 6 characters.');
+    if (newPassword != null && newPassword.isNotEmpty && newPassword.length < 8) {
+      return const Result.failure('Password must be at least 8 characters.');
     }
 
     final existing = await _userRepository.findById(id);

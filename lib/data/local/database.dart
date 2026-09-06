@@ -143,6 +143,15 @@ class AppDatabase extends _$AppDatabase {
           }
         },
         beforeOpen: (details) async {
+          await customStatement('CREATE TABLE IF NOT EXISTS local_safety_state (id TEXT PRIMARY KEY, value TEXT NOT NULL)');
+          for (final table in allTables.where((t) => t.actualTableName != 'device_meta')) {
+            for (final operation in ['INSERT', 'UPDATE', 'DELETE']) {
+              await customStatement('''CREATE TRIGGER IF NOT EXISTS safety_${table.actualTableName}_$operation
+                BEFORE $operation ON "${table.actualTableName}"
+                WHEN EXISTS(SELECT 1 FROM local_safety_state WHERE id='shop_change')
+                BEGIN SELECT RAISE(ABORT, 'Resolve the shop change before editing data'); END''');
+            }
+          }
           // WAL mode so report/list screens can keep reading while a
           // checkout transaction commits.
           await customStatement('PRAGMA journal_mode=WAL');

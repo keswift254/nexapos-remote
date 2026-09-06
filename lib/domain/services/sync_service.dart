@@ -1,10 +1,11 @@
-import 'dart:math' as math;
+import 'dart:async';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../core/providers.dart';
 import '../../data/local/database.dart';
 import '../../data/local/sync_metadata.dart';
 import '../../data/sync/platform_sync_gateway.dart';
 import '../../data/sync/sync_table_registry.dart';
+import '../../data/payments/platform_onboarding_gateway.dart';
 import 'paystack_credentials_service.dart';
 
 part 'sync_service.g.dart';
@@ -38,28 +39,99 @@ class _PendingChange {
 /// never surface a scary error for "no internet right now", matching
 /// how the existing Paystack payment polling behaves.
 class SyncService {
+  static const _pushBatchSize = 200;
+
   final AppDatabase _db;
   final SyncMetadataService _syncMeta;
   final PlatformSyncGateway _gateway;
   final PaystackCredentialsService _credentials;
+  final PlatformOnboardingGateway _onboarding;
 
-  SyncService(this._db, this._syncMeta, this._gateway, this._credentials);
+  SyncService(this._db, this._syncMeta, this._gateway, this._credentials,
+      {PlatformOnboardingGateway? onboarding}) : _onboarding = onboarding ?? PlatformOnboardingGateway();
 
-  Future<void> runSyncCycle() async {
+  Future<void> _tail = Future.value();
+  String? lastError;
+  DateTime? lastSuccess;
+
+  Future<T> exclusive<T>(Future<T> Function() operation) {
+    final result = _tail.then((_) => operation());
+    _tail = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
+    return result;
+  }
+
+  Future<bool> get hasPendingShopChange async =>
+      (await _db.customSelect("SELECT id FROM local_safety_state WHERE id='shop_change'").get()).isNotEmpty;
+
+  Future<bool> get needsInitialPull async =>
+      (await _db.customSelect("SELECT id FROM local_safety_state WHERE id='shop_hydration'").get()).isNotEmpty;
+
+  Future<void> prepareJoinedShop() => _db.transaction(() async {
+    await _db.delete(_db.businessSettings).go();
+    final meta = await _db.select(_db.deviceMeta).getSingle();
+    await _syncMeta.setLastPushedLocalRev(meta.nextLocalRev - 1);
+    await _syncMeta.setLastPulledChangeId(0);
+    await _db.customStatement("INSERT OR REPLACE INTO local_safety_state(id,value) VALUES('shop_hydration','pending')");
+  });
+
+  Future<void> prepareInitialJoin(int sourceShop) => _db.transaction(() async {
+    if (sourceShop <= 0) throw StateError('Update the platform before joining a shop.');
+    for (final table in _db.allTables.where((t) =>
+        !['roles', 'business_settings', 'device_meta'].contains(t.actualTableName))) {
+      if ((await _db.customSelect('SELECT 1 FROM "${table.actualTableName}" LIMIT 1').get()).isNotEmpty) {
+        throw StateError('This device contains shop data. Use the verified Switch shop action.');
+      }
+    }
+    await prepareJoinedShop();
+    await _db.customStatement("INSERT OR REPLACE INTO local_safety_state(id,value) VALUES('initial_join',?)", ['$sourceShop']);
+  });
+
+  Future<void> runSyncCycle() => exclusive(() async {
+    if (await hasPendingShopChange) {
+      lastError = 'Shop change interrupted. Resolve it in Device Sync before syncing.';
+      return;
+    }
     final credentials = await _credentials.load();
     if (!credentials.isConfigured) return;
 
     try {
+      final initialJoin = await _db.customSelect("SELECT value FROM local_safety_state WHERE id='initial_join'").getSingleOrNull();
+      if (initialJoin != null) {
+        final status = await _onboarding.getClientStatus(baseUrl: credentials.baseUrl, apiKey: credentials.apiKey);
+        if (status.shopId <= 0) throw StateError('The server did not return shop membership.');
+        await _db.transaction(() async {
+          if ('${status.shopId}' == initialJoin.data['value']) {
+            await _db.resetForFreshStart();
+            await _db.customStatement("DELETE FROM local_safety_state WHERE id='shop_hydration'");
+          }
+          await _db.customStatement("DELETE FROM local_safety_state WHERE id='initial_join'");
+        });
+      }
+      if (await needsInitialPull) {
+        await pullRemoteChanges(credentials.baseUrl, credentials.apiKey);
+        final users = await _db.select(_db.users).get();
+        final settings = await _db.select(_db.businessSettings).get();
+        if (!users.any((u) => u.status == 'active') || settings.isEmpty) {
+          throw const PaystackException('Waiting for the joined shop users and settings. Sync the owner device, then retry here.');
+        }
+        await _db.customStatement("DELETE FROM local_safety_state WHERE id='shop_hydration'");
+      }
       await pushLocalChanges(credentials.baseUrl, credentials.apiKey);
       await pullRemoteChanges(credentials.baseUrl, credentials.apiKey);
+      lastError = null;
+      lastSuccess = DateTime.now();
     } on PaystackOfflineException {
+      lastError = 'Offline. Changes remain on this device until the next successful sync.';
       // No internet right now - try again next cycle.
-    } on PaystackException {
+    } on PaystackException catch (e) {
+      lastError = e.message;
       // Backend rejected something (not yet joined a shop, bad key,
       // ...) - try again next cycle rather than surfacing an error from
       // a background process the user didn't explicitly trigger.
+    } catch (_) {
+      lastError = 'Sync could not complete. Local data is retained; retry from Device Sync.';
     }
-  }
+  });
 
   /// Gathers pending rows across ALL synced tables before sending -
   /// correctness-critical, not stylistic. local_rev is one counter
@@ -83,20 +155,27 @@ class SyncService {
 
     pending.sort((a, b) => (a.json['localRev'] as int).compareTo(b.json['localRev'] as int));
 
-    final batch = pending
-        .map((change) => {
-              'table_name': change.tableName,
-              'row_id': change.json['id'],
-              'local_rev': change.json['localRev'],
-              'updated_at': change.json['updatedAt'],
-              'payload': change.json,
-            })
-        .toList();
+    // Bound every request so a large import cannot create an unbounded
+    // JSON body on either the device or the relay server. Advance the
+    // cursor after each acknowledged batch: if batch N+1 fails, the
+    // next cycle safely resumes there instead of retransmitting every
+    // earlier row or skipping anything that was not accepted.
+    for (var offset = 0; offset < pending.length; offset += _pushBatchSize) {
+      final end = (offset + _pushBatchSize).clamp(0, pending.length);
+      final slice = pending.sublist(offset, end);
+      final batch = slice
+          .map((change) => {
+                'table_name': change.tableName,
+                'row_id': change.json['id'],
+                'local_rev': change.json['localRev'],
+                'updated_at': change.json['updatedAt'],
+                'payload': change.json,
+              })
+          .toList();
 
-    await _gateway.pushChanges(baseUrl: baseUrl, apiKey: apiKey, changes: batch);
-
-    final maxRev = pending.map((change) => change.json['localRev'] as int).reduce(math.max);
-    await _syncMeta.setLastPushedLocalRev(maxRev);
+      await _gateway.pushChanges(baseUrl: baseUrl, apiKey: apiKey, changes: batch);
+      await _syncMeta.setLastPushedLocalRev(slice.last.json['localRev'] as int);
+    }
   }
 
   /// Pages through pull_changes in ascending id order, applying each
@@ -110,9 +189,15 @@ class SyncService {
 
     while (true) {
       final result = await _gateway.pullChanges(baseUrl: baseUrl, apiKey: apiKey, since: cursor);
+      if (result.nextCursor < cursor ||
+          (result.changes.isNotEmpty && result.nextCursor <= cursor) ||
+          (result.changes.isEmpty && result.hasMore)) {
+        throw StateError('The server returned an invalid sync cursor.');
+      }
       if (result.changes.isEmpty) break;
 
       await _db.transaction(() async {
+        touchedProductIds.clear();
         await _db.customStatement('PRAGMA defer_foreign_keys=ON');
         for (final change in result.changes) {
           final adapter = syncTableAdapters[change.tableName];
@@ -129,14 +214,14 @@ class SyncService {
             if (productId != null && productId.isNotEmpty) touchedProductIds.add(productId);
           }
         }
+        await _recomputeStockQty(touchedProductIds);
+        await _syncMeta.setLastPulledChangeId(result.nextCursor);
       });
 
       cursor = result.nextCursor;
-      await _syncMeta.setLastPulledChangeId(cursor);
       if (!result.hasMore) break;
     }
 
-    await _recomputeStockQty(touchedProductIds);
   }
 
   Future<void> _applyWithLastWriteWins(SyncTableAdapter adapter, PulledChange change) async {
