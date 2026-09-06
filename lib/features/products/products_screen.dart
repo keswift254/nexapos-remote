@@ -63,6 +63,16 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
     ref.invalidate(allProductsProvider);
   }
 
+  Future<void> _openShopTransfer(BuildContext context) async {
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const ShopTransferDialog(),
+    );
+    ref.invalidate(allProductsProvider);
+    ref.invalidate(productFormCategoriesProvider);
+  }
+
   Future<void> _confirmDelete(Product product) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -73,15 +83,6 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
           'included it keep showing correctly - this only affects new sales.',
         ),
         actions: [
-          if (ref.watch(sessionProvider)?.role == UserRole.admin)
-            IconButton(icon: const Icon(Icons.backup_outlined),
-              tooltip: 'Import all data from another POS / Backup and restore',
-              onPressed: () async {
-                await showDialog<void>(context: context, barrierDismissible: false,
-                  builder: (_) => const ShopTransferDialog());
-                ref.invalidate(allProductsProvider);
-                ref.invalidate(productFormCategoriesProvider);
-              }),
           TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
           FilledButton.tonal(
             style: FilledButton.styleFrom(foregroundColor: Theme.of(dialogContext).colorScheme.error),
@@ -170,6 +171,12 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
       appBar: AppBar(
         title: Text(widget.lowStockOnly ? 'Low Stock' : 'Inventory'),
         actions: [
+          if (ref.watch(sessionProvider)?.role == UserRole.admin)
+            IconButton(
+              icon: const Icon(Icons.backup_outlined),
+              tooltip: 'Import all data from another POS / Backup and restore',
+              onPressed: () => _openShopTransfer(context),
+            ),
           IconButton(
             icon: const Icon(Icons.upload_file),
             tooltip: 'Import from Excel',
