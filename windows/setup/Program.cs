@@ -1,8 +1,10 @@
 using System;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Security.Principal;
 using System.Windows.Forms;
 using Microsoft.Win32;
 using System.IO.Compression;
@@ -21,6 +23,11 @@ internal static class Program
     {
         try
         {
+            if (!IsAdministrator())
+            {
+                return RelaunchElevated(args);
+            }
+
             var installDir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
                 ProductName);
@@ -46,6 +53,54 @@ internal static class Program
                 MessageBoxIcon.Error);
             return 1;
         }
+    }
+
+    private static bool IsAdministrator()
+    {
+        using (var identity = WindowsIdentity.GetCurrent())
+        {
+            var principal = new WindowsPrincipal(identity);
+            return principal.IsInRole(WindowsBuiltInRole.Administrator);
+        }
+    }
+
+    private static int RelaunchElevated(string[] args)
+    {
+        var executable = Process.GetCurrentProcess().MainModule.FileName;
+        if (string.IsNullOrWhiteSpace(executable))
+        {
+            throw new InvalidOperationException("The setup executable path could not be determined.");
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = executable,
+                Arguments = string.Join(" ", args.Select(QuoteArgument)),
+                UseShellExecute = true,
+                Verb = "runas",
+            });
+            return 0;
+        }
+        catch (Win32Exception error)
+        {
+            if (error.NativeErrorCode != 1223)
+            {
+                throw;
+            }
+            MessageBox.Show(
+                "NexaPOS was not updated because administrator approval was cancelled.",
+                ProductName,
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+            return 1;
+        }
+    }
+
+    private static string QuoteArgument(string argument)
+    {
+        return "\"" + argument.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
     }
 
     private static void Install(string installDir)
