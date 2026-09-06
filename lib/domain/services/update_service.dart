@@ -27,7 +27,11 @@ class UpdateCheckResult {
   final LatestVersionInfo? latest;
   final bool updateAvailable;
 
-  const UpdateCheckResult({required this.currentVersion, this.latest, required this.updateAvailable});
+  const UpdateCheckResult({
+    required this.currentVersion,
+    this.latest,
+    required this.updateAvailable,
+  });
 }
 
 /// Compares dotted version strings numerically per segment (so "1.9.0" <
@@ -38,9 +42,17 @@ class UpdateCheckResult {
 /// generator.html's "Publish app update" card) that could disagree on
 /// segment count.
 bool isNewerVersion(String latest, String current) {
-  final latestParts = latest.split('.').map((p) => int.tryParse(p) ?? 0).toList();
-  final currentParts = current.split('.').map((p) => int.tryParse(p) ?? 0).toList();
-  final length = latestParts.length > currentParts.length ? latestParts.length : currentParts.length;
+  final latestParts = latest
+      .split('.')
+      .map((p) => int.tryParse(p) ?? 0)
+      .toList();
+  final currentParts = current
+      .split('.')
+      .map((p) => int.tryParse(p) ?? 0)
+      .toList();
+  final length = latestParts.length > currentParts.length
+      ? latestParts.length
+      : currentParts.length;
   for (var i = 0; i < length; i++) {
     final l = i < latestParts.length ? latestParts[i] : 0;
     final c = i < currentParts.length ? currentParts[i] : 0;
@@ -109,8 +121,13 @@ class UpdateService {
   Future<UpdateCheckResult> checkForUpdate() async {
     final packageInfo = await PackageInfo.fromPlatform();
     final latest = await _ref.read(updateGatewayProvider).fetchLatestVersion();
-    final available = latest != null && isNewerVersion(latest.version, packageInfo.version);
-    return UpdateCheckResult(currentVersion: packageInfo.version, latest: latest, updateAvailable: available);
+    final available =
+        latest != null && isNewerVersion(latest.version, packageInfo.version);
+    return UpdateCheckResult(
+      currentVersion: packageInfo.version,
+      latest: latest,
+      updateAvailable: available,
+    );
   }
 
   /// Downloads and installs [info] on this platform, reporting 0.0-1.0
@@ -119,14 +136,77 @@ class UpdateService {
   /// the caller only ever sees this function return on failure there. On
   /// Android it returns normally either way, since the OS installer runs
   /// as a separate activity on top of (not instead of) this app.
-  Future<Result<void>> install(LatestVersionInfo info, {void Function(double progress)? onProgress}) {
+  Future<Result<void>> install(
+    LatestVersionInfo info, {
+    void Function(double progress)? onProgress,
+  }) {
     if (Platform.isWindows) return _installWindows(info, onProgress);
     if (Platform.isAndroid) return _installAndroid(info, onProgress);
-    return Future.value(const Result.failure('One-tap update is not available on this platform yet.'));
+    return Future.value(
+      const Result.failure(
+        'One-tap update is not available on this platform yet.',
+      ),
+    );
   }
 
-  Future<Result<void>> _installWindows(LatestVersionInfo info, void Function(double)? onProgress) async {
-    if (info.windowsUrl.isEmpty) return const Result.failure('No Windows download is available for this update.');
+  Future<Result<void>> _installWindows(
+    LatestVersionInfo info,
+    void Function(double)? onProgress,
+  ) async {
+    if (info.windowsInstallerUrl.isNotEmpty) {
+      return _installWindowsSetup(info, onProgress);
+    }
+    return _installWindowsZip(info, onProgress);
+  }
+
+  Future<Result<void>> _installWindowsSetup(
+    LatestVersionInfo info,
+    void Function(double)? onProgress,
+  ) async {
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final setupFile = File(path.join(tempDir.path, 'NexaPOS-setup.exe'));
+      await _ref
+          .read(updateGatewayProvider)
+          .downloadTo(
+            info.windowsInstallerUrl,
+            setupFile,
+            onProgress: (received, total) {
+              if (total != null && total > 0)
+                onProgress?.call(received / total * 0.9);
+            },
+          );
+      final checksumError = await _verifyChecksum(
+        setupFile,
+        info.windowsInstallerSha256,
+      );
+      if (checksumError != null) return Result.failure(checksumError);
+      onProgress?.call(1.0);
+      await Process.start(
+        setupFile.path,
+        const [],
+        mode: ProcessStartMode.detached,
+      );
+      exit(0);
+    } on UpdateOfflineException {
+      return const Result.failure(
+        'Could not reach the download server. Check your internet connection and try again.',
+      );
+    } on UpdateException catch (e) {
+      return Result.failure(e.message);
+    } catch (e) {
+      return Result.failure('Could not start the Windows installer: $e');
+    }
+  }
+
+  Future<Result<void>> _installWindowsZip(
+    LatestVersionInfo info,
+    void Function(double)? onProgress,
+  ) async {
+    if (info.windowsUrl.isEmpty)
+      return const Result.failure(
+        'No Windows download is available for this update.',
+      );
     try {
       final tempDir = await getTemporaryDirectory();
       final stagingDir = Directory(path.join(tempDir.path, 'nexapos_update'));
@@ -134,15 +214,18 @@ class UpdateService {
       await stagingDir.create(recursive: true);
 
       final zipFile = File(path.join(stagingDir.path, 'update.zip'));
-      await _ref.read(updateGatewayProvider).downloadTo(
-        info.windowsUrl,
-        zipFile,
-        onProgress: (received, total) {
-          // Reserve the last 10% of the bar for extract+handoff, which
-          // have no byte-level progress of their own to report.
-          if (total != null && total > 0) onProgress?.call(received / total * 0.9);
-        },
-      );
+      await _ref
+          .read(updateGatewayProvider)
+          .downloadTo(
+            info.windowsUrl,
+            zipFile,
+            onProgress: (received, total) {
+              // Reserve the last 10% of the bar for extract+handoff, which
+              // have no byte-level progress of their own to report.
+              if (total != null && total > 0)
+                onProgress?.call(received / total * 0.9);
+            },
+          );
 
       final checksumError = await _verifyChecksum(zipFile, info.windowsSha256);
       if (checksumError != null) return Result.failure(checksumError);
@@ -158,26 +241,34 @@ class UpdateService {
       // exe wherever it landed instead of assuming a fixed depth.
       final exeFile = await _findFile(extractDir, exeName);
       if (exeFile == null) {
-        return Result.failure('The downloaded update looks corrupted ($exeName not found inside it).');
+        return Result.failure(
+          'The downloaded update looks corrupted ($exeName not found inside it).',
+        );
       }
 
       final installDir = File(Platform.resolvedExecutable).parent;
-      final stagingBatFile = File(path.join(stagingDir.path, 'apply_update.bat'));
-      await stagingBatFile.writeAsString(_windowsUpdaterScript(
-        sourceDir: exeFile.parent.path,
-        installDir: installDir.path,
-        exeName: exeName,
-        stagingDir: stagingDir.path,
-      ));
+      final stagingBatFile = File(
+        path.join(stagingDir.path, 'apply_update.bat'),
+      );
+      await stagingBatFile.writeAsString(
+        _windowsUpdaterScript(
+          sourceDir: exeFile.parent.path,
+          installDir: installDir.path,
+          exeName: exeName,
+          stagingDir: stagingDir.path,
+        ),
+      );
 
       onProgress?.call(1.0);
       // /min so the brief handoff console window doesn't flash full-size;
       // detached so it survives this process exiting immediately after.
-      await Process.start(
-        'cmd.exe',
-        ['/c', 'start', '', '/min', stagingBatFile.path],
-        mode: ProcessStartMode.detached,
-      );
+      await Process.start('cmd.exe', [
+        '/c',
+        'start',
+        '',
+        '/min',
+        stagingBatFile.path,
+      ], mode: ProcessStartMode.detached);
       // The .bat's first step is a short wait before it touches anything
       // in installDir - but this process still has to have actually
       // exited by then, since Windows won't let the copy overwrite an
@@ -186,7 +277,9 @@ class UpdateService {
       // does end the function (and the process).
       exit(0);
     } on UpdateOfflineException {
-      return const Result.failure('Could not reach the download server. Check your internet connection and try again.');
+      return const Result.failure(
+        'Could not reach the download server. Check your internet connection and try again.',
+      );
     } on UpdateException catch (e) {
       return Result.failure(e.message);
     } catch (e) {
@@ -194,23 +287,35 @@ class UpdateService {
     }
   }
 
-  Future<Result<void>> _installAndroid(LatestVersionInfo info, void Function(double)? onProgress) async {
-    if (info.androidUrl.isEmpty) return const Result.failure('No Android download is available for this update.');
+  Future<Result<void>> _installAndroid(
+    LatestVersionInfo info,
+    void Function(double)? onProgress,
+  ) async {
+    if (info.androidUrl.isEmpty)
+      return const Result.failure(
+        'No Android download is available for this update.',
+      );
     try {
       final tempDir = await getTemporaryDirectory();
       final apkFile = File(path.join(tempDir.path, 'NexaPOS-update.apk'));
-      await _ref.read(updateGatewayProvider).downloadTo(
-        info.androidUrl,
-        apkFile,
-        onProgress: (received, total) {
-          if (total != null && total > 0) onProgress?.call(received / total);
-        },
-      );
+      await _ref
+          .read(updateGatewayProvider)
+          .downloadTo(
+            info.androidUrl,
+            apkFile,
+            onProgress: (received, total) {
+              if (total != null && total > 0)
+                onProgress?.call(received / total);
+            },
+          );
 
       final checksumError = await _verifyChecksum(apkFile, info.androidSha256);
       if (checksumError != null) return Result.failure(checksumError);
 
-      final result = await OpenFile.open(apkFile.path, type: 'application/vnd.android.package-archive');
+      final result = await OpenFile.open(
+        apkFile.path,
+        type: 'application/vnd.android.package-archive',
+      );
       switch (result.type) {
         case ResultType.done:
           return const Result.ok(null);
@@ -219,14 +324,20 @@ class UpdateService {
             'NexaPOS needs permission to install updates. In Settings, allow NexaPOS to "Install unknown apps", then tap Install again.',
           );
         case ResultType.noAppToOpen:
-          return const Result.failure('No installer is available on this device.');
+          return const Result.failure(
+            'No installer is available on this device.',
+          );
         case ResultType.fileNotFound:
-          return const Result.failure('The downloaded update file went missing - try again.');
+          return const Result.failure(
+            'The downloaded update file went missing - try again.',
+          );
         case ResultType.error:
           return Result.failure(result.message);
       }
     } on UpdateOfflineException {
-      return const Result.failure('Could not reach the download server. Check your internet connection and try again.');
+      return const Result.failure(
+        'Could not reach the download server. Check your internet connection and try again.',
+      );
     } on UpdateException catch (e) {
       return Result.failure(e.message);
     }
@@ -255,7 +366,8 @@ class UpdateService {
 
   Future<File?> _findFile(Directory dir, String name) async {
     await for (final entity in dir.list(recursive: true)) {
-      if (entity is File && path.basename(entity.path).toLowerCase() == name.toLowerCase()) {
+      if (entity is File &&
+          path.basename(entity.path).toLowerCase() == name.toLowerCase()) {
         return entity;
       }
     }

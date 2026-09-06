@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
+
 import '../licensing/license_gateway.dart' show licenseServerBaseUrl;
 import '../payments/platform_http_client.dart';
 
@@ -25,6 +26,7 @@ class UpdateOfflineException implements Exception {
 class LatestVersionInfo {
   final String version;
   final String windowsUrl;
+  final String windowsInstallerUrl;
   final String androidUrl;
   final String? releaseNotes;
   // Hex-encoded SHA-256 of the exact file at windowsUrl/androidUrl,
@@ -34,14 +36,17 @@ class LatestVersionInfo {
   // so old server rows can still be parsed and shown; install refuses a
   // release whose checksum is absent or malformed.
   final String? windowsSha256;
+  final String? windowsInstallerSha256;
   final String? androidSha256;
 
   const LatestVersionInfo({
     required this.version,
     required this.windowsUrl,
+    this.windowsInstallerUrl = '',
     required this.androidUrl,
     this.releaseNotes,
     this.windowsSha256,
+    this.windowsInstallerSha256,
     this.androidSha256,
   });
 }
@@ -65,7 +70,12 @@ class UpdateGateway {
   Future<LatestVersionInfo?> fetchLatestVersion() async {
     Map<String, dynamic> response;
     try {
-      response = await platformRequest(_client, 'GET', 'latest_version', licenseServerBaseUrl);
+      response = await platformRequest(
+        _client,
+        'GET',
+        'latest_version',
+        licenseServerBaseUrl,
+      );
     } on PaystackOfflineException {
       throw const UpdateOfflineException();
     } on PaystackException catch (e) {
@@ -76,14 +86,26 @@ class UpdateGateway {
     final version = (response['version'] as String? ?? '').trim();
     if (version.isEmpty) return null;
     final windowsSha256 = (response['windows_sha256'] as String?)?.trim();
+    final windowsInstallerSha256 =
+        (response['windows_installer_sha256'] as String?)?.trim();
     final androidSha256 = (response['android_sha256'] as String?)?.trim();
     return LatestVersionInfo(
       version: version,
       windowsUrl: (response['windows_url'] as String? ?? '').trim(),
+      windowsInstallerUrl: (response['windows_installer_url'] as String? ?? '')
+          .trim(),
       androidUrl: (response['android_url'] as String? ?? '').trim(),
       releaseNotes: (response['release_notes'] as String?)?.trim(),
-      windowsSha256: (windowsSha256 == null || windowsSha256.isEmpty) ? null : windowsSha256,
-      androidSha256: (androidSha256 == null || androidSha256.isEmpty) ? null : androidSha256,
+      windowsSha256: (windowsSha256 == null || windowsSha256.isEmpty)
+          ? null
+          : windowsSha256,
+      windowsInstallerSha256:
+          (windowsInstallerSha256 == null || windowsInstallerSha256.isEmpty)
+          ? null
+          : windowsInstallerSha256,
+      androidSha256: (androidSha256 == null || androidSha256.isEmpty)
+          ? null
+          : androidSha256,
     );
   }
 
@@ -106,12 +128,16 @@ class UpdateGateway {
     // does. Checked here, not at parse time in fetchLatestVersion, so
     // a bad URL for one platform doesn't block a good one for the other.
     if (uri.scheme != 'https') {
-      throw const UpdateException('The update download URL is not secure (not HTTPS) - refusing to download it.');
+      throw const UpdateException(
+        'The update download URL is not secure (not HTTPS) - refusing to download it.',
+      );
     }
 
     http.StreamedResponse response;
     try {
-      response = await _client.send(http.Request('GET', uri)).timeout(const Duration(minutes: 5));
+      response = await _client
+          .send(http.Request('GET', uri))
+          .timeout(const Duration(minutes: 5));
     } on TimeoutException {
       throw const UpdateOfflineException();
     } on SocketException {
@@ -120,10 +146,15 @@ class UpdateGateway {
       throw const UpdateOfflineException();
     }
     if (response.statusCode >= 400) {
-      throw UpdateException('Could not download the update (server said ${response.statusCode}).');
+      throw UpdateException(
+        'Could not download the update (server said ${response.statusCode}).',
+      );
     }
-    if (response.contentLength != null && response.contentLength! > maxDownloadBytes) {
-      throw const UpdateException('The update download is unexpectedly large - refusing to save it.');
+    if (response.contentLength != null &&
+        response.contentLength! > maxDownloadBytes) {
+      throw const UpdateException(
+        'The update download is unexpectedly large - refusing to save it.',
+      );
     }
 
     await destination.parent.create(recursive: true);
@@ -133,7 +164,9 @@ class UpdateGateway {
       await for (final chunk in response.stream) {
         received += chunk.length;
         if (received > maxDownloadBytes) {
-          throw const UpdateException('The update download is unexpectedly large - refusing to save it.');
+          throw const UpdateException(
+            'The update download is unexpectedly large - refusing to save it.',
+          );
         }
         sink.add(chunk);
         onProgress?.call(received, response.contentLength);
