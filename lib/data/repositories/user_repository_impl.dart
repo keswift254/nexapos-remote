@@ -110,4 +110,10 @@ class UserRepositoryImpl implements UserRepository {
       );
     });
   }
+
+  @override
+  Future<bool> updatePassword(String id, String passwordHash) => _db.transaction(() async {
+    final rev = await _syncMeta.nextLocalRev();
+    return await _dao.updatePassword(id, passwordHash, _clock.now().toIso8601String(), rev) == 1;
+  });
 }

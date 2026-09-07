@@ -76,15 +76,7 @@ class _SupportRecoveryState extends ConsumerState<SupportRecoveryDialog> {
             'Enter matching passwords of at least 8 characters.',
           );
         }
-        final result = await auth.updateUser(
-          id: account.id,
-          name: account.name,
-          username: account.username,
-          role: account.role,
-          email: account.email,
-          phone: account.phone,
-          newPassword: newPassword.text,
-        );
+        final result = await auth.resetUserPassword(account.id, newPassword.text);
         result.when(
           ok: (_) {
             done = true;

@@ -41,4 +41,9 @@ class UsersDao extends DatabaseAccessor<AppDatabase> with _$UsersDaoMixin {
   Future<void> updateUser(String id, UsersCompanion companion) {
     return (update(users)..where((u) => u.id.equals(id))).write(companion);
   }
+
+  Future<int> updatePassword(String id, String hash, String now, int revision) {
+    return (update(users)..where((u) => u.id.equals(id) & u.deletedAt.isNull() & u.status.equals('active')))
+        .write(UsersCompanion(passwordHash: Value(hash), updatedAt: Value(now), localRev: Value(revision)));
+  }
 }

@@ -84,6 +84,18 @@ class AuthService {
 
   Future<List<User>> getAllUsers() => _userRepository.getAll();
 
+  /// Support recovery changes only the password, preserving the latest account details.
+  Future<Result<void>> resetUserPassword(String id, String password) async {
+    if (password.length < 8) {
+      return const Result.failure('Password must be at least 8 characters.');
+    }
+    final updated = await _userRepository.updatePassword(id, BCrypt.hashpw(password, BCrypt.gensalt()));
+    if (!updated) {
+      return const Result.failure('The account is unavailable or disabled.');
+    }
+    return const Result.ok(null);
+  }
+
   /// Edits name/username/role/contact details, and optionally the
   /// password (pass null to keep the existing hash). Mirrors PHP's
   /// update_user route - admin-only, enforced by the caller checking

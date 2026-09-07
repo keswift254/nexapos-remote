@@ -60,6 +60,11 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Cashier One (cashier-one)').last);
     await tester.pumpAndSettle();
+    await tester.runAsync(() async {
+      final account = (await auth.getAllUsers()).single;
+      await auth.updateUser(id: account.id, name: account.name, username: account.username,
+        role: UserRole.manager);
+    });
     await tester.enterText(find.widgetWithText(TextField, 'New password (at least 8 characters)'), 'new-password');
     await tester.enterText(find.widgetWithText(TextField, 'Confirm password'), 'new-password');
     await tester.runAsync(() async {
@@ -73,6 +78,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Done. Sign in as cashier-one using the new password.'), findsOneWidget);
     final result = await tester.runAsync(() => auth.login('cashier-one', 'new-password'));
-    expect(result!.when(ok: (user) => user.role, failure: (_) => null), UserRole.cashier);
+    expect(result!.when(ok: (user) => user.role, failure: (_) => null), UserRole.manager);
   });
 }

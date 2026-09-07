@@ -17,4 +17,5 @@ abstract class UserRepository {
   Future<void> create(User user);
 
   Future<void> update(User user);
+  Future<bool> updatePassword(String id, String passwordHash);
 }
