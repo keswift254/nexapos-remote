@@ -30,6 +30,30 @@ void main() {
     return container;
   }
 
+  test('approved authenticator reset is device-local and cannot replay after reenrollment', () async {
+    var generation = 1;
+    var valid = true;
+    final container = buildContainer(clock: FixedClock(DateTime.utc(2026)),
+      licenseClient: MockClient((request) async => http.Response(jsonEncode({
+        'success': true, 'valid': valid, 'authenticator_generation': generation,
+      }), 200)));
+    final storage = container.read(secureStorageProvider);
+    await storage.write(key: 'nexapos.license.activationToken', value: 'licensed-token');
+    await storage.write(key: 'nexapos.security.admin', value: 'old-secret');
+    await storage.write(key: 'unrelated', value: 'keep');
+    final service = container.read(licenseServiceProvider);
+    await service.checkAuthenticatorReset();
+    expect(await storage.read(key: 'nexapos.security.admin'), isNull);
+    expect(await storage.read(key: 'unrelated'), 'keep');
+    await storage.write(key: 'nexapos.security.admin', value: 'new-secret');
+    await service.checkAuthenticatorReset();
+    expect(await storage.read(key: 'nexapos.security.admin'), 'new-secret');
+    generation = 2;
+    valid = false;
+    await expectLater(service.checkAuthenticatorReset(), throwsStateError);
+    expect(await storage.read(key: 'nexapos.security.admin'), 'new-secret');
+  });
+
   test('a license with no valid_until (never expires) stays licensed no matter how far the clock advances', () async {
     final clock = FixedClock(DateTime.utc(2026, 1, 1));
     final container = buildContainer(

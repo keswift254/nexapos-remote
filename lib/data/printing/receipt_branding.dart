@@ -1,0 +1,53 @@
+import 'dart:convert';
+
+import 'package:barcode/barcode.dart';
+import 'package:crypto/crypto.dart';
+import 'package:image/image.dart' as img;
+
+const installationFooter = 'For installation: 0768415017';
+
+// Fixed-length numeric Code 128 stays readable at 2 dots/module on 58mm paper.
+String receiptBarcodeValue(String receiptNumber) => BigInt.parse(
+  sha256.convert(utf8.encode(receiptNumber)).toString().substring(0, 19),
+  radix: 16,
+).toString().padLeft(24, '0');
+
+img.Image receiptLogo() {
+  final image = img.Image(width: 320, height: 64);
+  img.fill(image, color: img.ColorRgb8(255, 255, 255));
+  img.drawString(
+    image,
+    'NEXAPOS',
+    font: img.arial48,
+    color: img.ColorRgb8(0, 0, 0),
+  );
+  return image;
+}
+
+img.Image receiptBarcode(String receiptNumber) {
+  final value = receiptBarcodeValue(receiptNumber);
+  final image = img.Image(width: 384, height: 112);
+  img.fill(image, color: img.ColorRgb8(255, 255, 255));
+  for (final bar
+      in Barcode.code128()
+          .make(value, width: 334, height: 76)
+          .whereType<BarcodeBar>()) {
+    if (!bar.black) continue;
+    img.fillRect(
+      image,
+      x1: 25 + bar.left.round(),
+      y1: 4,
+      x2: 25 + (bar.left + bar.width).round() - 1,
+      y2: 79,
+      color: img.ColorRgb8(0, 0, 0),
+    );
+  }
+  img.drawString(
+    image,
+    value,
+    y: 88,
+    font: img.arial14,
+    color: img.ColorRgb8(0, 0, 0),
+  );
+  return image;
+}

@@ -1,4 +1,5 @@
 import 'package:http/http.dart' as http;
+
 import '../payments/platform_http_client.dart';
 
 /// nexapos_license runs as a single central server this vendor operates
@@ -34,7 +35,12 @@ class ActivationResult {
 class VerificationResult {
   final bool valid;
   final DateTime? validUntil;
-  const VerificationResult({required this.valid, this.validUntil});
+  final int authenticatorGeneration;
+  const VerificationResult({
+    required this.valid,
+    this.validUntil,
+    this.authenticatorGeneration = 0,
+  });
 }
 
 /// license_keys.valid_until is a MySQL TIMESTAMP string ("2026-09-22
@@ -60,7 +66,11 @@ class LicenseGateway {
 
   LicenseGateway([http.Client? client]) : _client = client ?? http.Client();
 
-  Future<ActivationResult> activate({required String baseUrl, required String code, required String deviceId}) async {
+  Future<ActivationResult> activate({
+    required String baseUrl,
+    required String code,
+    required String deviceId,
+  }) async {
     final response = await _call(
       'POST',
       'activate',
@@ -68,21 +78,65 @@ class LicenseGateway {
       body: {'code': code, 'device_id': deviceId},
     );
     if (response['success'] != true) {
-      throw LicenseException(platformResponseMessage(response, 'Could not activate this license key.'));
+      throw LicenseException(
+        platformResponseMessage(
+          response,
+          'Could not activate this license key.',
+        ),
+      );
     }
     final token = (response['activation_token'] as String? ?? '').trim();
     if (token.isEmpty) {
-      throw const LicenseException('The license server did not return an activation token.');
+      throw const LicenseException(
+        'The license server did not return an activation token.',
+      );
     }
-    return ActivationResult(token: token, validUntil: _parseUtc(response['valid_until']));
+    return ActivationResult(
+      token: token,
+      validUntil: _parseUtc(response['valid_until']),
+    );
   }
 
-  Future<VerificationResult> verify({required String baseUrl, required String activationToken}) async {
-    final response = await _call('POST', 'verify', baseUrl, bearerToken: activationToken);
+  Future<VerificationResult> verify({
+    required String baseUrl,
+    required String activationToken,
+  }) async {
+    final response = await _call(
+      'POST',
+      'verify',
+      baseUrl,
+      bearerToken: activationToken,
+    );
     if (response['success'] != true) {
-      throw LicenseException(platformResponseMessage(response, 'Could not verify this license.'));
+      throw LicenseException(
+        platformResponseMessage(response, 'Could not verify this license.'),
+      );
     }
-    return VerificationResult(valid: response['valid'] == true, validUntil: _parseUtc(response['valid_until']));
+    return VerificationResult(
+      valid: response['valid'] == true,
+      validUntil: _parseUtc(response['valid_until']),
+      authenticatorGeneration: response['authenticator_generation'] is int
+          ? response['authenticator_generation'] as int
+          : 0,
+    );
+  }
+
+  Future<void> redeemSupport({
+    required String baseUrl,
+    required String activationToken,
+    required String deviceId,
+    required String password,
+  }) async {
+    final response = await _call(
+      'POST',
+      'redeem_support_access',
+      baseUrl,
+      bearerToken: activationToken,
+      body: {'device_id': deviceId, 'password': password},
+    );
+    if (response['success'] != true) {
+      throw const LicenseException('Support access was not authorized.');
+    }
   }
 
   Future<Map<String, dynamic>> _call(
@@ -93,7 +147,14 @@ class LicenseGateway {
     Map<String, dynamic>? body,
   }) async {
     try {
-      return await platformRequest(_client, method, action, baseUrl, apiKey: bearerToken, body: body);
+      return await platformRequest(
+        _client,
+        method,
+        action,
+        baseUrl,
+        apiKey: bearerToken,
+        body: body,
+      );
     } on PaystackOfflineException {
       throw const LicenseOfflineException();
     } on PaystackException catch (e) {

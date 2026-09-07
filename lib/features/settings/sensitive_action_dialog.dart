@@ -6,6 +6,8 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../domain/services/sensitive_action_service.dart';
 import '../../domain/services/session_service.dart';
+import '../../domain/services/license_service.dart';
+import '../../core/providers.dart';
 
 Future<ActionApproval?> requestSensitiveApproval(
   BuildContext context, {
@@ -30,6 +32,44 @@ class _ApprovalDialogState extends ConsumerState<_ApprovalDialog> {
   String? error;
   bool verifiedPassword = false;
   bool busy = false;
+  String? deviceId;
+
+  @override
+  void initState() {
+    super.initState();
+    ref.read(syncMetadataProvider).deviceId().then((id) {
+      if (mounted) setState(() => deviceId = id);
+    });
+  }
+
+  Future<void> checkReset() async {
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    try {
+      await ref.read(licenseServiceProvider).checkAuthenticatorReset();
+      final service = ref.read(sensitiveActionProvider);
+      final id = await service.verifyPassword(
+        ref.read(sessionProvider)!.username,
+        password.text,
+      );
+      final enrolled = await service.isEnrolled(id);
+      if (mounted) {
+        setState(() {
+          secret = enrolled ? null : service.newSecret();
+          code.clear();
+          error = enrolled
+              ? 'No new approved reset. Contact support with your device ID.'
+              : null;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => error = '$e');
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
 
   @override
   void dispose() {
@@ -146,6 +186,30 @@ class _ApprovalDialogState extends ConsumerState<_ApprovalDialog> {
                 icon: const Icon(Icons.help_outline),
                 label: const Text('Lost access to your authenticator?'),
               ),
+            if (verifiedPassword) ...[
+              Row(
+                children: [
+                  Expanded(
+                    child: SelectableText(
+                      'Device ID: ${deviceId ?? "Loading..."}',
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Copy device ID',
+                    icon: const Icon(Icons.copy),
+                    onPressed: deviceId == null
+                        ? null
+                        : () =>
+                              Clipboard.setData(ClipboardData(text: deviceId!)),
+                  ),
+                ],
+              ),
+              TextButton.icon(
+                onPressed: busy ? null : checkReset,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Check for approved reset'),
+              ),
+            ],
             if (error != null)
               Padding(
                 padding: const EdgeInsets.only(top: 12),

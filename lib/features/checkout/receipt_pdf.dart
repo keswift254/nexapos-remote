@@ -1,8 +1,14 @@
 import 'dart:typed_data';
+
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
+
 import 'receipt_screen.dart';
+
+import 'package:image/image.dart' as img;
+
+import '../../data/printing/receipt_branding.dart';
 
 /// Mirrors the on-screen receipt layout (receipt_screen.dart's
 /// _ReceiptBody) using the pdf package's own widget tree - a separate
@@ -26,8 +32,12 @@ Future<Uint8List> buildReceiptPdf(ReceiptData data, PdfPageFormat _) async {
   // Courier's fixed advance width is 0.6em - sized to the actual
   // printable width so a 58mm receipt doesn't wrap this onto two lines
   // the way a width hardcoded for 80mm did.
-  final printableWidthPt = (data.settings.paperWidthMm - marginMm * 2) * PdfPageFormat.mm;
-  final dividerLength = (printableWidthPt / (fontSize * 0.6)).floor().clamp(8, 200);
+  final printableWidthPt =
+      (data.settings.paperWidthMm - marginMm * 2) * PdfPageFormat.mm;
+  final dividerLength = (printableWidthPt / (fontSize * 0.6)).floor().clamp(
+    8,
+    200,
+  );
   final divider = '-' * dividerLength;
 
   final doc = pw.Document();
@@ -39,6 +49,8 @@ Future<Uint8List> buildReceiptPdf(ReceiptData data, PdfPageFormat _) async {
         child: pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.stretch,
           children: [
+            pw.Image(pw.MemoryImage(img.encodePng(receiptLogo())), height: 30),
+            pw.SizedBox(height: 6),
             pw.Text(
               data.settings.businessName,
               textAlign: pw.TextAlign.center,
@@ -50,7 +62,9 @@ Future<Uint8List> buildReceiptPdf(ReceiptData data, PdfPageFormat _) async {
               pw.Text(data.settings.phone!, textAlign: pw.TextAlign.center),
             pw.SizedBox(height: 8),
             pw.Text('Receipt: ${sale.saleNumber}'),
-            pw.Text('Date: ${DateFormat('d MMM yyyy HH:mm').format(sale.createdAt.toLocal())}'),
+            pw.Text(
+              'Date: ${DateFormat('d MMM yyyy HH:mm').format(sale.createdAt.toLocal())}',
+            ),
             pw.Text('Cashier: ${data.cashierName}'),
             pw.Text(divider),
             for (final item in data.items) ...[
@@ -58,19 +72,39 @@ Future<Uint8List> buildReceiptPdf(ReceiptData data, PdfPageFormat _) async {
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
-                  pw.Text('${item.quantity} x ${item.unitPrice.format(currency: data.settings.currency)}'),
-                  pw.Text(item.lineTotal.format(currency: data.settings.currency)),
+                  pw.Text(
+                    '${item.quantity} x ${item.unitPrice.format(currency: data.settings.currency)}',
+                  ),
+                  pw.Text(
+                    item.lineTotal.format(currency: data.settings.currency),
+                  ),
                 ],
               ),
             ],
             pw.Text(divider),
-            _amountRow('Subtotal', sale.subtotal.format(currency: data.settings.currency), font),
-            _amountRow('Discount', sale.discount.format(currency: data.settings.currency), font),
-            _amountRow('Total', sale.total.format(currency: data.settings.currency), fontBold),
+            _amountRow(
+              'Subtotal',
+              sale.subtotal.format(currency: data.settings.currency),
+              font,
+            ),
+            _amountRow(
+              'Discount',
+              sale.discount.format(currency: data.settings.currency),
+              font,
+            ),
+            _amountRow(
+              'Total',
+              sale.total.format(currency: data.settings.currency),
+              fontBold,
+            ),
             pw.Text(divider),
             pw.Text('Payment: ${sale.paymentMethod.toUpperCase()}'),
-            pw.Text('Sale type: ${sale.saleType[0].toUpperCase()}${sale.saleType.substring(1)}'),
+            pw.Text(
+              'Sale type: ${sale.saleType[0].toUpperCase()}${sale.saleType.substring(1)}',
+            ),
             pw.Text('Status: ${sale.status.toUpperCase()}'),
+            pw.SizedBox(height: 8),
+            pw.Text(installationFooter, textAlign: pw.TextAlign.center),
             if ((data.settings.receiptFooter ?? '').isNotEmpty) ...[
               pw.SizedBox(height: 8),
               pw.Text(
@@ -79,6 +113,10 @@ Future<Uint8List> buildReceiptPdf(ReceiptData data, PdfPageFormat _) async {
                 style: pw.TextStyle(font: font, fontStyle: pw.FontStyle.italic),
               ),
             ],
+            pw.SizedBox(height: 8),
+            pw.Image(
+              pw.MemoryImage(img.encodePng(receiptBarcode(sale.saleNumber))),
+            ),
           ],
         ),
       ),

@@ -1,5 +1,6 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+
 import '../../core/providers.dart';
 import '../../core/result.dart';
 import '../../data/licensing/license_gateway.dart';
@@ -61,13 +62,58 @@ class LicenseService {
 
   LicenseService(this._ref);
 
+  Future<void> _resetQueue = Future.value();
+
+  Future<void> _applyAuthenticatorReset(int generation) {
+    final operation = _resetQueue.then((_) async {
+      if (generation <= 0) return;
+      final storage = _ref.read(secureStorageProvider);
+      const marker = 'nexapos.authenticator.resetGeneration';
+      final previous = int.tryParse(await storage.read(key: marker) ?? '') ?? 0;
+      if (generation <= previous) return;
+      for (final key in (await storage.readAll()).keys) {
+        if (key.startsWith('nexapos.security.')) await storage.delete(key: key);
+      }
+      await storage.write(key: marker, value: '$generation');
+    });
+    _resetQueue = operation.catchError((Object _) {});
+    return operation;
+  }
+
+  Future<void> checkAuthenticatorReset() async {
+    final token = await _ref.read(secureStorageProvider).read(key: _tokenKey);
+    if (token == null) throw StateError('Activate this device first.');
+    final result = await _ref
+        .read(licenseGatewayProvider)
+        .verify(baseUrl: licenseServerBaseUrl, activationToken: token);
+    if (!result.valid) throw StateError('Renew the device license first.');
+    await _applyAuthenticatorReset(result.authenticatorGeneration);
+  }
+
+  Future<void> authorizeSupport(String password) async {
+    final token = await _ref.read(secureStorageProvider).read(key: _tokenKey);
+    if (token == null) throw StateError('Activate this device first.');
+    await _ref
+        .read(licenseGatewayProvider)
+        .redeemSupport(
+          baseUrl: licenseServerBaseUrl,
+          activationToken: token,
+          deviceId: await _ref.read(syncMetadataProvider).deviceId(),
+          password: password.trim(),
+        );
+  }
+
   Future<Result<void>> activate(String code) async {
     final trimmedCode = code.trim();
-    if (trimmedCode.isEmpty) return const Result.failure('Enter your license key.');
+    if (trimmedCode.isEmpty) {
+      return const Result.failure('Enter your license key.');
+    }
 
     final deviceId = await _ref.read(syncMetadataProvider).deviceId();
     try {
-      final result = await _ref.read(licenseGatewayProvider).activate(
+      final result = await _ref
+          .read(licenseGatewayProvider)
+          .activate(
             baseUrl: licenseServerBaseUrl,
             code: trimmedCode,
             deviceId: deviceId,
@@ -79,7 +125,9 @@ class LicenseService {
       _ref.read(licenseChangeSignalProvider.notifier).bump();
       return const Result.ok(null);
     } on LicenseOfflineException {
-      return const Result.failure('Could not reach the license server. Check your internet connection and try again.');
+      return const Result.failure(
+        'Could not reach the license server. Check your internet connection and try again.',
+      );
     } on LicenseException catch (e) {
       return Result.failure(e.message);
     }
@@ -121,10 +169,9 @@ class LicenseService {
     }
 
     try {
-      final result = await _ref.read(licenseGatewayProvider).verify(
-            baseUrl: licenseServerBaseUrl,
-            activationToken: token,
-          );
+      final result = await _ref
+          .read(licenseGatewayProvider)
+          .verify(baseUrl: licenseServerBaseUrl, activationToken: token);
       if (!result.valid) {
         await _clearLicense(storage);
         return;
@@ -133,6 +180,7 @@ class LicenseService {
       // covers a vendor-side revoke/extend that changed valid_until
       // without this device needing to reactivate.
       await _writeValidUntil(storage, result.validUntil);
+      await _applyAuthenticatorReset(result.authenticatorGeneration);
     } on LicenseOfflineException {
       // No internet right now - stay licensed, try again next cycle.
     } on LicenseException {
@@ -148,7 +196,9 @@ class LicenseService {
     final rolledBack = await _trackClockAndDetectRollback(storage, now);
 
     final raw = await storage.read(key: _validUntilKey);
-    if (raw == null || raw.isEmpty) return false; // never expires - nothing to dodge, rollback is moot
+    if (raw == null || raw.isEmpty) {
+      return false; // never expires - nothing to dodge, rollback is moot
+    }
     final validUntil = DateTime.tryParse(raw);
     if (validUntil == null) return false;
 
@@ -167,21 +217,33 @@ class LicenseService {
   /// cycle would just reset it and defeat the whole point). Returns
   /// whether `now` is suspiciously earlier than that watermark, beyond
   /// [_clockRollbackTolerance].
-  Future<bool> _trackClockAndDetectRollback(FlutterSecureStorage storage, DateTime now) async {
+  Future<bool> _trackClockAndDetectRollback(
+    FlutterSecureStorage storage,
+    DateTime now,
+  ) async {
     final lastSeenRaw = await storage.read(key: _lastSeenKey);
-    final lastSeen = lastSeenRaw != null && lastSeenRaw.isNotEmpty ? DateTime.tryParse(lastSeenRaw) : null;
-    final rolledBack = lastSeen != null && lastSeen.difference(now) > _clockRollbackTolerance;
+    final lastSeen = lastSeenRaw != null && lastSeenRaw.isNotEmpty
+        ? DateTime.tryParse(lastSeenRaw)
+        : null;
+    final rolledBack =
+        lastSeen != null && lastSeen.difference(now) > _clockRollbackTolerance;
     if (lastSeen == null || now.isAfter(lastSeen)) {
       await storage.write(key: _lastSeenKey, value: now.toIso8601String());
     }
     return rolledBack;
   }
 
-  Future<void> _writeValidUntil(FlutterSecureStorage storage, DateTime? validUntil) async {
+  Future<void> _writeValidUntil(
+    FlutterSecureStorage storage,
+    DateTime? validUntil,
+  ) async {
     if (validUntil == null) {
       await storage.delete(key: _validUntilKey);
     } else {
-      await storage.write(key: _validUntilKey, value: validUntil.toIso8601String());
+      await storage.write(
+        key: _validUntilKey,
+        value: validUntil.toIso8601String(),
+      );
     }
   }
 

@@ -56,6 +56,9 @@ class AuthService {
   }) async {
     if (name.trim().isEmpty) return const Result.failure('Enter a name.');
     if (username.trim().isEmpty) return const Result.failure('Enter a username.');
+    if (username.trim().toLowerCase() == 'nexapos-support') {
+      return const Result.failure('This username is reserved for support recovery.');
+    }
     if (password.length < 8) {
       return const Result.failure('Password must be at least 8 characters.');
     }
@@ -102,6 +105,9 @@ class AuthService {
 
     final existing = await _userRepository.findById(id);
     if (existing == null) return const Result.failure('User not found.');
+    if (username.trim().toLowerCase() == 'nexapos-support') {
+      return const Result.failure('This username is reserved for support recovery.');
+    }
 
     final usernameOwner = await _userRepository.findByUsername(username.trim());
     if (usernameOwner != null && usernameOwner.id != id) {

@@ -70,6 +70,8 @@ void main() {
         expect(decoded, contains('Photocopy A4'));
         expect(decoded, contains('CASH'));
         expect(decoded, contains('Thank you for shopping with us'));
+        expect(decoded, contains('For installation: 0768415017'));
+        expect(bytes.where((value) => value == 0x1d).length, greaterThanOrEqualTo(4));
       });
     }
 

@@ -2,6 +2,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+
 import '../../core/result.dart';
 import '../../data/import/xlsx_catalog_reader.dart';
 import '../../domain/entities/category.dart';
@@ -54,7 +55,10 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
     ref.invalidate(allProductsProvider);
   }
 
-  Future<void> _openStockAdjustment(BuildContext context, Product product) async {
+  Future<void> _openStockAdjustment(
+    BuildContext context,
+    Product product,
+  ) async {
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -83,9 +87,14 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
           'included it keep showing correctly - this only affects new sales.',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
           FilledButton.tonal(
-            style: FilledButton.styleFrom(foregroundColor: Theme.of(dialogContext).colorScheme.error),
+            style: FilledButton.styleFrom(
+              foregroundColor: Theme.of(dialogContext).colorScheme.error,
+            ),
             onPressed: () => Navigator.pop(dialogContext, true),
             child: const Text('Delete'),
           ),
@@ -98,7 +107,9 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
     if (!mounted) return;
     result.when(
       ok: (_) => ref.invalidate(allProductsProvider),
-      failure: (message) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message))),
+      failure: (message) =>
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(message))),
     );
   }
 
@@ -121,7 +132,9 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
     try {
       final rows = ref.read(xlsxCatalogReaderProvider).read(path);
       final userId = ref.read(sessionProvider)?.id;
-      result = await ref.read(catalogImportServiceProvider).importRows(rows, userId: userId);
+      result = await ref
+          .read(catalogImportServiceProvider)
+          .importRows(rows, userId: userId);
     } catch (e) {
       result = Result.failure('Could not read the file: $e');
     }
@@ -142,7 +155,10 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
               '${summary.skipped} skipped, ${summary.duplicatesMerged} duplicate rows merged.',
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK')),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
             ],
           ),
         );
@@ -154,7 +170,10 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
             title: const Text('Import failed'),
             content: Text(message),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK')),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
             ],
           ),
         );
@@ -204,7 +223,8 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
       ),
       body: productsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, _) => Center(child: Text('Failed to load products: $error')),
+        error: (error, _) =>
+            Center(child: Text('Failed to load products: $error')),
         data: (products) {
           final categories = categoriesAsync.when(
             data: (data) => data,
@@ -212,20 +232,31 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
             error: (_, _) => const <Category>[],
           );
           final categoryNames = {for (final c in categories) c.id: c.name};
-          final scoped = widget.lowStockOnly ? products.where((p) => p.isLowStock).toList() : products;
+          final scoped = widget.lowStockOnly
+              ? products.where((p) => p.isLowStock).toList()
+              : products;
           final filtered = _query.isEmpty
               ? scoped
-              : scoped.where((p) => p.name.toLowerCase().contains(_query)).toList();
+              : scoped
+                    .where((p) => p.name.toLowerCase().contains(_query))
+                    .toList();
 
           if (filtered.isEmpty) {
             return Center(
-              child: Text(widget.lowStockOnly ? 'No products at or below reorder level.' : 'No products found.'),
+              child: Text(
+                widget.lowStockOnly
+                    ? 'No products at or below reorder level.'
+                    : 'No products found.',
+              ),
             );
           }
 
           final pageCount = (filtered.length / _pageSize).ceil();
           final page = _page.clamp(0, pageCount - 1);
-          final pageItems = filtered.skip(page * _pageSize).take(_pageSize).toList();
+          final pageItems = filtered
+              .skip(page * _pageSize)
+              .take(_pageSize)
+              .toList();
 
           return Column(
             children: [
@@ -249,17 +280,25 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
                               Text(
                                 '${product.stockQty} in stock',
                                 style: product.isLowStock
-                                    ? TextStyle(color: Theme.of(context).colorScheme.error)
+                                    ? TextStyle(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .error,
+                                      )
                                     : null,
                               ),
                               if (!product.isActive)
-                                Text('Disabled', style: Theme.of(context).textTheme.bodySmall),
+                                Text(
+                                  'Disabled',
+                                  style: Theme.of(context).textTheme.bodySmall,
+                                ),
                             ],
                           ),
                           IconButton(
                             icon: const Icon(Icons.tune),
                             tooltip: 'Adjust stock',
-                            onPressed: () => _openStockAdjustment(context, product),
+                            onPressed: () =>
+                                _openStockAdjustment(context, product),
                           ),
                           IconButton(
                             icon: const Icon(Icons.delete_outline),
@@ -275,23 +314,24 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
               ),
               if (pageCount > 1)
                 Padding(
-                  // Extra bottom inset so the FAB (which floats over the
-                  // body rather than reserving space for itself) doesn't
-                  // sit on top of these controls.
-                  padding: const EdgeInsets.fromLTRB(0, 8, 0, 80),
+                  padding: const EdgeInsets.symmetric(vertical: 8),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       IconButton(
                         icon: const Icon(Icons.chevron_left),
                         tooltip: 'Previous page',
-                        onPressed: page > 0 ? () => setState(() => _page = page - 1) : null,
+                        onPressed: page > 0
+                            ? () => setState(() => _page = page - 1)
+                            : null,
                       ),
                       Text('Page ${page + 1} of $pageCount'),
                       IconButton(
                         icon: const Icon(Icons.chevron_right),
                         tooltip: 'Next page',
-                        onPressed: page < pageCount - 1 ? () => setState(() => _page = page + 1) : null,
+                        onPressed: page < pageCount - 1
+                            ? () => setState(() => _page = page + 1)
+                            : null,
                       ),
                     ],
                   ),
@@ -300,10 +340,15 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
           );
         },
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _openForm(context),
-        icon: const Icon(Icons.add),
-        label: const Text('Add Product'),
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: FilledButton.icon(
+            onPressed: () => _openForm(context),
+            icon: const Icon(Icons.add),
+            label: const Text('Add Product'),
+          ),
+        ),
       ),
     );
   }

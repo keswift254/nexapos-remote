@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
 import 'package:intl/intl.dart';
 import '../../features/checkout/receipt_screen.dart' show ReceiptData;
+import 'receipt_branding.dart';
 
 /// Mirrors receipt_pdf.dart's content/layout exactly (same fields, same
 /// order) so a shop's printed paper receipt and its PDF/screen receipt
@@ -14,6 +15,9 @@ Future<Uint8List> buildThermalReceipt(ReceiptData data) async {
   final sale = data.sale;
   final currency = data.settings.currency;
   final bytes = <int>[];
+
+  bytes.addAll(generator.imageRaster(receiptLogo()));
+  bytes.addAll(generator.feed(1));
 
   bytes.addAll(generator.text(
     data.settings.businessName,
@@ -48,12 +52,16 @@ Future<Uint8List> buildThermalReceipt(ReceiptData data) async {
   bytes.addAll(generator.text('Payment: ${sale.paymentMethod.toUpperCase()}'));
   bytes.addAll(generator.text('Sale type: ${sale.saleType[0].toUpperCase()}${sale.saleType.substring(1)}'));
   bytes.addAll(generator.text('Status: ${sale.status.toUpperCase()}'));
+  bytes.addAll(generator.feed(1));
+  bytes.addAll(generator.text(installationFooter, styles: const PosStyles(align: PosAlign.center)));
 
   if ((data.settings.receiptFooter ?? '').isNotEmpty) {
     bytes.addAll(generator.feed(1));
     bytes.addAll(generator.text(data.settings.receiptFooter!, styles: const PosStyles(align: PosAlign.center)));
   }
 
+  bytes.addAll(generator.feed(1));
+  bytes.addAll(generator.imageRaster(receiptBarcode(sale.saleNumber)));
   bytes.addAll(generator.feed(2));
   bytes.addAll(generator.cut());
   return Uint8List.fromList(bytes);

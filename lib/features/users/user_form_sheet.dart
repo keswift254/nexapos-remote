@@ -135,7 +135,7 @@ class _UserFormSheetState extends ConsumerState<UserFormSheet> {
                 obscureText: true,
                 validator: (v) {
                   if (_isEdit) return null;
-                  return (v == null || v.length < 6) ? 'At least 6 characters' : null;
+                  return (v == null || v.length < 8) ? 'At least 8 characters' : null;
                 },
               ),
               if (_error != null) ...[
