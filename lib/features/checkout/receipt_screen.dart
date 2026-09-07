@@ -50,8 +50,9 @@ Future<ReceiptData> receiptData(Ref ref, String saleId) async {
 
 class ReceiptScreen extends ConsumerStatefulWidget {
   final String saleId;
+  final String returnPath;
 
-  const ReceiptScreen({super.key, required this.saleId});
+  const ReceiptScreen({super.key, required this.saleId, this.returnPath = '/'});
 
   @override
   ConsumerState<ReceiptScreen> createState() => _ReceiptScreenState();
@@ -91,7 +92,7 @@ class _ReceiptScreenState extends ConsumerState<ReceiptScreen> {
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
-        context.go('/');
+        context.go(widget.returnPath);
       },
       child: Scaffold(
         appBar: AppBar(title: const Text('Receipt')),
@@ -178,19 +179,27 @@ class _ReceiptBody extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Image.memory(
-            img.encodePng(receiptLogo()),
-            height: 48,
-            semanticLabel: 'NEXAPOS',
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Image.memory(
+              img.encodePng(receiptLogo()),
+              key: const Key('receipt-brand-logo'),
+              width: 100,
+              height: 20,
+              fit: BoxFit.contain,
+              alignment: Alignment.centerLeft,
+              semanticLabel: 'NEXAPOS',
+            ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           Text(
-            data.settings.businessName,
+            data.settings.businessName.toUpperCase(),
+            key: const Key('receipt-business-name'),
             textAlign: TextAlign.center,
             style: const TextStyle(
               fontFamily: 'monospace',
               fontWeight: FontWeight.bold,
-              fontSize: 18,
+              fontSize: 24,
             ),
           ),
           if ((data.settings.address ?? '').isNotEmpty)

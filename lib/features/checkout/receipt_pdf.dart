@@ -49,12 +49,18 @@ Future<Uint8List> buildReceiptPdf(ReceiptData data, PdfPageFormat _) async {
         child: pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.stretch,
           children: [
-            pw.Image(pw.MemoryImage(img.encodePng(receiptLogo())), height: 30),
-            pw.SizedBox(height: 6),
+            pw.Align(
+              alignment: pw.Alignment.centerLeft,
+              child: pw.Image(
+                pw.MemoryImage(img.encodePng(receiptLogo())),
+                width: 50,
+              ),
+            ),
+            pw.SizedBox(height: 8),
             pw.Text(
-              data.settings.businessName,
+              data.settings.businessName.toUpperCase(),
               textAlign: pw.TextAlign.center,
-              style: pw.TextStyle(font: fontBold, fontSize: 12),
+              style: pw.TextStyle(font: fontBold, fontSize: 16),
             ),
             if ((data.settings.address ?? '').isNotEmpty)
               pw.Text(data.settings.address!, textAlign: pw.TextAlign.center),

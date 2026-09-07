@@ -1,4 +1,5 @@
 import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexapos_mobile/core/utils/money.dart';
 import 'package:nexapos_mobile/data/printing/thermal_receipt_builder.dart';
@@ -54,25 +55,38 @@ void main() {
         lineTotal: Money(50000),
       ),
     ];
-    return ReceiptData(sale: sale, items: items, settings: settings, cashierName: 'Felix');
+    return ReceiptData(
+      sale: sale,
+      items: items,
+      settings: settings,
+      cashierName: 'Felix',
+    );
   }
 
   group('buildThermalReceipt', () {
     for (final width in [58, 80]) {
-      test('produces a ticket containing the sale\'s real content at ${width}mm', () async {
-        final bytes = await buildThermalReceipt(buildData(paperWidthMm: width));
-        final decoded = latin1.decode(bytes, allowInvalid: true);
+      test(
+        'produces a ticket containing the sale\'s real content at ${width}mm',
+        () async {
+          final bytes = await buildThermalReceipt(
+            buildData(paperWidthMm: width),
+          );
+          final decoded = latin1.decode(bytes, allowInvalid: true);
 
-        expect(decoded, contains('Nax General Store'));
-        expect(decoded, contains('123 Market Street'));
-        expect(decoded, contains('RCPT-0001'));
-        expect(decoded, contains('Felix'));
-        expect(decoded, contains('Photocopy A4'));
-        expect(decoded, contains('CASH'));
-        expect(decoded, contains('Thank you for shopping with us'));
-        expect(decoded, contains('For installation: 0768415017'));
-        expect(bytes.where((value) => value == 0x1d).length, greaterThanOrEqualTo(4));
-      });
+          expect(decoded, contains('NAX GENERAL STORE'));
+          expect(decoded, contains('123 Market Street'));
+          expect(decoded, contains('RCPT-0001'));
+          expect(decoded, contains('Felix'));
+          expect(decoded, contains('Photocopy A4'));
+          expect(decoded, contains('CASH'));
+          expect(decoded, contains('Thank you for shopping with us'));
+          expect(decoded, contains('For installation: 0768415017'));
+          expect(
+            bytes.where((value) => value == 0x1d).length,
+            greaterThanOrEqualTo(4),
+          );
+        },
+      );
     }
 
     test('omits optional fields entirely when they are blank, rather than printing empty lines', () async {
@@ -80,7 +94,11 @@ void main() {
       final noExtras = ReceiptData(
         sale: data.sale,
         items: data.items,
-        settings: data.settings.copyWith(address: '', phone: '', receiptFooter: ''),
+        settings: data.settings.copyWith(
+          address: '',
+          phone: '',
+          receiptFooter: '',
+        ),
         cashierName: data.cashierName,
       );
       final bytes = await buildThermalReceipt(noExtras);
@@ -93,13 +111,16 @@ void main() {
 
   group('buildTestTicket', () {
     for (final width in [58, 80]) {
-      test('produces a readable test page at ${width}mm without needing a real sale', () async {
-        final bytes = await buildTestTicket(width);
-        final decoded = latin1.decode(bytes, allowInvalid: true);
+      test(
+        'produces a readable test page at ${width}mm without needing a real sale',
+        () async {
+          final bytes = await buildTestTicket(width);
+          final decoded = latin1.decode(bytes, allowInvalid: true);
 
-        expect(decoded, contains('NexaPOS'));
-        expect(decoded, contains('Test print'));
-      });
+          expect(decoded, contains('NexaPOS'));
+          expect(decoded, contains('Test print'));
+        },
+      );
     }
   });
 }

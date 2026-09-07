@@ -13,12 +13,15 @@ String receiptBarcodeValue(String receiptNumber) => BigInt.parse(
 ).toString().padLeft(24, '0');
 
 img.Image receiptLogo() {
-  final image = img.Image(width: 320, height: 64);
+  // ESC/POS raster rows must be byte-aligned (a multiple of eight pixels).
+  final image = img.Image(width: 184, height: 36);
   img.fill(image, color: img.ColorRgb8(255, 255, 255));
   img.drawString(
     image,
     'NEXAPOS',
-    font: img.arial48,
+    x: 12,
+    y: 5,
+    font: img.arial24,
     color: img.ColorRgb8(0, 0, 0),
   );
   return image;

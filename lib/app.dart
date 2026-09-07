@@ -162,8 +162,12 @@ GoRouter router(Ref ref) {
       ),
       GoRoute(
         path: '/receipt/:saleId',
-        builder: (context, state) =>
-            ReceiptScreen(saleId: state.pathParameters['saleId']!),
+        builder: (context, state) => ReceiptScreen(
+          saleId: state.pathParameters['saleId']!,
+          returnPath: state.uri.queryParameters['from'] == 'reports'
+              ? '/reports'
+              : '/',
+        ),
       ),
       GoRoute(
         path: '/payment-settings',

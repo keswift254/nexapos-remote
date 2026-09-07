@@ -9,7 +9,8 @@ import 'package:nexapos_mobile/core/providers.dart';
 import 'package:nexapos_mobile/data/local/database.dart';
 import 'package:nexapos_mobile/domain/entities/paystack_credentials.dart';
 import 'package:nexapos_mobile/domain/services/license_service.dart';
-import 'package:nexapos_mobile/features/settings/payment_settings_screen.dart' show currentPaymentCredentialsProvider;
+import 'package:nexapos_mobile/features/settings/payment_settings_screen.dart'
+    show currentPaymentCredentialsProvider;
 
 void main() {
   testWidgets(
@@ -26,7 +27,11 @@ void main() {
             hasCachedLicenseProvider.overrideWith((ref) async => true),
             currentPaymentCredentialsProvider.overrideWith(
               (ref) async => const PaystackCredentials(
-                  baseUrl: 'https://test.example/index.php', apiKey: 'test-api-key', currency: 'KES', defaultEmail: ''),
+                baseUrl: 'https://test.example/index.php',
+                apiKey: 'test-api-key',
+                currency: 'KES',
+                defaultEmail: '',
+              ),
             ),
           ],
           child: const NexaPosApp(),
@@ -34,11 +39,25 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.enterText(find.widgetWithText(TextFormField, 'Your name'), 'Owner');
-      await tester.enterText(find.widgetWithText(TextFormField, 'Username'), 'owner');
-      await tester.enterText(find.widgetWithText(TextFormField, 'Password'), 'ownerpass');
-      await tester.enterText(find.widgetWithText(TextFormField, 'Confirm password'), 'ownerpass');
-      await tester.tap(find.widgetWithText(FilledButton, 'Create admin account'));
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Your name'),
+        'Owner',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Username'),
+        'owner',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Password'),
+        'ownerpass',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Confirm password'),
+        'ownerpass',
+      );
+      await tester.tap(
+        find.widgetWithText(FilledButton, 'Create admin account'),
+      );
       await tester.pumpAndSettle();
 
       final router = GoRouter.of(tester.element(find.byType(Scaffold).first));
@@ -65,6 +84,19 @@ void main() {
       // Must land on the dashboard - never on the '/products' debris,
       // and never stuck back on the receipt itself.
       expect(find.text('Inventory'), findsNothing);
+      expect(find.text('Receipt'), findsNothing);
+
+      router.go('/reports');
+      await tester.pumpAndSettle();
+      expect(find.text('Reports'), findsOneWidget);
+
+      router.push('/receipt/does-not-exist?from=reports');
+      await tester.pumpAndSettle();
+      expect(find.text('Receipt'), findsOneWidget);
+
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(find.text('Reports'), findsOneWidget);
       expect(find.text('Receipt'), findsNothing);
     },
   );
