@@ -7,6 +7,21 @@
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
+  // A browser return activates the waiting app, without opening its database twice.
+  const auto arguments = GetCommandLineArguments();
+  if (arguments.size() == 1 &&
+      (arguments[0] == "nexapos://checkout-return" ||
+       arguments[0] == "nexapos://checkout-return/")) {
+    HWND existing = ::FindWindow(L"FLUTTER_RUNNER_WIN32_WINDOW", L"NexaPOS");
+    if (existing) {
+      DWORD process_id = 0;
+      ::GetWindowThreadProcessId(existing, &process_id);
+      ::AllowSetForegroundWindow(process_id);
+      if (::IsIconic(existing)) ::ShowWindow(existing, SW_RESTORE);
+      ::SetForegroundWindow(existing);
+      return EXIT_SUCCESS;
+    }
+  }
   // Attach to console when present (e.g., 'flutter run') or create a
   // new console when running with a debugger.
   if (!::AttachConsole(ATTACH_PARENT_PROCESS) && ::IsDebuggerPresent()) {

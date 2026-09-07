@@ -60,7 +60,10 @@ class CartNotifier extends _$CartNotifier {
 
   void setCustomerPhone(String phone) => state = state.copyWith(customerPhone: phone);
 
-  void setPaymentMethod(String method) => state = state.copyWith(paymentMethod: method);
+  void setPaymentMethod(String method) {
+    if (method != 'cash' && method != 'paystack') return;
+    state = state.copyWith(paymentMethod: method);
+  }
 
   void setReferenceNote(String note) => state = state.copyWith(referenceNote: note);
 

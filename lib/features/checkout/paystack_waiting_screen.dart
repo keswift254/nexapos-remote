@@ -50,13 +50,8 @@ class _PaystackWaitingScreenState extends ConsumerState<PaystackWaitingScreen> w
     super.dispose();
   }
 
-  /// The checkout page opens in the system browser, not embedded in
-  /// this app (see the class doc) - there's no callback URL wiring the
-  /// browser back to us, so the OS never automatically refocuses
-  /// NexaPOS once the customer finishes paying. The next best thing:
-  /// the instant the cashier switches back to this app (alt-tab, or
-  /// backgrounding on mobile), check immediately rather than waiting
-  /// for the next scheduled poll tick.
+  /// The browser return link resumes this app. Treat it only as a cue to
+  /// verify the transaction with the server, never as proof of payment.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
@@ -175,8 +170,7 @@ class _PaystackWaitingScreenState extends ConsumerState<PaystackWaitingScreen> w
                 Text(
                   _autoPollingStopped
                       ? 'Still waiting for confirmation. Check again once the customer has paid.'
-                      : 'Waiting for the customer to complete payment in the browser. '
-                          'Once they\'re done, switch back to this screen - it checks automatically.',
+                      : 'Waiting for payment confirmation.',
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 24),

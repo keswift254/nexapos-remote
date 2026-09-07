@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -36,6 +37,7 @@ class _ShopTransferDialogState extends ConsumerState<ShopTransferDialog> {
   bool busy = false;
   bool failed = false;
   bool sourceConnected = false;
+  bool completed = false;
 
   @override
   void dispose() {
@@ -60,6 +62,7 @@ class _ShopTransferDialogState extends ConsumerState<ShopTransferDialog> {
       busy = true;
       failed = false;
       message = null;
+      completed = false;
     });
     try {
       await task();
@@ -133,11 +136,17 @@ class _ShopTransferDialogState extends ConsumerState<ShopTransferDialog> {
     if (mounted) {
       setState(() {
         preview = null;
+        completed = true;
         message =
-            'Imported ${counts.values.fold<int>(0, (a, b) => a + b)} records. Existing records were preserved.';
+            'Done. Imported ${counts.values.fold<int>(0, (a, b) => a + b)} records. Existing records were preserved.';
       });
     }
-    await ref.read(syncServiceProvider).runSyncCycle();
+    // Local import is committed. Network sync must not keep the dialog locked.
+    unawaited(
+      ref.read(syncServiceProvider).runSyncCycle().catchError((Object _) {
+        // The normal sync scheduler retries pending records.
+      }),
+    );
   });
 
   Future<void> exportBackup() => run(() async {
@@ -154,10 +163,11 @@ class _ShopTransferDialogState extends ConsumerState<ShopTransferDialog> {
       if (!mounted) return;
       final saved = await saveRecoveryArchive(context, archive);
       if (mounted && saved) {
-        setState(
-          () => message =
-              'Encrypted backup saved. Keep its password for recovery.',
-        );
+        setState(() {
+          completed = true;
+          message =
+              'Done. Encrypted backup saved. Keep its password for recovery.';
+        });
       }
     });
   });
@@ -394,6 +404,18 @@ class _ShopTransferDialogState extends ConsumerState<ShopTransferDialog> {
                 ],
               ),
             ),
+            if (completed && !busy)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: FilledButton.icon(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.check),
+                    label: const Text('Done'),
+                  ),
+                ),
+              ),
           ],
         ),
       ),

@@ -144,6 +144,21 @@ internal static class Program
         CreateShortcut(startMenuShortcut, executable, installDir);
         TryPinToTaskbar(desktopShortcut);
         RegisterUninstaller(installDir);
+        RegisterCheckoutProtocol(executable);
+    }
+
+    private static void RegisterCheckoutProtocol(string executable)
+    {
+        using (var key = Registry.LocalMachine.CreateSubKey(@"Software\Classes\nexapos"))
+        {
+            if (key == null) throw new InvalidOperationException("Could not register the checkout return link.");
+            key.SetValue("", "URL:NexaPOS");
+            key.SetValue("URL Protocol", "");
+            using (var command = key.CreateSubKey(@"shell\open\command"))
+            {
+                command.SetValue("", "\"" + executable + "\" \"%1\"");
+            }
+        }
     }
 
     private static void CopySetupIntoInstall(string installDir)
@@ -223,6 +238,7 @@ internal static class Program
         TryDelete(startMenuShortcut);
         TryDeleteDirectory(Path.GetDirectoryName(startMenuShortcut));
         Registry.LocalMachine.DeleteSubKeyTree(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\NexaPOS", false);
+        Registry.LocalMachine.DeleteSubKeyTree(@"Software\Classes\nexapos", false);
         var script = Path.Combine(Path.GetTempPath(), "nexapos-uninstall.cmd");
         File.WriteAllText(script, "@echo off\r\nping -n 3 127.0.0.1 > nul\r\nrmdir /s /q \"" + installDir + "\"\r\ndel /q \"%~f0\"\r\n");
         Process.Start(new ProcessStartInfo("cmd.exe", "/c \"" + script + "\"") { UseShellExecute = false, CreateNoWindow = true });

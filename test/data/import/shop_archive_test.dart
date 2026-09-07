@@ -193,6 +193,14 @@ void main() {
     },
   );
 
+  test('eight-character backup password round trips and seven is rejected', () async {
+    final archive = await ShopArchive.capture(db);
+    await expectLater(ArchiveEncryption.encode(archive, '1234567'), throwsArgumentError);
+    final bytes = await ArchiveEncryption.encode(archive, '12345678');
+    final restored = await ArchiveEncryption.decode(bytes, '12345678');
+    expect(restored.tables.keys, archive.tables.keys);
+  });
+
   test('backup includes unsynced data, decrypts only with correct password, rejects tampering', () async {
     await LegacyPosMapper('fixture').convert(legacyFixture()).mergeInto(db);
     final archive = await ShopArchive.capture(db);

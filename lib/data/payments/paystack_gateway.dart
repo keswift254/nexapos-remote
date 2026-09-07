@@ -58,6 +58,7 @@ class PaystackGateway {
         'amount': amount.cents,
         'currency': currency,
         'reference': reference,
+        'return_to_app': true,
       },
     );
     if (response['status'] != true) {

@@ -11,12 +11,10 @@ import 'paystack_waiting_screen.dart';
 
 const _paymentMethodLabels = {
   'cash': 'Cash',
-  'mpesa': 'M-Pesa',
-  'mpesa_manual': 'M-Pesa Till',
   'paystack': 'Paystack',
 };
 
-/// Cart review + checkout details. cash/mpesa/mpesa_manual complete
+/// Cart review + checkout details. Cash completes
 /// immediately through CheckoutService; paystack hands off to
 /// PaystackPaymentService and, on success, PaystackWaitingScreen.
 class CartScreen extends ConsumerStatefulWidget {
@@ -29,7 +27,6 @@ class CartScreen extends ConsumerStatefulWidget {
 class _CartScreenState extends ConsumerState<CartScreen> {
   late final _nameController = TextEditingController(text: ref.read(cartProvider).customerName);
   late final _phoneController = TextEditingController(text: ref.read(cartProvider).customerPhone);
-  late final _noteController = TextEditingController(text: ref.read(cartProvider).referenceNote);
   late final _discountController = TextEditingController(
     text: ref.read(cartProvider).discount.cents == 0
         ? ''
@@ -41,7 +38,6 @@ class _CartScreenState extends ConsumerState<CartScreen> {
   void dispose() {
     _nameController.dispose();
     _phoneController.dispose();
-    _noteController.dispose();
     _discountController.dispose();
     super.dispose();
   }
@@ -83,7 +79,7 @@ class _CartScreenState extends ConsumerState<CartScreen> {
       customerPhone: _phoneController.text,
       saleType: state.saleType,
       paymentMethod: paymentMethod,
-      referenceNote: _noteController.text,
+      referenceNote: '',
       userId: userId,
     );
     if (!mounted) return;
@@ -118,7 +114,6 @@ class _CartScreenState extends ConsumerState<CartScreen> {
     final userId = ref.watch(sessionProvider)?.id;
     final discount = cartState.discount;
     final total = discount > cartState.subtotal ? const Money.zero() : cartState.subtotal - discount;
-    final isExternal = cartState.paymentMethod == 'mpesa' || cartState.paymentMethod == 'mpesa_manual';
 
     return Scaffold(
       appBar: AppBar(title: const Text('Cart & Checkout')),
@@ -195,14 +190,6 @@ class _CartScreenState extends ConsumerState<CartScreen> {
                     ))
                 .toList(),
           ),
-          if (isExternal) ...[
-            const SizedBox(height: 12),
-            TextField(
-              controller: _noteController,
-              decoration: const InputDecoration(labelText: 'Reference note (optional)'),
-              onChanged: cart.setReferenceNote,
-            ),
-          ],
           const SizedBox(height: 16),
           TextField(
             controller: _discountController,

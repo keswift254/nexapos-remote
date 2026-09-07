@@ -16,6 +16,7 @@ void main() {
         expect(request.headers['Authorization'], 'Bearer device_api_key_123');
         final body = jsonDecode(request.body) as Map<String, dynamic>;
         expect(body['amount'], 10000); // Money.cents, not major units
+        expect(body['return_to_app'], isTrue);
         expect(body.containsKey('metadata'), isFalse, reason: 'the backend builds its own metadata now');
         return http.Response(
           jsonEncode({

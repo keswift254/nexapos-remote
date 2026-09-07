@@ -67,7 +67,7 @@ class _BackupPasswordDialogState extends State<_BackupPasswordDialog> {
             controller: password,
             obscureText: true,
             decoration: const InputDecoration(
-              labelText: 'Password (12 or more characters)',
+              labelText: 'Password (8 or more characters)',
             ),
           ),
           TextField(
@@ -90,9 +90,10 @@ class _BackupPasswordDialogState extends State<_BackupPasswordDialog> {
       ),
       FilledButton(
         onPressed: () {
-          if (password.text.length < 12 || password.text != confirm.text) {
+          if (password.text.length < ArchiveEncryption.minimumPasswordLength ||
+              password.text != confirm.text) {
             setState(
-              () => error = 'Use matching passwords of at least 12 characters.',
+              () => error = 'Use matching passwords of at least 8 characters.',
             );
           } else {
             Navigator.pop(context, password.text);

@@ -348,10 +348,12 @@ Future<void> insertRow(
 }
 
 class ArchiveEncryption {
+  static const minimumPasswordLength = 8;
+
   static Future<Uint8List> encode(ShopArchive archive, String password) async {
-    if (password.length < 12) {
+    if (password.length < minimumPasswordLength) {
       throw ArgumentError(
-        'Backup password must contain at least 12 characters.',
+        'Backup password must contain at least $minimumPasswordLength characters.',
       );
     }
     final json = archive.toJson();
