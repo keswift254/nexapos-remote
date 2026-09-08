@@ -105,6 +105,17 @@ void main() {
           generatedByName: 'Pilot_test',
         ),
       );
+      await File('${outDir.path}/monthly-sales-report.pdf').writeAsBytes(
+        await buildReportPdf(
+          data: reportData,
+          reportTitle: 'Monthly Sales Report',
+          periodLabel: 'SEPTEMBER 2026',
+          isMonthlyReport: true,
+          timeFormat: DateFormat('d MMM HH:mm'),
+          settings: settings,
+          generatedByName: 'Pilot_test',
+        ),
+      );
     },
     skip: Platform.environment['NEXAPOS_RECEIPT_PREVIEW_DIR'] == null
         ? 'Set NEXAPOS_RECEIPT_PREVIEW_DIR to write visual PDF previews.'

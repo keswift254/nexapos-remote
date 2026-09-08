@@ -255,21 +255,17 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
     }
   }
 
-  /// Distinct from _print: the OS print dialog only offers to save as
-  /// PDF if a virtual PDF printer happens to be installed, which isn't
-  /// guaranteed - this writes the file directly to wherever the user
-  /// picks, independent of installed printers.
+  /// Shows the generated document before allowing the user to save it.
   Future<void> _exportPdf(ReportData data) async {
     final bytes = await _buildPdfBytes(data);
     final fileName = '$_fileNameLabel.pdf';
-    final uri = await FilePicker.saveFile(
-      fileName: fileName,
-      bytes: bytes,
-      mimeType: 'application/pdf',
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            _ReportPdfPreviewScreen(bytes: bytes, fileName: fileName),
+      ),
     );
-    if (!mounted || uri == null) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text('Saved to ${uri.toFilePath()}')));
   }
 
   @override
@@ -408,6 +404,49 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ReportPdfPreviewScreen extends StatelessWidget {
+  const _ReportPdfPreviewScreen({required this.bytes, required this.fileName});
+
+  final Uint8List bytes;
+  final String fileName;
+
+  Future<void> _save(BuildContext context) async {
+    final uri = await FilePicker.saveFile(
+      fileName: fileName,
+      bytes: bytes,
+      mimeType: 'application/pdf',
+    );
+    if (!context.mounted || uri == null) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text('Saved to ${uri.toFilePath()}')));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('PDF Preview'),
+        actions: [
+          IconButton(
+            onPressed: () => _save(context),
+            icon: const Icon(Icons.save_outlined),
+            tooltip: 'Save PDF',
+          ),
+        ],
+      ),
+      body: PdfPreview(
+        build: (_) async => bytes,
+        pdfFileName: fileName,
+        canChangePageFormat: false,
+        canChangeOrientation: false,
+        allowPrinting: false,
+        allowSharing: false,
+        useActions: false,
       ),
     );
   }

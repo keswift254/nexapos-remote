@@ -10,20 +10,7 @@ import '../../data/printing/receipt_branding.dart';
 import '../../domain/entities/business_settings.dart';
 import '../../domain/services/reports_service.dart';
 
-const _brandColor = PdfColors.indigo700;
-
-/// Same thermal-receipt page shape as receipt_pdf.dart (narrow width
-/// from business_settings.paperWidthMm, height left as double.infinity
-/// so the page auto-sizes to content) rather than a fixed A4 page - a
-/// fixed page size sent to a continuous-feed thermal printer makes it
-/// feed blank paper trying to fill out the rest of that phantom page
-/// after the real content ends. Helvetica rather than Courier - still
-/// one of the PDF spec's bundled base14 fonts (zero network dependency,
-/// matching receipt_pdf.dart's reasoning), just a more report-
-/// appropriate face than a receipt's monospace look. Section markers
-/// are plain colored circles rather than real icon glyphs - matching
-/// Material icons exactly would mean bundling an icon font, which isn't
-/// worth the added risk for a cosmetic accent.
+/// Builds a narrow, monochrome report for continuous-feed thermal printers.
 Future<Uint8List> buildReportPdf({
   required ReportData data,
   required String reportTitle,
@@ -33,8 +20,8 @@ Future<Uint8List> buildReportPdf({
   required BusinessSettings settings,
   required String generatedByName,
 }) async {
-  final font = pw.Font.helvetica();
-  final fontBold = pw.Font.helveticaBold();
+  final font = pw.Font.courier();
+  final fontBold = pw.Font.courierBold();
   final currency = settings.currency;
   String money(int cents) => Money(cents).format(currency: currency);
   final reportBarcodeSource = [
@@ -49,39 +36,34 @@ Future<Uint8List> buildReportPdf({
     double.infinity,
     marginAll: 4 * PdfPageFormat.mm,
   );
+  final timeColumnWidth = isMonthlyReport ? 58.0 : 42.0;
+
+  pw.Widget divider({double thickness = 1.2}) => pw.Padding(
+    padding: const pw.EdgeInsets.symmetric(vertical: 5),
+    child: pw.Divider(thickness: thickness, color: PdfColors.black),
+  );
 
   pw.Widget sectionHeader(String title) => pw.Padding(
-    padding: const pw.EdgeInsets.only(bottom: 6),
-    child: pw.Row(
-      children: [
-        pw.Container(
-          width: 7,
-          height: 7,
-          decoration: const pw.BoxDecoration(
-            color: _brandColor,
-            shape: pw.BoxShape.circle,
-          ),
-        ),
-        pw.SizedBox(width: 5),
-        pw.Text(
-          title.toUpperCase(),
-          style: pw.TextStyle(font: fontBold, fontSize: 10, color: _brandColor),
-        ),
-      ],
+    padding: const pw.EdgeInsets.only(top: 4, bottom: 3),
+    child: pw.Text(
+      title.toUpperCase(),
+      style: pw.TextStyle(font: fontBold, fontSize: 11),
     ),
   );
 
   pw.Widget line(String time, String label, String amount) => pw.Padding(
     padding: const pw.EdgeInsets.symmetric(vertical: 2),
     child: pw.Row(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
         pw.SizedBox(
-          width: 40,
+          width: timeColumnWidth,
           child: pw.Text(time, style: pw.TextStyle(font: font, fontSize: 8)),
         ),
         pw.Expanded(
           child: pw.Text(label, style: pw.TextStyle(font: font, fontSize: 8)),
         ),
+        pw.SizedBox(width: 5),
         pw.Text(amount, style: pw.TextStyle(font: fontBold, fontSize: 8)),
       ],
     ),
@@ -89,11 +71,14 @@ Future<Uint8List> buildReportPdf({
 
   pw.Widget totalLine(String label, String amount, {bool bold = false}) =>
       pw.Padding(
-        padding: const pw.EdgeInsets.symmetric(vertical: 3),
+        padding: const pw.EdgeInsets.symmetric(vertical: 2),
         child: pw.Row(
           mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
           children: [
-            pw.Text(label, style: pw.TextStyle(font: fontBold, fontSize: 9)),
+            pw.Text(
+              label,
+              style: pw.TextStyle(font: bold ? fontBold : font, fontSize: 9),
+            ),
             pw.Text(
               amount,
               style: pw.TextStyle(font: bold ? fontBold : font, fontSize: 9),
@@ -106,143 +91,118 @@ Future<Uint8List> buildReportPdf({
   doc.addPage(
     pw.Page(
       pageFormat: pageFormat,
-      build: (context) => pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-        children: [
-          pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.center,
-            children: [
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.start,
-                children: [
-                  pw.Container(
-                    width: 18,
-                    height: 18,
-                    alignment: pw.Alignment.center,
-                    decoration: pw.BoxDecoration(
-                      color: _brandColor,
-                      borderRadius: pw.BorderRadius.circular(5),
-                    ),
-                    child: pw.Text(
-                      'N',
-                      style: pw.TextStyle(
-                        font: fontBold,
-                        fontSize: 10,
-                        color: PdfColors.white,
-                      ),
-                    ),
-                  ),
-                  pw.SizedBox(width: 6),
-                  pw.Text(
-                    'NexaPOS',
-                    style: pw.TextStyle(font: fontBold, fontSize: 13),
-                  ),
-                ],
-              ),
-              pw.SizedBox(height: 10),
-              pw.Text(
-                reportTitle.toUpperCase(),
-                style: pw.TextStyle(
-                  font: fontBold,
-                  fontSize: 17,
-                  color: PdfColors.black,
-                ),
-                textAlign: pw.TextAlign.center,
-              ),
-              pw.SizedBox(height: 4),
-              pw.Text(
-                periodLabel,
-                style: pw.TextStyle(font: fontBold, fontSize: 10),
-                textAlign: pw.TextAlign.center,
-              ),
-            ],
-          ),
-          pw.SizedBox(height: 12),
-          pw.Divider(thickness: 1.2),
-          pw.SizedBox(height: 10),
-          sectionHeader('Sales'),
-          pw.Divider(borderStyle: pw.BorderStyle.dashed),
-          if (data.sales.isEmpty) line('', 'No paid sales', money(0)),
-          for (final sale in data.sales)
-            line(
-              timeFormat.format(DateTime.parse(sale.createdAt).toLocal()),
-              sale.itemNames ?? sale.saleNumber,
-              money(sale.totalCents),
+      build: (context) => pw.DefaultTextStyle(
+        style: pw.TextStyle(font: font, fontSize: 9),
+        child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+          children: [
+            pw.Text(
+              settings.businessName.toUpperCase(),
+              textAlign: pw.TextAlign.center,
+              style: pw.TextStyle(font: fontBold, fontSize: 20),
             ),
-          pw.Divider(),
-          totalLine('Total Paid Sales', money(data.salesTotal.cents)),
-          pw.SizedBox(height: 12),
-          sectionHeader('Expenses'),
-          pw.Divider(borderStyle: pw.BorderStyle.dashed),
-          if (data.expenses.isEmpty) line('', 'No expenses', money(0)),
-          for (final expense in data.expenses)
-            line(
-              timeFormat.format(DateTime.parse(expense.createdAt).toLocal()),
-              '${expense.title} x1',
-              money(expense.amountCents),
+            pw.Text(
+              'Powered by NEXAPOS',
+              textAlign: pw.TextAlign.center,
+              style: pw.TextStyle(font: font, fontSize: 10),
             ),
-          pw.Divider(),
-          totalLine('Total Expenses', money(data.expensesTotal.cents)),
-          pw.SizedBox(height: 12),
-          sectionHeader('Grand Total'),
-          pw.Divider(),
-          if (isMonthlyReport)
-            totalLine('Gross Profit', money(data.grossProfitTotal.cents)),
-          pw.SizedBox(height: 3),
-          pw.Row(
-            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-            children: [
-              pw.Text(
-                isMonthlyReport ? 'Net Profit' : 'Grand Total',
-                style: pw.TextStyle(font: fontBold, fontSize: 15),
-              ),
-              pw.Text(
-                money(
-                  (isMonthlyReport ? data.netProfit : data.grandTotal).cents,
-                ),
-                style: pw.TextStyle(font: fontBold, fontSize: 15),
-              ),
-            ],
-          ),
-          pw.SizedBox(height: 16),
-          pw.Divider(thickness: 1.2),
-          pw.SizedBox(height: 6),
-          pw.Text(
-            'Cashier/Admin: $generatedByName',
-            style: pw.TextStyle(font: font, fontSize: 8, color: _brandColor),
-          ),
-          pw.Text(
-            'Report Date: $periodLabel',
-            style: pw.TextStyle(font: font, fontSize: 8, color: _brandColor),
-          ),
-          pw.Text(
-            'Generated Time: ${DateFormat('d MMM yyyy HH:mm').format(DateTime.now())}',
-            style: pw.TextStyle(font: font, fontSize: 8, color: _brandColor),
-          ),
-          pw.SizedBox(height: 8),
-          pw.Center(
-            child: pw.Text(
-              'Generated by NexaPOS',
+            divider(thickness: 1.4),
+            pw.Text(
+              reportTitle.toUpperCase(),
+              textAlign: pw.TextAlign.center,
+              style: pw.TextStyle(font: fontBold, fontSize: 15),
+            ),
+            pw.Text(
+              periodLabel.toUpperCase(),
+              textAlign: pw.TextAlign.center,
               style: pw.TextStyle(font: fontBold, fontSize: 9),
             ),
-          ),
-          pw.Center(
-            child: pw.Text(
-              'Thank you for using NexaPOS',
+            divider(),
+            sectionHeader('Sales'),
+            if (data.sales.isEmpty) line('', 'No paid sales', money(0)),
+            for (final sale in data.sales)
+              line(
+                timeFormat.format(DateTime.parse(sale.createdAt).toLocal()),
+                sale.itemNames ?? sale.saleNumber,
+                money(sale.totalCents),
+              ),
+            divider(),
+            totalLine(
+              'Total Paid Sales',
+              money(data.salesTotal.cents),
+              bold: true,
+            ),
+            pw.SizedBox(height: 5),
+            sectionHeader('Expenses'),
+            if (data.expenses.isEmpty) line('', 'No expenses', money(0)),
+            for (final expense in data.expenses)
+              line(
+                timeFormat.format(DateTime.parse(expense.createdAt).toLocal()),
+                expense.title,
+                money(expense.amountCents),
+              ),
+            divider(),
+            totalLine(
+              'Total Expenses',
+              money(data.expensesTotal.cents),
+              bold: true,
+            ),
+            if (isMonthlyReport)
+              totalLine('Gross Profit', money(data.grossProfitTotal.cents)),
+            divider(thickness: 1.8),
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text(
+                  isMonthlyReport ? 'NET PROFIT' : 'GRAND TOTAL',
+                  style: pw.TextStyle(font: fontBold, fontSize: 14),
+                ),
+                pw.Text(
+                  money(
+                    (isMonthlyReport ? data.netProfit : data.grandTotal).cents,
+                  ),
+                  style: pw.TextStyle(font: fontBold, fontSize: 14),
+                ),
+              ],
+            ),
+            divider(thickness: 1.8),
+            pw.Text(
+              'Cashier/Admin: $generatedByName',
               style: pw.TextStyle(font: font, fontSize: 8),
             ),
-          ),
-          pw.SizedBox(height: 6),
-          pw.Divider(),
-          pw.Center(
-            child: pw.Image(
+            pw.Text(
+              'Report Date: $periodLabel',
+              style: pw.TextStyle(font: font, fontSize: 8),
+            ),
+            pw.Text(
+              'Generated: ${DateFormat('d MMM yyyy HH:mm').format(DateTime.now())}',
+              style: pw.TextStyle(font: font, fontSize: 8),
+            ),
+            pw.SizedBox(height: 7),
+            pw.Text(
+              'Generated by NexaPOS',
+              textAlign: pw.TextAlign.center,
+              style: pw.TextStyle(font: fontBold, fontSize: 9),
+            ),
+            pw.Text(
+              'Thank you for using NexaPOS',
+              textAlign: pw.TextAlign.center,
+              style: pw.TextStyle(font: font, fontSize: 8),
+            ),
+            pw.Text(
+              supportFooter,
+              textAlign: pw.TextAlign.center,
+              style: pw.TextStyle(font: font, fontSize: 8),
+            ),
+            divider(),
+            pw.Image(
               pw.MemoryImage(
                 img.encodePng(receiptBarcode(reportBarcodeSource)),
               ),
               width: pageFormat.availableWidth,
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     ),
   );
