@@ -119,11 +119,9 @@ class _ReceiptScreenState extends ConsumerState<ReceiptScreen> {
           data: (data) => SafeArea(
             child: Padding(
               padding: const EdgeInsets.all(12),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
+              child: Row(
                 children: [
-                  SizedBox(
-                    width: double.infinity,
+                  Expanded(
                     child: OutlinedButton.icon(
                       onPressed: _thermalPrinting
                           ? null
@@ -138,9 +136,8 @@ class _ReceiptScreenState extends ConsumerState<ReceiptScreen> {
                       label: const Text('Print to thermal printer'),
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
+                  const SizedBox(width: 12),
+                  Expanded(
                     child: FilledButton.icon(
                       onPressed: () {
                         // Same reasoning as the checkout success handlers:
@@ -179,19 +176,6 @@ class _ReceiptBody extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Image.memory(
-              img.encodePng(receiptLogo()),
-              key: const Key('receipt-brand-logo'),
-              width: 100,
-              height: 20,
-              fit: BoxFit.contain,
-              alignment: Alignment.centerLeft,
-              semanticLabel: 'NEXAPOS',
-            ),
-          ),
-          const SizedBox(height: 12),
           Text(
             data.settings.businessName.toUpperCase(),
             key: const Key('receipt-business-name'),
@@ -202,24 +186,33 @@ class _ReceiptBody extends StatelessWidget {
               fontSize: 24,
             ),
           ),
+          const Text(
+            'Powered by NEXAPOS',
+            key: Key('receipt-powered-by'),
+            textAlign: TextAlign.center,
+            style: TextStyle(fontFamily: 'monospace', fontSize: 14),
+          ),
           if ((data.settings.address ?? '').isNotEmpty)
             Text(data.settings.address!, textAlign: TextAlign.center),
           if ((data.settings.phone ?? '').isNotEmpty)
             Text(data.settings.phone!, textAlign: TextAlign.center),
+          const _SolidDivider(),
           const SizedBox(height: 12),
-          Text('Receipt: ${sale.saleNumber}'),
+          Text('Receipt #: ${sale.saleNumber}'),
           Text(
             'Date: ${DateFormat('d MMM yyyy HH:mm').format(sale.createdAt.toLocal())}',
           ),
           Text('Cashier: ${data.cashierName}'),
-          const _DashedDivider(),
+          const _SolidDivider(),
           for (final item in data.items) ...[
-            Text(item.itemName),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  '${item.quantity} x ${item.unitPrice.format(currency: data.settings.currency)}',
+                Expanded(
+                  child: Text(
+                    '${item.itemName}      ${item.quantity} x ${item.unitPrice.format(currency: data.settings.currency)}',
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
                 Text(item.lineTotal.format(currency: data.settings.currency)),
               ],
@@ -238,15 +231,21 @@ class _ReceiptBody extends StatelessWidget {
             'Total',
             sale.total.format(currency: data.settings.currency),
             bold: true,
+            prominent: true,
           ),
-          const _DashedDivider(),
+          const _SolidDivider(),
           Text('Payment: ${sale.paymentMethod.toUpperCase()}'),
           Text(
             'Sale type: ${sale.saleType[0].toUpperCase()}${sale.saleType.substring(1)}',
           ),
           Text('Status: ${sale.status.toUpperCase()}'),
           const SizedBox(height: 12),
-          const Text(installationFooter, textAlign: TextAlign.center),
+          const _SolidDivider(),
+          const Text(
+            'Thank you for shopping with us!',
+            textAlign: TextAlign.center,
+          ),
+          const Text(supportFooter, textAlign: TextAlign.center),
           if ((data.settings.receiptFooter ?? '').isNotEmpty) ...[
             const SizedBox(height: 12),
             Text(
@@ -271,20 +270,41 @@ class _AmountRow extends StatelessWidget {
   final String label;
   final String value;
   final bool bold;
+  final bool prominent;
 
-  const _AmountRow(this.label, this.value, {this.bold = false});
+  const _AmountRow(
+    this.label,
+    this.value, {
+    this.bold = false,
+    this.prominent = false,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final style = bold
+    final style = bold || prominent
         ? const TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold)
         : null;
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label, style: style),
-        Text(value, style: style),
+        Text(
+          prominent ? label.toUpperCase() : label,
+          style: prominent ? style?.copyWith(fontSize: 20) : style,
+        ),
+        Text(value, style: prominent ? style?.copyWith(fontSize: 20) : style),
       ],
+    );
+  }
+}
+
+class _SolidDivider extends StatelessWidget {
+  const _SolidDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.symmetric(vertical: 8),
+      child: Divider(height: 1, thickness: 1.4, color: Colors.black87),
     );
   }
 }

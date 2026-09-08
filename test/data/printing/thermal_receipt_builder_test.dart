@@ -74,13 +74,14 @@ void main() {
           final decoded = latin1.decode(bytes, allowInvalid: true);
 
           expect(decoded, contains('NAX GENERAL STORE'));
+          expect(decoded, contains('Powered by NEXAPOS'));
           expect(decoded, contains('123 Market Street'));
           expect(decoded, contains('RCPT-0001'));
           expect(decoded, contains('Felix'));
           expect(decoded, contains('Photocopy A4'));
           expect(decoded, contains('CASH'));
           expect(decoded, contains('Thank you for shopping with us'));
-          expect(decoded, contains('For installation: 0768415017'));
+          expect(decoded, contains('Support / Installation: 0768415017'));
           expect(
             bytes.where((value) => value == 0x1d).length,
             greaterThanOrEqualTo(4),
@@ -105,7 +106,8 @@ void main() {
       final decoded = latin1.decode(bytes, allowInvalid: true);
 
       expect(decoded, isNot(contains('123 Market Street')));
-      expect(decoded, isNot(contains('Thank you for shopping')));
+      expect(decoded, contains('Thank you for shopping with us!'));
+      expect(decoded, isNot(contains('Thank you for shopping with us\n')));
     });
   });
 

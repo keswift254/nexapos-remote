@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:fl_chart/fl_chart.dart';
@@ -7,15 +8,20 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+
 import '../../core/providers.dart';
 import '../../core/utils/money.dart';
+import '../../data/import/shop_archive.dart';
 import '../../domain/entities/user_role.dart';
 import '../../domain/services/pending_sales_notifier.dart';
 import '../../domain/services/product_service.dart';
 import '../../domain/services/reports_service.dart';
+import '../../domain/services/sensitive_action_service.dart';
 import '../../domain/services/session_service.dart';
 import '../../domain/services/sync_service.dart';
 import '../../domain/services/update_service.dart';
+import '../settings/save_recovery.dart';
+import '../settings/sensitive_action_dialog.dart';
 import 'product_search_dialog.dart';
 
 part 'dashboard_screen.g.dart';
@@ -91,8 +97,14 @@ Future<DashboardData> dashboardData(Ref ref) async {
 
   return DashboardData(
     today: todayStats,
-    salesChange: PercentChange.compare(todayStats.salesTotal, yesterdayStats.salesTotal),
-    netProfitChange: PercentChange.compare(todayStats.netProfit, yesterdayStats.netProfit),
+    salesChange: PercentChange.compare(
+      todayStats.salesTotal,
+      yesterdayStats.salesTotal,
+    ),
+    netProfitChange: PercentChange.compare(
+      todayStats.netProfit,
+      yesterdayStats.netProfit,
+    ),
     last7Days: last7Days,
     lowStockCount: lowStockCount,
     stockValue: stockValue,
@@ -108,6 +120,51 @@ class DashboardScreen extends ConsumerStatefulWidget {
 
 class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   bool _manualSyncing = false;
+  bool _savingBackup = false;
+
+  Future<void> _saveManualBackup() async {
+    if (_savingBackup) return;
+    final approval = await requestSensitiveApproval(
+      context,
+      action: 'Back up shop data',
+    );
+    if (approval == null || !mounted) return;
+    setState(() => _savingBackup = true);
+    try {
+      await ref
+          .read(sensitiveActionProvider)
+          .consume(approval, 'Back up shop data');
+      final archive = await ref.read(syncServiceProvider).exclusive(() async {
+        final snapshot = await ShopArchive.capture(
+          ref.read(appDatabaseProvider),
+        );
+        await snapshot.validate();
+        return snapshot;
+      });
+      if (!mounted) return;
+      final saved = await saveRecoveryArchive(context, archive);
+      if (mounted && saved) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Done. Encrypted backup saved.')),
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$error')));
+      }
+    } finally {
+      if (mounted) setState(() => _savingBackup = false);
+    }
+  }
+
+  void _handleSettingsAction(String action) {
+    if (action == 'manual-backup') {
+      unawaited(_saveManualBackup());
+      return;
+    }
+    context.push(action);
+  }
 
   /// Desktop has no pull-to-refresh gesture, so Windows gets an explicit
   /// button for the same thing the periodic timer/app-resume already do
@@ -163,7 +220,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               IconButton(
                 icon: Badge(
                   smallSize: 8,
-                  child: Icon(Icons.notifications_active, color: Theme.of(context).colorScheme.error),
+                  child: Icon(
+                    Icons.notifications_active,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
                 ),
                 tooltip: 'Update available: version ${availableUpdate.version}',
                 onPressed: () => context.push('/update'),
@@ -186,12 +246,28 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             PopupMenuButton<String>(
               icon: const Icon(Icons.settings_outlined),
               tooltip: 'Settings',
-              onSelected: (route) => context.push(route),
+              onSelected: _handleSettingsAction,
               itemBuilder: (context) => const [
-                PopupMenuItem(value: '/business-settings', child: Text('Business Settings')),
-                PopupMenuItem(value: '/payment-settings', child: Text('Payment Settings')),
-                PopupMenuItem(value: '/device-sync', child: Text('Device Sync')),
-                PopupMenuItem(value: '/update', child: Text('Check for Updates')),
+                PopupMenuItem(
+                  value: '/business-settings',
+                  child: Text('Business Settings'),
+                ),
+                PopupMenuItem(
+                  value: '/payment-settings',
+                  child: Text('Payment Settings'),
+                ),
+                PopupMenuItem(
+                  value: '/device-sync',
+                  child: Text('Device Sync'),
+                ),
+                PopupMenuItem(
+                  value: 'manual-backup',
+                  child: Text('Back up data now'),
+                ),
+                PopupMenuItem(
+                  value: '/update',
+                  child: Text('Check for Updates'),
+                ),
               ],
             ),
           if (user?.role == UserRole.admin)
@@ -227,7 +303,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                       Expanded(
                         child: Align(
                           alignment: Alignment.centerRight,
-                          child: Text(user.name, style: Theme.of(context).textTheme.titleLarge),
+                          child: Text(
+                            user.name,
+                            style: Theme.of(context).textTheme.titleLarge,
+                          ),
                         ),
                       ),
                     ],
@@ -243,7 +322,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                               ? '1 pending Paystack payment needs attention'
                               : '${pendingPaystackSales.length} pending Paystack payments need attention',
                         ),
-                        subtitle: const Text('Tap to check status or cancel and restore stock.'),
+                        subtitle: const Text(
+                          'Tap to check status or cancel and restore stock.',
+                        ),
                         onTap: () => context.push('/pending-sales'),
                       ),
                     ),
@@ -254,7 +335,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                       color: Theme.of(context).colorScheme.primaryContainer,
                       child: ListTile(
                         leading: const Icon(Icons.system_update_alt),
-                        title: Text('Update available: version ${availableUpdate.version}'),
+                        title: Text(
+                          'Update available: version ${availableUpdate.version}',
+                        ),
                         subtitle: const Text('Tap to download and install.'),
                         onTap: () => context.push('/update'),
                       ),
@@ -270,7 +353,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                       padding: const EdgeInsets.symmetric(vertical: 20),
                       child: Text('Failed to load dashboard: $error'),
                     ),
-                    data: (data) => _DashboardStats(data: data, canManageInventory: canManageInventory),
+                    data: (data) => _DashboardStats(
+                      data: data,
+                      canManageInventory: canManageInventory,
+                    ),
                   ),
                   const SizedBox(height: 24),
                   Center(
@@ -313,15 +399,67 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   }
 }
 
-class _DashboardStats extends StatelessWidget {
+class _DashboardStats extends StatefulWidget {
   final DashboardData data;
   final bool canManageInventory;
 
   const _DashboardStats({required this.data, required this.canManageInventory});
 
   @override
+  State<_DashboardStats> createState() => _DashboardStatsState();
+}
+
+class _DashboardStatsState extends State<_DashboardStats> {
+  static const _visibilityDuration = Duration(seconds: 60);
+  bool _financialsVisible = false;
+  Timer? _hideTimer;
+
+  @override
+  void didUpdateWidget(covariant _DashboardStats oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.data, widget.data)) _hideFinancials();
+  }
+
+  @override
+  void dispose() {
+    _hideTimer?.cancel();
+    super.dispose();
+  }
+
+  void _toggleFinancials() {
+    if (_financialsVisible) {
+      _hideFinancials();
+      return;
+    }
+    _hideTimer?.cancel();
+    setState(() => _financialsVisible = true);
+    _hideTimer = Timer(_visibilityDuration, _hideFinancials);
+  }
+
+  void _hideFinancials() {
+    _hideTimer?.cancel();
+    if (mounted && _financialsVisible) {
+      setState(() => _financialsVisible = false);
+    }
+  }
+
+  Widget _visibilityButton() => IconButton(
+    tooltip: _financialsVisible
+        ? 'Hide financial values'
+        : 'Show financial values',
+    onPressed: _toggleFinancials,
+    icon: Icon(
+      _financialsVisible
+          ? Icons.visibility_off_outlined
+          : Icons.visibility_outlined,
+    ),
+  );
+
+  @override
   Widget build(BuildContext context) {
+    final data = widget.data;
     final today = data.today;
+    const hiddenValue = '******';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -332,18 +470,30 @@ class _DashboardStats extends StatelessWidget {
               Expanded(
                 child: _StatCard(
                   label: 'Sales Today',
-                  value: today.salesTotal.format(),
-                  subtitle: today.salesCount == 1 ? '1 transaction' : '${today.salesCount} transactions',
-                  change: data.salesChange,
+                  value: _financialsVisible
+                      ? today.salesTotal.format()
+                      : hiddenValue,
+                  subtitle: today.salesCount == 1
+                      ? '1 transaction'
+                      : '${today.salesCount} transactions',
+                  change: _financialsVisible ? data.salesChange : null,
+                  trailing: _visibilityButton(),
+                  valueKey: const Key('sales-today-value'),
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: _StatCard(
                   label: 'Net Profit Today',
-                  value: today.netProfit.format(),
-                  subtitle: 'Gross ${today.grossProfit.format()}',
-                  change: data.netProfitChange,
+                  value: _financialsVisible
+                      ? today.netProfit.format()
+                      : hiddenValue,
+                  subtitle: _financialsVisible
+                      ? 'Gross ${today.grossProfit.format()}'
+                      : 'Gross $hiddenValue',
+                  change: _financialsVisible ? data.netProfitChange : null,
+                  trailing: _visibilityButton(),
+                  valueKey: const Key('net-profit-today-value'),
                 ),
               ),
             ],
@@ -358,8 +508,12 @@ class _DashboardStats extends StatelessWidget {
                 child: _StatCard(
                   label: 'Low Stock',
                   value: '${data.lowStockCount}',
-                  subtitle: data.lowStockCount == 1 ? 'product at/below reorder level' : 'products at/below reorder level',
-                  onTap: canManageInventory ? () => context.push('/products?lowStockOnly=true') : null,
+                  subtitle: data.lowStockCount == 1
+                      ? 'product at/below reorder level'
+                      : 'products at/below reorder level',
+                  onTap: widget.canManageInventory
+                      ? () => context.push('/products?lowStockOnly=true')
+                      : null,
                 ),
               ),
               const SizedBox(width: 12),
@@ -386,6 +540,8 @@ class _StatCard extends StatelessWidget {
   final String subtitle;
   final PercentChange? change;
   final VoidCallback? onTap;
+  final Widget? trailing;
+  final Key? valueKey;
 
   const _StatCard({
     required this.label,
@@ -393,6 +549,8 @@ class _StatCard extends StatelessWidget {
     required this.subtitle,
     this.change,
     this.onTap,
+    this.trailing,
+    this.valueKey,
   });
 
   @override
@@ -407,17 +565,36 @@ class _StatCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                label,
-                style: theme.textTheme.labelLarge?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      label,
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                  ?trailing,
+                ],
               ),
               const SizedBox(height: 6),
-              Text(value, style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
+              Text(
+                value,
+                key: valueKey,
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
               const SizedBox(height: 4),
               Row(
                 children: [
                   Expanded(
-                    child: Text(subtitle, style: theme.textTheme.bodySmall, overflow: TextOverflow.ellipsis),
+                    child: Text(
+                      subtitle,
+                      style: theme.textTheme.bodySmall,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                   if (change != null) ...[
                     const SizedBox(width: 6),
@@ -457,7 +634,14 @@ class _PercentBadge extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Icon(icon, size: 14, color: color),
-        Text('${change.percent.abs()}%', style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600)),
+        Text(
+          '${change.percent.abs()}%',
+          style: TextStyle(
+            color: color,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
       ],
     );
   }
@@ -477,10 +661,17 @@ class _SalesTrendCard extends StatelessWidget {
 
     final maxVal = points.fold<double>(
       0,
-      (m, p) => [m, p.salesTotal.toMajorDouble, p.expensesTotal.toMajorDouble, p.netProfit.toMajorDouble]
-          .reduce(math.max),
+      (m, p) => [
+        m,
+        p.salesTotal.toMajorDouble,
+        p.expensesTotal.toMajorDouble,
+        p.netProfit.toMajorDouble,
+      ].reduce(math.max),
     );
-    final minVal = points.fold<double>(0, (m, p) => math.min(m, p.netProfit.toMajorDouble));
+    final minVal = points.fold<double>(
+      0,
+      (m, p) => math.min(m, p.netProfit.toMajorDouble),
+    );
     final maxY = maxVal <= 0 ? 100.0 : maxVal * 1.2;
     final minY = minVal >= 0 ? 0.0 : minVal * 1.2;
     final gridInterval = (maxY - minY) / 4;
@@ -494,7 +685,10 @@ class _SalesTrendCard extends StatelessWidget {
           children: [
             Text('Last 7 Days', style: theme.textTheme.titleMedium),
             const SizedBox(height: 2),
-            Text('Tap a bar for the exact total', style: theme.textTheme.bodySmall),
+            Text(
+              'Tap a bar for the exact total',
+              style: theme.textTheme.bodySmall,
+            ),
             const SizedBox(height: 10),
             Wrap(
               spacing: 16,
@@ -516,10 +710,18 @@ class _SalesTrendCard extends StatelessWidget {
                       getTooltipItem: (group, groupIndex, rod, rodIndex) {
                         final point = points[group.x];
                         const labels = ['Sales', 'Expenses', 'Net Profit'];
-                        final values = [point.salesTotal, point.expensesTotal, point.netProfit];
+                        final values = [
+                          point.salesTotal,
+                          point.expensesTotal,
+                          point.netProfit,
+                        ];
                         return BarTooltipItem(
                           '${DateFormat('EEE, d MMM').format(point.date)}\n${labels[rodIndex]}: ${values[rodIndex].format()}',
-                          const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                          const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
                         );
                       },
                     ),
@@ -528,20 +730,29 @@ class _SalesTrendCard extends StatelessWidget {
                     drawVerticalLine: false,
                     horizontalInterval: gridInterval == 0 ? null : gridInterval,
                     getDrawingHorizontalLine: (value) => FlLine(
-                      color: value == 0 ? theme.colorScheme.outline : theme.colorScheme.outlineVariant,
+                      color: value == 0
+                          ? theme.colorScheme.outline
+                          : theme.colorScheme.outlineVariant,
                       strokeWidth: value == 0 ? 1.5 : 1,
                     ),
                   ),
                   borderData: FlBorderData(show: false),
                   titlesData: FlTitlesData(
-                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    topTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
+                    rightTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false),
+                    ),
                     leftTitles: AxisTitles(
                       sideTitles: SideTitles(
                         showTitles: true,
                         reservedSize: 36,
                         interval: gridInterval == 0 ? null : gridInterval,
-                        getTitlesWidget: (value, meta) => Text(compactNumber.format(value), style: theme.textTheme.bodySmall),
+                        getTitlesWidget: (value, meta) => Text(
+                          compactNumber.format(value),
+                          style: theme.textTheme.bodySmall,
+                        ),
                       ),
                     ),
                     bottomTitles: AxisTitles(
@@ -550,10 +761,15 @@ class _SalesTrendCard extends StatelessWidget {
                         reservedSize: 24,
                         getTitlesWidget: (value, meta) {
                           final index = value.toInt();
-                          if (index < 0 || index >= points.length) return const SizedBox.shrink();
+                          if (index < 0 || index >= points.length) {
+                            return const SizedBox.shrink();
+                          }
                           return Padding(
                             padding: const EdgeInsets.only(top: 6),
-                            child: Text(DateFormat('E').format(points[index].date), style: theme.textTheme.bodySmall),
+                            child: Text(
+                              DateFormat('E').format(points[index].date),
+                              style: theme.textTheme.bodySmall,
+                            ),
                           );
                         },
                       ),
@@ -569,21 +785,29 @@ class _SalesTrendCard extends StatelessWidget {
                             toY: points[i].salesTotal.toMajorDouble,
                             color: salesColor,
                             width: 7,
-                            borderRadius: const BorderRadius.vertical(top: Radius.circular(2)),
+                            borderRadius: const BorderRadius.vertical(
+                              top: Radius.circular(2),
+                            ),
                           ),
                           BarChartRodData(
                             toY: points[i].expensesTotal.toMajorDouble,
                             color: expensesColor,
                             width: 7,
-                            borderRadius: const BorderRadius.vertical(top: Radius.circular(2)),
+                            borderRadius: const BorderRadius.vertical(
+                              top: Radius.circular(2),
+                            ),
                           ),
                           BarChartRodData(
                             toY: points[i].netProfit.toMajorDouble,
                             color: profitColor,
                             width: 7,
                             borderRadius: BorderRadius.vertical(
-                              top: Radius.circular(points[i].netProfit.cents >= 0 ? 2 : 0),
-                              bottom: Radius.circular(points[i].netProfit.cents < 0 ? 2 : 0),
+                              top: Radius.circular(
+                                points[i].netProfit.cents >= 0 ? 2 : 0,
+                              ),
+                              bottom: Radius.circular(
+                                points[i].netProfit.cents < 0 ? 2 : 0,
+                              ),
                             ),
                           ),
                         ],
@@ -610,7 +834,11 @@ class _LegendDot extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(width: 10, height: 10, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
         const SizedBox(width: 6),
         Text(label, style: Theme.of(context).textTheme.bodySmall),
       ],

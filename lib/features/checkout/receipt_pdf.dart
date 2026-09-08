@@ -17,7 +17,6 @@ import '../../data/printing/receipt_branding.dart';
 Future<Uint8List> buildReceiptPdf(ReceiptData data, PdfPageFormat _) async {
   final sale = data.sale;
   const marginMm = 4.0;
-  const fontSize = 9.0;
   final pageFormat = PdfPageFormat(
     data.settings.paperWidthMm * PdfPageFormat.mm,
     double.infinity,
@@ -29,16 +28,11 @@ Future<Uint8List> buildReceiptPdf(ReceiptData data, PdfPageFormat _) async {
   // on first use, which defeats the point on an offline-first POS.
   final font = pw.Font.courier();
   final fontBold = pw.Font.courierBold();
-  // Courier's fixed advance width is 0.6em - sized to the actual
-  // printable width so a 58mm receipt doesn't wrap this onto two lines
-  // the way a width hardcoded for 80mm did.
-  final printableWidthPt =
-      (data.settings.paperWidthMm - marginMm * 2) * PdfPageFormat.mm;
-  final dividerLength = (printableWidthPt / (fontSize * 0.6)).floor().clamp(
-    8,
-    200,
+  const divider = '--------------------------------';
+  pw.Widget solidDivider() => pw.Padding(
+    padding: const pw.EdgeInsets.symmetric(vertical: 6),
+    child: pw.Divider(thickness: 1.4),
   );
-  final divider = '-' * dividerLength;
 
   final doc = pw.Document();
   doc.addPage(
@@ -49,37 +43,36 @@ Future<Uint8List> buildReceiptPdf(ReceiptData data, PdfPageFormat _) async {
         child: pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.stretch,
           children: [
-            pw.Align(
-              alignment: pw.Alignment.centerLeft,
-              child: pw.Image(
-                pw.MemoryImage(img.encodePng(receiptLogo())),
-                width: 50,
-              ),
-            ),
-            pw.SizedBox(height: 8),
             pw.Text(
               data.settings.businessName.toUpperCase(),
               textAlign: pw.TextAlign.center,
-              style: pw.TextStyle(font: fontBold, fontSize: 16),
+              style: pw.TextStyle(font: fontBold, fontSize: 24),
+            ),
+            pw.Text(
+              'Powered by NEXAPOS',
+              textAlign: pw.TextAlign.center,
+              style: pw.TextStyle(font: font, fontSize: 11),
             ),
             if ((data.settings.address ?? '').isNotEmpty)
               pw.Text(data.settings.address!, textAlign: pw.TextAlign.center),
             if ((data.settings.phone ?? '').isNotEmpty)
               pw.Text(data.settings.phone!, textAlign: pw.TextAlign.center),
+            solidDivider(),
             pw.SizedBox(height: 8),
-            pw.Text('Receipt: ${sale.saleNumber}'),
+            pw.Text('Receipt #: ${sale.saleNumber}'),
             pw.Text(
               'Date: ${DateFormat('d MMM yyyy HH:mm').format(sale.createdAt.toLocal())}',
             ),
             pw.Text('Cashier: ${data.cashierName}'),
-            pw.Text(divider),
+            solidDivider(),
             for (final item in data.items) ...[
-              pw.Text(item.itemName),
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
-                  pw.Text(
-                    '${item.quantity} x ${item.unitPrice.format(currency: data.settings.currency)}',
+                  pw.Expanded(
+                    child: pw.Text(
+                      '${item.itemName}      ${item.quantity} x ${item.unitPrice.format(currency: data.settings.currency)}',
+                    ),
                   ),
                   pw.Text(
                     item.lineTotal.format(currency: data.settings.currency),
@@ -102,15 +95,21 @@ Future<Uint8List> buildReceiptPdf(ReceiptData data, PdfPageFormat _) async {
               'Total',
               sale.total.format(currency: data.settings.currency),
               fontBold,
+              prominent: true,
             ),
-            pw.Text(divider),
+            solidDivider(),
             pw.Text('Payment: ${sale.paymentMethod.toUpperCase()}'),
             pw.Text(
               'Sale type: ${sale.saleType[0].toUpperCase()}${sale.saleType.substring(1)}',
             ),
             pw.Text('Status: ${sale.status.toUpperCase()}'),
             pw.SizedBox(height: 8),
-            pw.Text(installationFooter, textAlign: pw.TextAlign.center),
+            solidDivider(),
+            pw.Text(
+              'Thank you for shopping with us!',
+              textAlign: pw.TextAlign.center,
+            ),
+            pw.Text(supportFooter, textAlign: pw.TextAlign.center),
             if ((data.settings.receiptFooter ?? '').isNotEmpty) ...[
               pw.SizedBox(height: 8),
               pw.Text(
@@ -131,12 +130,23 @@ Future<Uint8List> buildReceiptPdf(ReceiptData data, PdfPageFormat _) async {
   return doc.save();
 }
 
-pw.Widget _amountRow(String label, String value, pw.Font font) {
+pw.Widget _amountRow(
+  String label,
+  String value,
+  pw.Font font, {
+  bool prominent = false,
+}) {
   return pw.Row(
     mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
     children: [
-      pw.Text(label, style: pw.TextStyle(font: font)),
-      pw.Text(value, style: pw.TextStyle(font: font)),
+      pw.Text(
+        prominent ? label.toUpperCase() : label,
+        style: pw.TextStyle(font: font, fontSize: prominent ? 16 : null),
+      ),
+      pw.Text(
+        value,
+        style: pw.TextStyle(font: font, fontSize: prominent ? 16 : null),
+      ),
     ],
   );
 }

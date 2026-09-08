@@ -4,7 +4,8 @@ import 'package:barcode/barcode.dart';
 import 'package:crypto/crypto.dart';
 import 'package:image/image.dart' as img;
 
-const installationFooter = 'For installation: 0768415017';
+const supportFooter = 'Support / Installation: 0768415017';
+const installationFooter = supportFooter;
 
 // Fixed-length numeric Code 128 stays readable at 2 dots/module on 58mm paper.
 String receiptBarcodeValue(String receiptNumber) => BigInt.parse(

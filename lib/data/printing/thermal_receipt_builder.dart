@@ -20,9 +20,6 @@ Future<Uint8List> buildThermalReceipt(ReceiptData data) async {
   final currency = data.settings.currency;
   final bytes = <int>[];
 
-  bytes.addAll(generator.imageRaster(receiptLogo(), align: PosAlign.left));
-  bytes.addAll(generator.feed(1));
-
   bytes.addAll(
     generator.text(
       data.settings.businessName.toUpperCase(),
@@ -32,6 +29,12 @@ Future<Uint8List> buildThermalReceipt(ReceiptData data) async {
         height: PosTextSize.size2,
         width: PosTextSize.size2,
       ),
+    ),
+  );
+  bytes.addAll(
+    generator.text(
+      'Powered by NEXAPOS',
+      styles: const PosStyles(align: PosAlign.center),
     ),
   );
   if ((data.settings.address ?? '').isNotEmpty) {
@@ -50,8 +53,8 @@ Future<Uint8List> buildThermalReceipt(ReceiptData data) async {
       ),
     );
   }
-  bytes.addAll(generator.feed(1));
-  bytes.addAll(generator.text('Receipt: ${sale.saleNumber}'));
+  bytes.addAll(generator.hr());
+  bytes.addAll(generator.text('Receipt #: ${sale.saleNumber}'));
   bytes.addAll(
     generator.text(
       'Date: ${DateFormat('d MMM yyyy HH:mm').format(sale.createdAt.toLocal())}',
@@ -61,12 +64,11 @@ Future<Uint8List> buildThermalReceipt(ReceiptData data) async {
   bytes.addAll(generator.hr());
 
   for (final item in data.items) {
-    bytes.addAll(generator.text(item.itemName));
     bytes.addAll(
       generator.row([
         PosColumn(
           text:
-              '${item.quantity} x ${item.unitPrice.format(currency: currency)}',
+              '${item.itemName}  ${item.quantity} x ${item.unitPrice.format(currency: currency)}',
           width: 7,
         ),
         PosColumn(
@@ -88,9 +90,10 @@ Future<Uint8List> buildThermalReceipt(ReceiptData data) async {
   bytes.addAll(
     _amountRow(
       generator,
-      'Total',
+      'TOTAL',
       sale.total.format(currency: currency),
       bold: true,
+      doubleSize: true,
     ),
   );
   bytes.addAll(generator.hr());
@@ -102,10 +105,16 @@ Future<Uint8List> buildThermalReceipt(ReceiptData data) async {
     ),
   );
   bytes.addAll(generator.text('Status: ${sale.status.toUpperCase()}'));
-  bytes.addAll(generator.feed(1));
+  bytes.addAll(generator.hr());
   bytes.addAll(
     generator.text(
-      installationFooter,
+      'Thank you for shopping with us!',
+      styles: const PosStyles(align: PosAlign.center),
+    ),
+  );
+  bytes.addAll(
+    generator.text(
+      supportFooter,
       styles: const PosStyles(align: PosAlign.center),
     ),
   );
@@ -168,8 +177,13 @@ List<int> _amountRow(
   String label,
   String value, {
   bool bold = false,
+  bool doubleSize = false,
 }) {
-  final styles = PosStyles(bold: bold);
+  final styles = PosStyles(
+    bold: bold,
+    height: doubleSize ? PosTextSize.size2 : PosTextSize.size1,
+    width: doubleSize ? PosTextSize.size2 : PosTextSize.size1,
+  );
   return generator.row([
     PosColumn(text: label, width: 7, styles: styles),
     PosColumn(

@@ -60,6 +60,7 @@ class ReportsScreen extends ConsumerStatefulWidget {
 
 class _ReportsScreenState extends ConsumerState<ReportsScreen> {
   String _mode = 'day';
+  bool _printing = false;
   DateTime _draftDate = _dateOnly(DateTime.now());
   DateTime _draftMonth = DateTime(DateTime.now().year, DateTime.now().month, 1);
   DateTime _draftRangeStart = _dateOnly(DateTime.now())
@@ -241,8 +242,17 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
   }
 
   Future<void> _print(ReportData data) async {
+    if (_printing) return;
+    setState(() => _printing = true);
     final bytes = await _buildPdfBytes(data);
-    await Printing.layoutPdf(onLayout: (format) => bytes);
+    try {
+      await Printing.layoutPdf(
+        name: 'NexaPOS $_fileNameLabel.pdf',
+        onLayout: (format) => bytes,
+      );
+    } finally {
+      if (mounted) setState(() => _printing = false);
+    }
   }
 
   /// Distinct from _print: the OS print dialog only offers to save as
@@ -347,9 +357,15 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
               FilledButton(onPressed: _apply, child: const Text('View Report')),
               dataAsync.maybeWhen(
                 data: (data) => OutlinedButton.icon(
-                  onPressed: () => _print(data),
-                  icon: const Icon(Icons.print_outlined),
-                  label: const Text('Print'),
+                  onPressed: _printing ? null : () => _print(data),
+                  icon: _printing
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.print_outlined),
+                  label: Text(_printing ? 'Printing...' : 'Print'),
                 ),
                 orElse: () => OutlinedButton.icon(
                   onPressed: null,
