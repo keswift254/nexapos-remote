@@ -23,6 +23,10 @@ internal static class Program
     {
         try
         {
+            if (args.Any(arg => string.Equals(arg, "/verify-payload", StringComparison.OrdinalIgnoreCase)))
+            {
+                return VerifyRuntimePayload();
+            }
             if (!IsAdministrator())
             {
                 return RelaunchElevated(args);
@@ -106,9 +110,8 @@ internal static class Program
     private static void Install(string installDir)
     {
         Directory.CreateDirectory(installDir);
-        using (var payload = typeof(Program).Assembly.GetManifestResourceStream("NexaPOS-Windows-runtime.zip"))
+        using (var payload = OpenRuntimePayload())
         {
-            if (payload == null) throw new InvalidOperationException("The Windows runtime payload is missing from this setup file.");
             using (var archive = new ZipArchive(payload, ZipArchiveMode.Read))
             {
                 foreach (var entry in archive.Entries)
@@ -145,6 +148,46 @@ internal static class Program
         TryPinToTaskbar(desktopShortcut);
         RegisterUninstaller(installDir);
         RegisterCheckoutProtocol(executable);
+    }
+
+    private static Stream OpenRuntimePayload()
+    {
+        var assembly = typeof(Program).Assembly;
+        var resourceName = assembly.GetManifestResourceNames().FirstOrDefault(name =>
+            string.Equals(name, "NexaPOS.WindowsRuntime.zip", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(name, "NexaPOS-Windows-runtime.zip", StringComparison.OrdinalIgnoreCase) ||
+            name.EndsWith("WindowsRuntime.zip", StringComparison.OrdinalIgnoreCase) ||
+            name.EndsWith("Windows-runtime.zip", StringComparison.OrdinalIgnoreCase));
+        if (resourceName == null)
+        {
+            throw new InvalidOperationException(
+                "The Windows runtime payload is missing from this setup file. Embedded resources: " +
+                string.Join(", ", assembly.GetManifestResourceNames()));
+        }
+        var payload = assembly.GetManifestResourceStream(resourceName);
+        if (payload == null)
+        {
+            throw new InvalidOperationException("The embedded Windows runtime payload could not be opened.");
+        }
+        return payload;
+    }
+
+    private static int VerifyRuntimePayload()
+    {
+        using (var payload = OpenRuntimePayload())
+        using (var archive = new ZipArchive(payload, ZipArchiveMode.Read))
+        {
+            if (!archive.Entries.Any(entry =>
+                string.Equals(
+                    entry.FullName.Replace('/', '\\'),
+                    ExecutableName,
+                    StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidDataException(
+                    "The Windows runtime payload does not contain " + ExecutableName + ".");
+            }
+        }
+        return 0;
     }
 
     private static void RegisterCheckoutProtocol(string executable)
