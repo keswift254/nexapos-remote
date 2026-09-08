@@ -442,6 +442,7 @@ class _ReportPdfPreviewScreen extends StatelessWidget {
       body: PdfPreview(
         build: (_) async => bytes,
         pdfFileName: fileName,
+        maxPageWidth: 300,
         canChangePageFormat: false,
         canChangeOrientation: false,
         allowPrinting: false,
