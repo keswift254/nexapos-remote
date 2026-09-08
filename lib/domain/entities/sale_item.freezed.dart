@@ -26,16 +26,21 @@ $SaleItemCopyWith<SaleItem> get copyWith => _$SaleItemCopyWithImpl<SaleItem>(thi
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is SaleItem&&(identical(other.id, id) || other.id == id)&&(identical(other.saleId, saleId) || other.saleId == saleId)&&(identical(other.productId, productId) || other.productId == productId)&&(identical(other.itemName, itemName) || other.itemName == itemName)&&(identical(other.quantity, quantity) || other.quantity == quantity)&&(identical(other.unitPrice, unitPrice) || other.unitPrice == unitPrice)&&(identical(other.costPrice, costPrice) || other.costPrice == costPrice)&&(identical(other.lineTotal, lineTotal) || other.lineTotal == lineTotal));
+  final _this = this as SaleItem;
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is SaleItem&&(identical(other.id, _this.id) || other.id == _this.id)&&(identical(other.saleId, _this.saleId) || other.saleId == _this.saleId)&&(identical(other.productId, _this.productId) || other.productId == _this.productId)&&(identical(other.itemName, _this.itemName) || other.itemName == _this.itemName)&&(identical(other.quantity, _this.quantity) || other.quantity == _this.quantity)&&(identical(other.unitPrice, _this.unitPrice) || other.unitPrice == _this.unitPrice)&&(identical(other.costPrice, _this.costPrice) || other.costPrice == _this.costPrice)&&(identical(other.lineTotal, _this.lineTotal) || other.lineTotal == _this.lineTotal));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,id,saleId,productId,itemName,quantity,unitPrice,costPrice,lineTotal);
+int get hashCode {
+  final _this = this as SaleItem;
+  return Object.hash(runtimeType,_this.id,_this.saleId,_this.productId,_this.itemName,_this.quantity,_this.unitPrice,_this.costPrice,_this.lineTotal);
+}
 
 @override
 String toString() {
-  return 'SaleItem(id: $id, saleId: $saleId, productId: $productId, itemName: $itemName, quantity: $quantity, unitPrice: $unitPrice, costPrice: $costPrice, lineTotal: $lineTotal)';
+  final _this = this as SaleItem;
+  return 'SaleItem(id: ${_this.id}, saleId: ${_this.saleId}, productId: ${_this.productId}, itemName: ${_this.itemName}, quantity: ${_this.quantity}, unitPrice: ${_this.unitPrice}, costPrice: ${_this.costPrice}, lineTotal: ${_this.lineTotal})';
 }
 
 
@@ -236,16 +241,18 @@ _$SaleItemCopyWith<_SaleItem> get copyWith => __$SaleItemCopyWithImpl<_SaleItem>
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _SaleItem&&(identical(other.id, id) || other.id == id)&&(identical(other.saleId, saleId) || other.saleId == saleId)&&(identical(other.productId, productId) || other.productId == productId)&&(identical(other.itemName, itemName) || other.itemName == itemName)&&(identical(other.quantity, quantity) || other.quantity == quantity)&&(identical(other.unitPrice, unitPrice) || other.unitPrice == unitPrice)&&(identical(other.costPrice, costPrice) || other.costPrice == costPrice)&&(identical(other.lineTotal, lineTotal) || other.lineTotal == lineTotal));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is _SaleItem&&(identical(other.id, id) || other.id == id)&&(identical(other.saleId, saleId) || other.saleId == saleId)&&(identical(other.productId, productId) || other.productId == productId)&&(identical(other.itemName, itemName) || other.itemName == itemName)&&(identical(other.quantity, quantity) || other.quantity == quantity)&&(identical(other.unitPrice, unitPrice) || other.unitPrice == unitPrice)&&(identical(other.costPrice, costPrice) || other.costPrice == costPrice)&&(identical(other.lineTotal, lineTotal) || other.lineTotal == lineTotal));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,id,saleId,productId,itemName,quantity,unitPrice,costPrice,lineTotal);
+int get hashCode {
+    return Object.hash(runtimeType,id,saleId,productId,itemName,quantity,unitPrice,costPrice,lineTotal);
+}
 
 @override
 String toString() {
-  return 'SaleItem(id: $id, saleId: $saleId, productId: $productId, itemName: $itemName, quantity: $quantity, unitPrice: $unitPrice, costPrice: $costPrice, lineTotal: $lineTotal)';
+    return 'SaleItem(id: $id, saleId: $saleId, productId: $productId, itemName: $itemName, quantity: $quantity, unitPrice: $unitPrice, costPrice: $costPrice, lineTotal: $lineTotal)';
 }
 
 

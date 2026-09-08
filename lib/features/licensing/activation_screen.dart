@@ -1,7 +1,16 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
+
 import '../../domain/services/license_service.dart';
+import '../../core/providers.dart';
+import '../../data/payments/platform_http_client.dart';
+import '../../data/payments/platform_onboarding_gateway.dart';
+import '../../domain/entities/paystack_credentials.dart';
+import '../../domain/services/paystack_credentials_service.dart';
 
 const _whatsappSupportUrl = 'https://wa.me/message/M5SGWZ664XJ4C1';
 
@@ -36,9 +45,11 @@ class _ActivationScreenState extends ConsumerState<ActivationScreen> {
       _error = null;
     });
 
-    final result = await ref.read(licenseServiceProvider).activate(_codeController.text);
+    final result = await ref
+        .read(licenseServiceProvider)
+        .activate(_codeController.text);
     result.when(
-      ok: (_) {},
+      ok: (_) => unawaited(_registerPrimaryDevice()),
       failure: (message) => setState(() {
         _submitting = false;
         _error = message;
@@ -46,8 +57,38 @@ class _ActivationScreenState extends ConsumerState<ActivationScreen> {
     );
   }
 
+  Future<void> _registerPrimaryDevice() async {
+    final credentialsService = ref.read(paystackCredentialsServiceProvider);
+    final syncMetadata = ref.read(syncMetadataProvider);
+    final onboarding = ref.read(platformOnboardingGatewayProvider);
+    try {
+      final credentials = await credentialsService.load();
+      if (credentials.isConfigured) return;
+      final registration = await onboarding.registerDevice(
+            baseUrl: nexaposPlatformBaseUrl,
+            deviceId: await syncMetadata.deviceId(),
+            deviceLabel: 'Primary device',
+            registrationSecret: await syncMetadata.registrationSecret(),
+          );
+      await credentialsService.save(
+            PaystackCredentials(
+              baseUrl: nexaposPlatformBaseUrl,
+              apiKey: registration.apiKey,
+              currency: 'KES',
+              defaultEmail: '',
+            ),
+          );
+      await credentialsService.saveDeviceLabel('Primary device');
+    } catch (_) {
+      // Setup remains usable offline; Device Sync can retry registration later.
+    }
+  }
+
   Future<void> _openWhatsApp() async {
-    await launchUrl(Uri.parse(_whatsappSupportUrl), mode: LaunchMode.externalApplication);
+    await launchUrl(
+      Uri.parse(_whatsappSupportUrl),
+      mode: LaunchMode.externalApplication,
+    );
   }
 
   @override
@@ -64,7 +105,11 @@ class _ActivationScreenState extends ConsumerState<ActivationScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Icon(Icons.vpn_key, size: 48, color: Theme.of(context).colorScheme.primary),
+                  Icon(
+                    Icons.vpn_key,
+                    size: 48,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
                   const SizedBox(height: 8),
                   Text(
                     'Activate NexaPOS',
@@ -82,22 +127,48 @@ class _ActivationScreenState extends ConsumerState<ActivationScreen> {
                     decoration: const InputDecoration(labelText: 'License key'),
                     textCapitalization: TextCapitalization.characters,
                     autofocus: true,
-                    validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter your license key' : null,
+                    validator: (v) => (v == null || v.trim().isEmpty)
+                        ? 'Enter your license key'
+                        : null,
                     onFieldSubmitted: (_) => _submit(),
                   ),
                   if (_error != null) ...[
                     const SizedBox(height: 12),
-                    Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                    Text(
+                      _error!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
                   ],
                   const SizedBox(height: 24),
                   FilledButton(
                     onPressed: _submitting ? null : _submit,
                     child: _submitting
                         ? const SizedBox(
-                            height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
                         : const Text('Activate'),
                   ),
                   const SizedBox(height: 20),
+                  OutlinedButton.icon(
+                    onPressed: _submitting
+                        ? null
+                        : () => context.go('/join-shop'),
+                    icon: const Icon(Icons.group_add_outlined),
+                    label: const Text('Join an existing shop'),
+                  ),
+                  const SizedBox(height: 12),
+                  FutureBuilder<bool>(
+                    future: ref.read(licenseServiceProvider).membershipBlocked,
+                    builder: (context, snapshot) => snapshot.data == true
+                        ? const Text(
+                            'Shop access ended. Your local records are retained. Contact support for recovery.',
+                          )
+                        : const SizedBox.shrink(),
+                  ),
                   Text(
                     "Don't have a license key? Tap the WhatsApp button below to chat with our agent and get one.",
                     textAlign: TextAlign.center,

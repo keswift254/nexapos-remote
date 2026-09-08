@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:http/http.dart' as http;
 
 const platformRequestTimeout = Duration(seconds: 25);
@@ -12,7 +13,8 @@ const platformRequestTimeout = Duration(seconds: 25);
 /// deployment. A compile-time constant rather than a field an operator
 /// types in during registration; PaymentSettingsScreen no longer shows
 /// that field at all. Update this if the deployment ever moves.
-const nexaposPlatformBaseUrl = 'https://nexapos-platform.onrender.com/index.php';
+const nexaposPlatformBaseUrl =
+    'https://nexapos-platform.onrender.com/index.php';
 
 /// An error the payments-platform backend (or Paystack, relayed through
 /// it) reported - bad/expired API key, declined transaction, malformed
@@ -20,7 +22,8 @@ const nexaposPlatformBaseUrl = 'https://nexapos-platform.onrender.com/index.php'
 /// Surface [message] to the user as-is.
 class PaystackException implements Exception {
   final String message;
-  const PaystackException(this.message);
+  final int? statusCode;
+  const PaystackException(this.message, {this.statusCode});
 
   @override
   String toString() => message;
@@ -48,10 +51,8 @@ Future<Map<String, dynamic>> platformRequest(
   Map<String, dynamic>? body,
   Map<String, String>? queryParameters,
 }) async {
-  final uri = Uri.parse(baseUrl).replace(queryParameters: {
-    'action': action,
-    ...?queryParameters,
-  });
+  final uri = Uri.parse(baseUrl)
+      .replace(queryParameters: {'action': action, ...?queryParameters});
   final headers = {
     'Accept': 'application/json',
     if (apiKey != null) 'Authorization': 'Bearer ${apiKey.trim()}',
@@ -60,10 +61,11 @@ Future<Map<String, dynamic>> platformRequest(
 
   http.Response response;
   try {
-    response = await (method == 'POST'
-            ? client.post(uri, headers: headers, body: jsonEncode(body))
-            : client.get(uri, headers: headers))
-        .timeout(platformRequestTimeout);
+    response =
+        await (method == 'POST'
+                ? client.post(uri, headers: headers, body: jsonEncode(body))
+                : client.get(uri, headers: headers))
+            .timeout(platformRequestTimeout);
   } on TimeoutException {
     throw const PaystackOfflineException();
   } on SocketException {
@@ -82,13 +84,23 @@ Future<Map<String, dynamic>> platformRequest(
   try {
     decoded = jsonDecode(response.body);
   } on FormatException {
-    throw const PaystackException('The payments server sent back an invalid response.');
+    throw const PaystackException(
+      'The payments server sent back an invalid response.',
+    );
   }
   if (decoded is! Map<String, dynamic>) {
-    throw const PaystackException('The payments server sent back an invalid response.');
+    throw const PaystackException(
+      'The payments server sent back an invalid response.',
+    );
   }
   if (response.statusCode >= 400) {
-    throw PaystackException(platformResponseMessage(decoded, 'The payments server rejected the request.'));
+    throw PaystackException(
+      platformResponseMessage(
+        decoded,
+        'The payments server rejected the request.',
+      ),
+      statusCode: response.statusCode,
+    );
   }
   return decoded;
 }
@@ -99,7 +111,9 @@ String platformResponseMessage(Map<String, dynamic> response, String fallback) {
   final data = response['data'];
   if (data is Map) {
     final gatewayResponse = data['gateway_response'];
-    if (gatewayResponse is String && gatewayResponse.trim().isNotEmpty) return gatewayResponse.trim();
+    if (gatewayResponse is String && gatewayResponse.trim().isNotEmpty) {
+      return gatewayResponse.trim();
+    }
   }
   return fallback;
 }

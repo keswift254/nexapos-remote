@@ -69,15 +69,19 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Update available: version 1.0.12'), findsOneWidget);
       expect(find.byTooltip('Update available: version 1.0.12'), findsOneWidget);
-      if (role == UserRole.admin) {
-        await tester.tap(find.byTooltip('Settings'));
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('Check for Updates'));
-      } else {
-        expect(find.byTooltip('Settings'), findsNothing);
+      if (role != UserRole.admin) {
         expect(find.byTooltip('Users & Roles'), findsNothing);
-        await tester.tap(find.byTooltip('Check for Updates'));
       }
+      await tester.tap(find.byTooltip('Settings'));
+      await tester.pumpAndSettle();
+      expect(find.text('Privacy'), findsOneWidget);
+      if (role != UserRole.admin) {
+        expect(find.text('Business Settings'), findsNothing);
+        expect(find.text('Payment Settings'), findsNothing);
+        expect(find.text('Device Sync'), findsNothing);
+        expect(find.text('Back up data now'), findsNothing);
+      }
+      await tester.tap(find.text('Check for Updates'));
       await tester.pumpAndSettle();
       expect(find.text('Software Update'), findsOneWidget);
       expect(updates.checks, 1);

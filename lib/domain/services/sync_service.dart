@@ -1,5 +1,7 @@
 import 'dart:async';
+
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+
 import '../../core/providers.dart';
 import '../../data/local/database.dart';
 import '../../data/local/sync_metadata.dart';
@@ -7,6 +9,7 @@ import '../../data/sync/platform_sync_gateway.dart';
 import '../../data/sync/sync_table_registry.dart';
 import '../../data/payments/platform_onboarding_gateway.dart';
 import 'paystack_credentials_service.dart';
+import 'license_service.dart';
 
 part 'sync_service.g.dart';
 
@@ -17,6 +20,7 @@ SyncService syncService(Ref ref) {
     ref.watch(syncMetadataProvider),
     ref.watch(platformSyncGatewayProvider),
     ref.watch(paystackCredentialsServiceProvider),
+    canSync: () => ref.read(licenseServiceProvider).hasAppAccess(),
   );
 }
 
@@ -46,9 +50,16 @@ class SyncService {
   final PlatformSyncGateway _gateway;
   final PaystackCredentialsService _credentials;
   final PlatformOnboardingGateway _onboarding;
+  final Future<bool> Function()? canSync;
 
-  SyncService(this._db, this._syncMeta, this._gateway, this._credentials,
-      {PlatformOnboardingGateway? onboarding}) : _onboarding = onboarding ?? PlatformOnboardingGateway();
+  SyncService(
+    this._db,
+    this._syncMeta,
+    this._gateway,
+    this._credentials, {
+    PlatformOnboardingGateway? onboarding,
+    this.canSync,
+  }) : _onboarding = onboarding ?? PlatformOnboardingGateway();
 
   Future<void> _tail = Future.value();
   String? lastError;
@@ -61,50 +72,116 @@ class SyncService {
   }
 
   Future<bool> get hasPendingShopChange async =>
-      (await _db.customSelect("SELECT id FROM local_safety_state WHERE id='shop_change'").get()).isNotEmpty;
+      (await _db
+              .customSelect(
+                "SELECT id FROM local_safety_state WHERE id='shop_change'",
+              )
+              .get())
+          .isNotEmpty;
 
   Future<bool> get needsInitialPull async =>
-      (await _db.customSelect("SELECT id FROM local_safety_state WHERE id='shop_hydration'").get()).isNotEmpty;
+      (await _db
+              .customSelect(
+                "SELECT id FROM local_safety_state WHERE id='shop_hydration'",
+              )
+              .get())
+          .isNotEmpty;
 
   Future<void> prepareJoinedShop() => _db.transaction(() async {
     await _db.delete(_db.businessSettings).go();
     final meta = await _db.select(_db.deviceMeta).getSingle();
     await _syncMeta.setLastPushedLocalRev(meta.nextLocalRev - 1);
     await _syncMeta.setLastPulledChangeId(0);
-    await _db.customStatement("INSERT OR REPLACE INTO local_safety_state(id,value) VALUES('shop_hydration','pending')");
+    await _db.customStatement(
+      "INSERT OR REPLACE INTO local_safety_state(id,value) VALUES('shop_hydration','pending')",
+    );
   });
 
   Future<void> prepareInitialJoin(int sourceShop) => _db.transaction(() async {
-    if (sourceShop <= 0) throw StateError('Update the platform before joining a shop.');
-    for (final table in _db.allTables.where((t) =>
-        !['roles', 'business_settings', 'device_meta'].contains(t.actualTableName))) {
-      if ((await _db.customSelect('SELECT 1 FROM "${table.actualTableName}" LIMIT 1').get()).isNotEmpty) {
-        throw StateError('This device contains shop data. Use the verified Switch shop action.');
+    if (sourceShop <= 0) {
+      throw StateError('Update the platform before joining a shop.');
+    }
+    for (final table in _db.allTables.where(
+      (t) => ![
+        'roles',
+        'business_settings',
+        'device_meta',
+      ].contains(t.actualTableName),
+    )) {
+      if ((await _db
+              .customSelect('SELECT 1 FROM "${table.actualTableName}" LIMIT 1')
+              .get())
+          .isNotEmpty) {
+        throw StateError(
+          'This device contains shop data. Use the verified Switch shop action.',
+        );
       }
     }
     await prepareJoinedShop();
-    await _db.customStatement("INSERT OR REPLACE INTO local_safety_state(id,value) VALUES('initial_join',?)", ['$sourceShop']);
+    await _db.customStatement(
+      "INSERT OR REPLACE INTO local_safety_state(id,value) VALUES('initial_join',?)",
+      ['$sourceShop'],
+    );
+  });
+
+  Future<void> reconcileFailedInitialJoin() => exclusive(() async {
+    final marker = await _db
+        .customSelect(
+          "SELECT value FROM local_safety_state WHERE id='initial_join'",
+        )
+        .getSingleOrNull();
+    if (marker == null) return;
+    final credentials = await _credentials.load();
+    final status = await _onboarding.getClientStatus(
+      baseUrl: credentials.baseUrl,
+      apiKey: credentials.apiKey,
+    );
+    if ('${status.shopId}' != marker.data['value'] || !status.isOwner) return;
+    await _db.transaction(() async {
+      await _db.resetForFreshStart();
+      await _db.customStatement(
+        "DELETE FROM local_safety_state WHERE id IN ('initial_join','shop_hydration')",
+      );
+    });
   });
 
   Future<void> runSyncCycle() => exclusive(() async {
+    if (canSync != null && !await canSync!()) {
+      lastError = 'Activate this device or reconnect to its invited shop before syncing.';
+      return;
+    }
     if (await hasPendingShopChange) {
-      lastError = 'Shop change interrupted. Resolve it in Device Sync before syncing.';
+      lastError =
+          'Shop change interrupted. Resolve it in Device Sync before syncing.';
       return;
     }
     final credentials = await _credentials.load();
     if (!credentials.isConfigured) return;
 
     try {
-      final initialJoin = await _db.customSelect("SELECT value FROM local_safety_state WHERE id='initial_join'").getSingleOrNull();
+      final initialJoin = await _db
+          .customSelect(
+            "SELECT value FROM local_safety_state WHERE id='initial_join'",
+          )
+          .getSingleOrNull();
       if (initialJoin != null) {
-        final status = await _onboarding.getClientStatus(baseUrl: credentials.baseUrl, apiKey: credentials.apiKey);
-        if (status.shopId <= 0) throw StateError('The server did not return shop membership.');
+        final status = await _onboarding.getClientStatus(
+          baseUrl: credentials.baseUrl,
+          apiKey: credentials.apiKey,
+        );
+        if (status.shopId <= 0) {
+          throw StateError('The server did not return shop membership.');
+        }
         await _db.transaction(() async {
           if ('${status.shopId}' == initialJoin.data['value']) {
             await _db.resetForFreshStart();
-            await _db.customStatement("DELETE FROM local_safety_state WHERE id='shop_hydration'");
+            await _db.customStatement(
+              "DELETE FROM local_safety_state WHERE id='shop_hydration'",
+            );
           }
-          await _db.customStatement("DELETE FROM local_safety_state WHERE id='initial_join'");
+          await _db.customStatement(
+            "DELETE FROM local_safety_state WHERE id='initial_join'",
+          );
         });
       }
       if (await needsInitialPull) {
@@ -112,9 +189,13 @@ class SyncService {
         final users = await _db.select(_db.users).get();
         final settings = await _db.select(_db.businessSettings).get();
         if (!users.any((u) => u.status == 'active') || settings.isEmpty) {
-          throw const PaystackException('Waiting for the joined shop users and settings. Sync the owner device, then retry here.');
+          throw const PaystackException(
+            'Waiting for the joined shop users and settings. Sync the owner device, then retry here.',
+          );
         }
-        await _db.customStatement("DELETE FROM local_safety_state WHERE id='shop_hydration'");
+        await _db.customStatement(
+          "DELETE FROM local_safety_state WHERE id='shop_hydration'",
+        );
       }
       await pushLocalChanges(credentials.baseUrl, credentials.apiKey);
       await pullRemoteChanges(credentials.baseUrl, credentials.apiKey);
@@ -153,7 +234,10 @@ class SyncService {
     }
     if (pending.isEmpty) return;
 
-    pending.sort((a, b) => (a.json['localRev'] as int).compareTo(b.json['localRev'] as int));
+    pending.sort(
+      (a, b) =>
+          (a.json['localRev'] as int).compareTo(b.json['localRev'] as int),
+    );
 
     // Bound every request so a large import cannot create an unbounded
     // JSON body on either the device or the relay server. Advance the
@@ -164,16 +248,22 @@ class SyncService {
       final end = (offset + _pushBatchSize).clamp(0, pending.length);
       final slice = pending.sublist(offset, end);
       final batch = slice
-          .map((change) => {
-                'table_name': change.tableName,
-                'row_id': change.json['id'],
-                'local_rev': change.json['localRev'],
-                'updated_at': change.json['updatedAt'],
-                'payload': change.json,
-              })
+          .map(
+            (change) => {
+              'table_name': change.tableName,
+              'row_id': change.json['id'],
+              'local_rev': change.json['localRev'],
+              'updated_at': change.json['updatedAt'],
+              'payload': change.json,
+            },
+          )
           .toList();
 
-      await _gateway.pushChanges(baseUrl: baseUrl, apiKey: apiKey, changes: batch);
+      await _gateway.pushChanges(
+        baseUrl: baseUrl,
+        apiKey: apiKey,
+        changes: batch,
+      );
       await _syncMeta.setLastPushedLocalRev(slice.last.json['localRev'] as int);
     }
   }
@@ -188,7 +278,11 @@ class SyncService {
     final touchedProductIds = <String>{};
 
     while (true) {
-      final result = await _gateway.pullChanges(baseUrl: baseUrl, apiKey: apiKey, since: cursor);
+      final result = await _gateway.pullChanges(
+        baseUrl: baseUrl,
+        apiKey: apiKey,
+        since: cursor,
+      );
       if (result.nextCursor < cursor ||
           (result.changes.isNotEmpty && result.nextCursor <= cursor) ||
           (result.changes.isEmpty && result.hasMore)) {
@@ -211,7 +305,9 @@ class SyncService {
 
           if (change.tableName == 'stock_movements') {
             final productId = change.payload['productId'] as String?;
-            if (productId != null && productId.isNotEmpty) touchedProductIds.add(productId);
+            if (productId != null && productId.isNotEmpty) {
+              touchedProductIds.add(productId);
+            }
           }
         }
         await _recomputeStockQty(touchedProductIds);
@@ -221,12 +317,15 @@ class SyncService {
       cursor = result.nextCursor;
       if (!result.hasMore) break;
     }
-
   }
 
-  Future<void> _applyWithLastWriteWins(SyncTableAdapter adapter, PulledChange change) async {
+  Future<void> _applyWithLastWriteWins(
+    SyncTableAdapter adapter,
+    PulledChange change,
+  ) async {
     final incomingUpdatedAt = change.payload['updatedAt'] as String? ?? '';
-    final incomingDeviceId = change.payload['createdByDeviceId'] as String? ?? '';
+    final incomingDeviceId =
+        change.payload['createdByDeviceId'] as String? ?? '';
     final existing = await adapter.findLocalMeta!(_db, change.rowId);
 
     // No local copy yet (first time this device has seen the row), or
@@ -235,9 +334,11 @@ class SyncService {
     // objectively picking the "correct" winner (impossible under wall-
     // clock skew), it's guaranteeing every device converges on the same
     // answer rather than two devices permanently disagreeing.
-    final shouldApply = existing == null ||
+    final shouldApply =
+        existing == null ||
         incomingUpdatedAt.compareTo(existing.updatedAt) > 0 ||
-        (incomingUpdatedAt == existing.updatedAt && incomingDeviceId.compareTo(existing.deviceId) > 0);
+        (incomingUpdatedAt == existing.updatedAt &&
+            incomingDeviceId.compareTo(existing.deviceId) > 0);
 
     if (shouldApply) {
       await adapter.applyPayload(_db, change.payload);

@@ -26,16 +26,21 @@ $CartStateCopyWith<CartState> get copyWith => _$CartStateCopyWithImpl<CartState>
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is CartState&&const DeepCollectionEquality().equals(other.items, items)&&(identical(other.saleType, saleType) || other.saleType == saleType)&&(identical(other.discount, discount) || other.discount == discount)&&(identical(other.customerName, customerName) || other.customerName == customerName)&&(identical(other.customerPhone, customerPhone) || other.customerPhone == customerPhone)&&(identical(other.paymentMethod, paymentMethod) || other.paymentMethod == paymentMethod)&&(identical(other.referenceNote, referenceNote) || other.referenceNote == referenceNote));
+  final _this = this as CartState;
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is CartState&&const DeepCollectionEquality().equals(other.items, _this.items)&&(identical(other.saleType, _this.saleType) || other.saleType == _this.saleType)&&(identical(other.discount, _this.discount) || other.discount == _this.discount)&&(identical(other.customerName, _this.customerName) || other.customerName == _this.customerName)&&(identical(other.customerPhone, _this.customerPhone) || other.customerPhone == _this.customerPhone)&&(identical(other.paymentMethod, _this.paymentMethod) || other.paymentMethod == _this.paymentMethod)&&(identical(other.referenceNote, _this.referenceNote) || other.referenceNote == _this.referenceNote));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(items),saleType,discount,customerName,customerPhone,paymentMethod,referenceNote);
+int get hashCode {
+  final _this = this as CartState;
+  return Object.hash(runtimeType,const DeepCollectionEquality().hash(_this.items),_this.saleType,_this.discount,_this.customerName,_this.customerPhone,_this.paymentMethod,_this.referenceNote);
+}
 
 @override
 String toString() {
-  return 'CartState(items: $items, saleType: $saleType, discount: $discount, customerName: $customerName, customerPhone: $customerPhone, paymentMethod: $paymentMethod, referenceNote: $referenceNote)';
+  final _this = this as CartState;
+  return 'CartState(items: ${_this.items}, saleType: ${_this.saleType}, discount: ${_this.discount}, customerName: ${_this.customerName}, customerPhone: ${_this.customerPhone}, paymentMethod: ${_this.paymentMethod}, referenceNote: ${_this.referenceNote})';
 }
 
 
@@ -240,16 +245,18 @@ _$CartStateCopyWith<_CartState> get copyWith => __$CartStateCopyWithImpl<_CartSt
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _CartState&&const DeepCollectionEquality().equals(other._items, _items)&&(identical(other.saleType, saleType) || other.saleType == saleType)&&(identical(other.discount, discount) || other.discount == discount)&&(identical(other.customerName, customerName) || other.customerName == customerName)&&(identical(other.customerPhone, customerPhone) || other.customerPhone == customerPhone)&&(identical(other.paymentMethod, paymentMethod) || other.paymentMethod == paymentMethod)&&(identical(other.referenceNote, referenceNote) || other.referenceNote == referenceNote));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is _CartState&&const DeepCollectionEquality().equals(other.items, _items)&&(identical(other.saleType, saleType) || other.saleType == saleType)&&(identical(other.discount, discount) || other.discount == discount)&&(identical(other.customerName, customerName) || other.customerName == customerName)&&(identical(other.customerPhone, customerPhone) || other.customerPhone == customerPhone)&&(identical(other.paymentMethod, paymentMethod) || other.paymentMethod == paymentMethod)&&(identical(other.referenceNote, referenceNote) || other.referenceNote == referenceNote));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(_items),saleType,discount,customerName,customerPhone,paymentMethod,referenceNote);
+int get hashCode {
+    return Object.hash(runtimeType,const DeepCollectionEquality().hash(_items),saleType,discount,customerName,customerPhone,paymentMethod,referenceNote);
+}
 
 @override
 String toString() {
-  return 'CartState(items: $items, saleType: $saleType, discount: $discount, customerName: $customerName, customerPhone: $customerPhone, paymentMethod: $paymentMethod, referenceNote: $referenceNote)';
+    return 'CartState(items: $items, saleType: $saleType, discount: $discount, customerName: $customerName, customerPhone: $customerPhone, paymentMethod: $paymentMethod, referenceNote: $referenceNote)';
 }
 
 

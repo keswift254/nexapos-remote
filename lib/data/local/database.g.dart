@@ -8494,8 +8494,10 @@ class $$RolesTableTableManager
               ),
           withReferenceMapper: (p0) => p0
               .map(
-                (e) =>
-                    (e.readTable(table), $$RolesTableReferences(db, table, e)),
+                (e) => (
+                  e.readTable<$RolesTable, Role>(table),
+                  $$RolesTableReferences(db, table, e),
+                ),
               )
               .toList(),
           prefetchHooksCallback: ({usersRefs = false}) {
@@ -9174,8 +9176,10 @@ class $$UsersTableTableManager
               ),
           withReferenceMapper: (p0) => p0
               .map(
-                (e) =>
-                    (e.readTable(table), $$UsersTableReferences(db, table, e)),
+                (e) => (
+                  e.readTable<$UsersTable, User>(table),
+                  $$UsersTableReferences(db, table, e),
+                ),
               )
               .toList(),
           prefetchHooksCallback:
@@ -9627,7 +9631,7 @@ class $$CategoriesTableTableManager
           withReferenceMapper: (p0) => p0
               .map(
                 (e) => (
-                  e.readTable(table),
+                  e.readTable<$CategoriesTable, Category>(table),
                   $$CategoriesTableReferences(db, table, e),
                 ),
               )
@@ -10309,7 +10313,7 @@ class $$ProductsTableTableManager
           withReferenceMapper: (p0) => p0
               .map(
                 (e) => (
-                  e.readTable(table),
+                  e.readTable<$ProductsTable, Product>(table),
                   $$ProductsTableReferences(db, table, e),
                 ),
               )
@@ -11059,8 +11063,10 @@ class $$SalesTableTableManager
               ),
           withReferenceMapper: (p0) => p0
               .map(
-                (e) =>
-                    (e.readTable(table), $$SalesTableReferences(db, table, e)),
+                (e) => (
+                  e.readTable<$SalesTable, Sale>(table),
+                  $$SalesTableReferences(db, table, e),
+                ),
               )
               .toList(),
           prefetchHooksCallback:
@@ -11674,7 +11680,7 @@ class $$SaleItemsTableTableManager
           withReferenceMapper: (p0) => p0
               .map(
                 (e) => (
-                  e.readTable(table),
+                  e.readTable<$SaleItemsTable, SaleItem>(table),
                   $$SaleItemsTableReferences(db, table, e),
                 ),
               )
@@ -12137,7 +12143,7 @@ class $$ExpensesTableTableManager
           withReferenceMapper: (p0) => p0
               .map(
                 (e) => (
-                  e.readTable(table),
+                  e.readTable<$ExpensesTable, Expense>(table),
                   $$ExpensesTableReferences(db, table, e),
                 ),
               )
@@ -12669,7 +12675,7 @@ class $$StockMovementsTableTableManager
           withReferenceMapper: (p0) => p0
               .map(
                 (e) => (
-                  e.readTable(table),
+                  e.readTable<$StockMovementsTable, StockMovement>(table),
                   $$StockMovementsTableReferences(db, table, e),
                 ),
               )
@@ -13140,7 +13146,7 @@ class $$PaymentRecordsTableTableManager
           withReferenceMapper: (p0) => p0
               .map(
                 (e) => (
-                  e.readTable(table),
+                  e.readTable<$PaymentRecordsTable, PaymentRecord>(table),
                   $$PaymentRecordsTableReferences(db, table, e),
                 ),
               )
@@ -13544,7 +13550,16 @@ class $$BusinessSettingsTableTableManager
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
-              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .map(
+                (e) => (
+                  e.readTable<$BusinessSettingsTable, BusinessSetting>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $BusinessSettingsTable,
+                    BusinessSetting
+                  >(db, table, e),
+                ),
+              )
               .toList(),
           prefetchHooksCallback: null,
         ),
@@ -13790,7 +13805,16 @@ class $$DeviceMetaTableTableManager
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
-              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .map(
+                (e) => (
+                  e.readTable<$DeviceMetaTable, DeviceMetaData>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $DeviceMetaTable,
+                    DeviceMetaData
+                  >(db, table, e),
+                ),
+              )
               .toList(),
           prefetchHooksCallback: null,
         ),

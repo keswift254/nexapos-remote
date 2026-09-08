@@ -26,16 +26,21 @@ $SaleCopyWith<Sale> get copyWith => _$SaleCopyWithImpl<Sale>(this as Sale, _$ide
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is Sale&&(identical(other.id, id) || other.id == id)&&(identical(other.saleNumber, saleNumber) || other.saleNumber == saleNumber)&&(identical(other.userId, userId) || other.userId == userId)&&(identical(other.customerName, customerName) || other.customerName == customerName)&&(identical(other.customerPhone, customerPhone) || other.customerPhone == customerPhone)&&(identical(other.saleType, saleType) || other.saleType == saleType)&&(identical(other.paymentMethod, paymentMethod) || other.paymentMethod == paymentMethod)&&(identical(other.subtotal, subtotal) || other.subtotal == subtotal)&&(identical(other.discount, discount) || other.discount == discount)&&(identical(other.total, total) || other.total == total)&&(identical(other.status, status) || other.status == status)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt));
+  final _this = this as Sale;
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is Sale&&(identical(other.id, _this.id) || other.id == _this.id)&&(identical(other.saleNumber, _this.saleNumber) || other.saleNumber == _this.saleNumber)&&(identical(other.userId, _this.userId) || other.userId == _this.userId)&&(identical(other.customerName, _this.customerName) || other.customerName == _this.customerName)&&(identical(other.customerPhone, _this.customerPhone) || other.customerPhone == _this.customerPhone)&&(identical(other.saleType, _this.saleType) || other.saleType == _this.saleType)&&(identical(other.paymentMethod, _this.paymentMethod) || other.paymentMethod == _this.paymentMethod)&&(identical(other.subtotal, _this.subtotal) || other.subtotal == _this.subtotal)&&(identical(other.discount, _this.discount) || other.discount == _this.discount)&&(identical(other.total, _this.total) || other.total == _this.total)&&(identical(other.status, _this.status) || other.status == _this.status)&&(identical(other.createdAt, _this.createdAt) || other.createdAt == _this.createdAt));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,id,saleNumber,userId,customerName,customerPhone,saleType,paymentMethod,subtotal,discount,total,status,createdAt);
+int get hashCode {
+  final _this = this as Sale;
+  return Object.hash(runtimeType,_this.id,_this.saleNumber,_this.userId,_this.customerName,_this.customerPhone,_this.saleType,_this.paymentMethod,_this.subtotal,_this.discount,_this.total,_this.status,_this.createdAt);
+}
 
 @override
 String toString() {
-  return 'Sale(id: $id, saleNumber: $saleNumber, userId: $userId, customerName: $customerName, customerPhone: $customerPhone, saleType: $saleType, paymentMethod: $paymentMethod, subtotal: $subtotal, discount: $discount, total: $total, status: $status, createdAt: $createdAt)';
+  final _this = this as Sale;
+  return 'Sale(id: ${_this.id}, saleNumber: ${_this.saleNumber}, userId: ${_this.userId}, customerName: ${_this.customerName}, customerPhone: ${_this.customerPhone}, saleType: ${_this.saleType}, paymentMethod: ${_this.paymentMethod}, subtotal: ${_this.subtotal}, discount: ${_this.discount}, total: ${_this.total}, status: ${_this.status}, createdAt: ${_this.createdAt})';
 }
 
 
@@ -244,16 +249,18 @@ _$SaleCopyWith<_Sale> get copyWith => __$SaleCopyWithImpl<_Sale>(this, _$identit
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _Sale&&(identical(other.id, id) || other.id == id)&&(identical(other.saleNumber, saleNumber) || other.saleNumber == saleNumber)&&(identical(other.userId, userId) || other.userId == userId)&&(identical(other.customerName, customerName) || other.customerName == customerName)&&(identical(other.customerPhone, customerPhone) || other.customerPhone == customerPhone)&&(identical(other.saleType, saleType) || other.saleType == saleType)&&(identical(other.paymentMethod, paymentMethod) || other.paymentMethod == paymentMethod)&&(identical(other.subtotal, subtotal) || other.subtotal == subtotal)&&(identical(other.discount, discount) || other.discount == discount)&&(identical(other.total, total) || other.total == total)&&(identical(other.status, status) || other.status == status)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is _Sale&&(identical(other.id, id) || other.id == id)&&(identical(other.saleNumber, saleNumber) || other.saleNumber == saleNumber)&&(identical(other.userId, userId) || other.userId == userId)&&(identical(other.customerName, customerName) || other.customerName == customerName)&&(identical(other.customerPhone, customerPhone) || other.customerPhone == customerPhone)&&(identical(other.saleType, saleType) || other.saleType == saleType)&&(identical(other.paymentMethod, paymentMethod) || other.paymentMethod == paymentMethod)&&(identical(other.subtotal, subtotal) || other.subtotal == subtotal)&&(identical(other.discount, discount) || other.discount == discount)&&(identical(other.total, total) || other.total == total)&&(identical(other.status, status) || other.status == status)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,id,saleNumber,userId,customerName,customerPhone,saleType,paymentMethod,subtotal,discount,total,status,createdAt);
+int get hashCode {
+    return Object.hash(runtimeType,id,saleNumber,userId,customerName,customerPhone,saleType,paymentMethod,subtotal,discount,total,status,createdAt);
+}
 
 @override
 String toString() {
-  return 'Sale(id: $id, saleNumber: $saleNumber, userId: $userId, customerName: $customerName, customerPhone: $customerPhone, saleType: $saleType, paymentMethod: $paymentMethod, subtotal: $subtotal, discount: $discount, total: $total, status: $status, createdAt: $createdAt)';
+    return 'Sale(id: $id, saleNumber: $saleNumber, userId: $userId, customerName: $customerName, customerPhone: $customerPhone, saleType: $saleType, paymentMethod: $paymentMethod, subtotal: $subtotal, discount: $discount, total: $total, status: $status, createdAt: $createdAt)';
 }
 
 

@@ -26,17 +26,17 @@ $PaystackCredentialsCopyWith<PaystackCredentials> get copyWith => _$PaystackCred
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is PaystackCredentials&&(identical(other.baseUrl, baseUrl) || other.baseUrl == baseUrl)&&(identical(other.apiKey, apiKey) || other.apiKey == apiKey)&&(identical(other.currency, currency) || other.currency == currency)&&(identical(other.defaultEmail, defaultEmail) || other.defaultEmail == defaultEmail));
+  final _this = this as PaystackCredentials;
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is PaystackCredentials&&(identical(other.baseUrl, _this.baseUrl) || other.baseUrl == _this.baseUrl)&&(identical(other.apiKey, _this.apiKey) || other.apiKey == _this.apiKey)&&(identical(other.currency, _this.currency) || other.currency == _this.currency)&&(identical(other.defaultEmail, _this.defaultEmail) || other.defaultEmail == _this.defaultEmail));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,baseUrl,apiKey,currency,defaultEmail);
-
-@override
-String toString() {
-  return 'PaystackCredentials(baseUrl: $baseUrl, apiKey: [REDACTED], currency: $currency, defaultEmail: [REDACTED])';
+int get hashCode {
+  final _this = this as PaystackCredentials;
+  return Object.hash(runtimeType,_this.baseUrl,_this.apiKey,_this.currency,_this.defaultEmail);
 }
+
 
 
 }
@@ -228,17 +228,15 @@ _$PaystackCredentialsCopyWith<_PaystackCredentials> get copyWith => __$PaystackC
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _PaystackCredentials&&(identical(other.baseUrl, baseUrl) || other.baseUrl == baseUrl)&&(identical(other.apiKey, apiKey) || other.apiKey == apiKey)&&(identical(other.currency, currency) || other.currency == currency)&&(identical(other.defaultEmail, defaultEmail) || other.defaultEmail == defaultEmail));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is _PaystackCredentials&&(identical(other.baseUrl, baseUrl) || other.baseUrl == baseUrl)&&(identical(other.apiKey, apiKey) || other.apiKey == apiKey)&&(identical(other.currency, currency) || other.currency == currency)&&(identical(other.defaultEmail, defaultEmail) || other.defaultEmail == defaultEmail));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,baseUrl,apiKey,currency,defaultEmail);
-
-@override
-String toString() {
-  return 'PaystackCredentials(baseUrl: $baseUrl, apiKey: [REDACTED], currency: $currency, defaultEmail: [REDACTED])';
+int get hashCode {
+    return Object.hash(runtimeType,baseUrl,apiKey,currency,defaultEmail);
 }
+
 
 
 }

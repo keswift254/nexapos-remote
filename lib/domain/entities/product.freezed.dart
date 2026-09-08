@@ -26,16 +26,21 @@ $ProductCopyWith<Product> get copyWith => _$ProductCopyWithImpl<Product>(this as
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is Product&&(identical(other.id, id) || other.id == id)&&(identical(other.sku, sku) || other.sku == sku)&&(identical(other.name, name) || other.name == name)&&(identical(other.categoryId, categoryId) || other.categoryId == categoryId)&&(identical(other.imagePath, imagePath) || other.imagePath == imagePath)&&(identical(other.retailPrice, retailPrice) || other.retailPrice == retailPrice)&&(identical(other.wholesalePrice, wholesalePrice) || other.wholesalePrice == wholesalePrice)&&(identical(other.costPrice, costPrice) || other.costPrice == costPrice)&&(identical(other.stockQty, stockQty) || other.stockQty == stockQty)&&(identical(other.reorderLevel, reorderLevel) || other.reorderLevel == reorderLevel)&&(identical(other.status, status) || other.status == status));
+  final _this = this as Product;
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is Product&&(identical(other.id, _this.id) || other.id == _this.id)&&(identical(other.sku, _this.sku) || other.sku == _this.sku)&&(identical(other.name, _this.name) || other.name == _this.name)&&(identical(other.categoryId, _this.categoryId) || other.categoryId == _this.categoryId)&&(identical(other.imagePath, _this.imagePath) || other.imagePath == _this.imagePath)&&(identical(other.retailPrice, _this.retailPrice) || other.retailPrice == _this.retailPrice)&&(identical(other.wholesalePrice, _this.wholesalePrice) || other.wholesalePrice == _this.wholesalePrice)&&(identical(other.costPrice, _this.costPrice) || other.costPrice == _this.costPrice)&&(identical(other.stockQty, _this.stockQty) || other.stockQty == _this.stockQty)&&(identical(other.reorderLevel, _this.reorderLevel) || other.reorderLevel == _this.reorderLevel)&&(identical(other.status, _this.status) || other.status == _this.status));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,id,sku,name,categoryId,imagePath,retailPrice,wholesalePrice,costPrice,stockQty,reorderLevel,status);
+int get hashCode {
+  final _this = this as Product;
+  return Object.hash(runtimeType,_this.id,_this.sku,_this.name,_this.categoryId,_this.imagePath,_this.retailPrice,_this.wholesalePrice,_this.costPrice,_this.stockQty,_this.reorderLevel,_this.status);
+}
 
 @override
 String toString() {
-  return 'Product(id: $id, sku: $sku, name: $name, categoryId: $categoryId, imagePath: $imagePath, retailPrice: $retailPrice, wholesalePrice: $wholesalePrice, costPrice: $costPrice, stockQty: $stockQty, reorderLevel: $reorderLevel, status: $status)';
+  final _this = this as Product;
+  return 'Product(id: ${_this.id}, sku: ${_this.sku}, name: ${_this.name}, categoryId: ${_this.categoryId}, imagePath: ${_this.imagePath}, retailPrice: ${_this.retailPrice}, wholesalePrice: ${_this.wholesalePrice}, costPrice: ${_this.costPrice}, stockQty: ${_this.stockQty}, reorderLevel: ${_this.reorderLevel}, status: ${_this.status})';
 }
 
 
@@ -242,16 +247,18 @@ _$ProductCopyWith<_Product> get copyWith => __$ProductCopyWithImpl<_Product>(thi
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _Product&&(identical(other.id, id) || other.id == id)&&(identical(other.sku, sku) || other.sku == sku)&&(identical(other.name, name) || other.name == name)&&(identical(other.categoryId, categoryId) || other.categoryId == categoryId)&&(identical(other.imagePath, imagePath) || other.imagePath == imagePath)&&(identical(other.retailPrice, retailPrice) || other.retailPrice == retailPrice)&&(identical(other.wholesalePrice, wholesalePrice) || other.wholesalePrice == wholesalePrice)&&(identical(other.costPrice, costPrice) || other.costPrice == costPrice)&&(identical(other.stockQty, stockQty) || other.stockQty == stockQty)&&(identical(other.reorderLevel, reorderLevel) || other.reorderLevel == reorderLevel)&&(identical(other.status, status) || other.status == status));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is _Product&&(identical(other.id, id) || other.id == id)&&(identical(other.sku, sku) || other.sku == sku)&&(identical(other.name, name) || other.name == name)&&(identical(other.categoryId, categoryId) || other.categoryId == categoryId)&&(identical(other.imagePath, imagePath) || other.imagePath == imagePath)&&(identical(other.retailPrice, retailPrice) || other.retailPrice == retailPrice)&&(identical(other.wholesalePrice, wholesalePrice) || other.wholesalePrice == wholesalePrice)&&(identical(other.costPrice, costPrice) || other.costPrice == costPrice)&&(identical(other.stockQty, stockQty) || other.stockQty == stockQty)&&(identical(other.reorderLevel, reorderLevel) || other.reorderLevel == reorderLevel)&&(identical(other.status, status) || other.status == status));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,id,sku,name,categoryId,imagePath,retailPrice,wholesalePrice,costPrice,stockQty,reorderLevel,status);
+int get hashCode {
+    return Object.hash(runtimeType,id,sku,name,categoryId,imagePath,retailPrice,wholesalePrice,costPrice,stockQty,reorderLevel,status);
+}
 
 @override
 String toString() {
-  return 'Product(id: $id, sku: $sku, name: $name, categoryId: $categoryId, imagePath: $imagePath, retailPrice: $retailPrice, wholesalePrice: $wholesalePrice, costPrice: $costPrice, stockQty: $stockQty, reorderLevel: $reorderLevel, status: $status)';
+    return 'Product(id: $id, sku: $sku, name: $name, categoryId: $categoryId, imagePath: $imagePath, retailPrice: $retailPrice, wholesalePrice: $wholesalePrice, costPrice: $costPrice, stockQty: $stockQty, reorderLevel: $reorderLevel, status: $status)';
 }
 
 

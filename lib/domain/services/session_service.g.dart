@@ -62,7 +62,7 @@ final class SessionNotifierProvider
   }
 }
 
-String _$sessionNotifierHash() => r'8dd92696b4aa8f3052a1aa31cbf614eb9fb7e766';
+String _$sessionNotifierHash() => r'5372326bd6e0cfcf658c748909b6598d21f56fec';
 
 /// Current logged-in user as reactive state, persisted via
 /// flutter_secure_storage so app resume behaves like PHP's session

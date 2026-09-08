@@ -26,16 +26,21 @@ $PaymentRecordCopyWith<PaymentRecord> get copyWith => _$PaymentRecordCopyWithImp
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is PaymentRecord&&(identical(other.id, id) || other.id == id)&&(identical(other.saleId, saleId) || other.saleId == saleId)&&(identical(other.method, method) || other.method == method)&&(identical(other.amount, amount) || other.amount == amount)&&(identical(other.referenceNote, referenceNote) || other.referenceNote == referenceNote)&&(identical(other.status, status) || other.status == status));
+  final _this = this as PaymentRecord;
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is PaymentRecord&&(identical(other.id, _this.id) || other.id == _this.id)&&(identical(other.saleId, _this.saleId) || other.saleId == _this.saleId)&&(identical(other.method, _this.method) || other.method == _this.method)&&(identical(other.amount, _this.amount) || other.amount == _this.amount)&&(identical(other.referenceNote, _this.referenceNote) || other.referenceNote == _this.referenceNote)&&(identical(other.status, _this.status) || other.status == _this.status));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,id,saleId,method,amount,referenceNote,status);
+int get hashCode {
+  final _this = this as PaymentRecord;
+  return Object.hash(runtimeType,_this.id,_this.saleId,_this.method,_this.amount,_this.referenceNote,_this.status);
+}
 
 @override
 String toString() {
-  return 'PaymentRecord(id: $id, saleId: $saleId, method: $method, amount: $amount, referenceNote: $referenceNote, status: $status)';
+  final _this = this as PaymentRecord;
+  return 'PaymentRecord(id: ${_this.id}, saleId: ${_this.saleId}, method: ${_this.method}, amount: ${_this.amount}, referenceNote: ${_this.referenceNote}, status: ${_this.status})';
 }
 
 
@@ -232,16 +237,18 @@ _$PaymentRecordCopyWith<_PaymentRecord> get copyWith => __$PaymentRecordCopyWith
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _PaymentRecord&&(identical(other.id, id) || other.id == id)&&(identical(other.saleId, saleId) || other.saleId == saleId)&&(identical(other.method, method) || other.method == method)&&(identical(other.amount, amount) || other.amount == amount)&&(identical(other.referenceNote, referenceNote) || other.referenceNote == referenceNote)&&(identical(other.status, status) || other.status == status));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is _PaymentRecord&&(identical(other.id, id) || other.id == id)&&(identical(other.saleId, saleId) || other.saleId == saleId)&&(identical(other.method, method) || other.method == method)&&(identical(other.amount, amount) || other.amount == amount)&&(identical(other.referenceNote, referenceNote) || other.referenceNote == referenceNote)&&(identical(other.status, status) || other.status == status));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,id,saleId,method,amount,referenceNote,status);
+int get hashCode {
+    return Object.hash(runtimeType,id,saleId,method,amount,referenceNote,status);
+}
 
 @override
 String toString() {
-  return 'PaymentRecord(id: $id, saleId: $saleId, method: $method, amount: $amount, referenceNote: $referenceNote, status: $status)';
+    return 'PaymentRecord(id: $id, saleId: $saleId, method: $method, amount: $amount, referenceNote: $referenceNote, status: $status)';
 }
 
 

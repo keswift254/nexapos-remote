@@ -1,15 +1,19 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+
 import '../../core/providers.dart';
 import '../../data/payments/paystack_gateway.dart' show PaystackException;
-import '../../data/payments/platform_http_client.dart' show nexaposPlatformBaseUrl;
+import '../../data/payments/platform_http_client.dart'
+    show nexaposPlatformBaseUrl;
 import '../../data/payments/platform_onboarding_gateway.dart';
 import '../../data/sync/lan_discovery.dart';
 import '../../domain/entities/paystack_credentials.dart';
 import '../../domain/services/paystack_credentials_service.dart';
 import '../../domain/services/sync_service.dart';
+import '../../domain/services/license_service.dart';
 import '../../domain/services/auth_service.dart';
 import '../../domain/services/session_service.dart';
 import '../../domain/services/shop_safety_service.dart';
@@ -30,7 +34,8 @@ import 'payment_settings_screen.dart' show currentPaymentCredentialsProvider;
 /// register_device) is unchanged and still shared with Payment Settings -
 /// this is a reachability/framing fix, not a new backend concept.
 class DeviceSyncScreen extends ConsumerStatefulWidget {
-  const DeviceSyncScreen({super.key});
+  const DeviceSyncScreen({super.key, this.joinOnly = false});
+  final bool joinOnly;
 
   @override
   ConsumerState<DeviceSyncScreen> createState() => _DeviceSyncScreenState();
@@ -67,6 +72,7 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
   @override
   void initState() {
     super.initState();
+    _joinExisting = widget.joinOnly;
     _checkExistingRegistration();
   }
 
@@ -83,8 +89,12 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
   Future<void> _checkExistingRegistration() async {
     try {
       final deviceId = await ref.read(syncMetadataProvider).deviceId();
-      final registrationSecret = await ref.read(syncMetadataProvider).registrationSecret();
-      final lookup = await ref.read(platformOnboardingGatewayProvider).lookupRegistration(
+      final registrationSecret = await ref
+          .read(syncMetadataProvider)
+          .registrationSecret();
+      final lookup = await ref
+          .read(platformOnboardingGatewayProvider)
+          .lookupRegistration(
             baseUrl: nexaposPlatformBaseUrl,
             deviceId: deviceId,
             registrationSecret: registrationSecret,
@@ -118,7 +128,8 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
 
   void _showMessage(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   // --- First-time registration (not yet connected to any server) ---
@@ -127,7 +138,9 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
     setState(() => _scanning = true);
     final scanner = LanHostScanner();
     _scanner = scanner;
-    _scanSub = scanner.hosts.listen((hosts) => setState(() => _discovered = hosts));
+    _scanSub = scanner.hosts.listen(
+      (hosts) => setState(() => _discovered = hosts),
+    );
     await scanner.start();
   }
 
@@ -135,7 +148,12 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
     await _scanSub?.cancel();
     await _scanner?.stop();
     _scanner = null;
-    if (mounted) setState(() { _scanning = false; _discovered = const []; });
+    if (mounted) {
+      setState(() {
+        _scanning = false;
+        _discovered = const [];
+      });
+    }
   }
 
   Future<void> _registerNewShop() async {
@@ -150,7 +168,9 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
   // CODE nearby without having to type it.
   Future<void> _joinDiscovered(DiscoveredHost host) async {
     final label = _deviceLabelController.text.trim();
-    if (label.isEmpty) return _showMessage('Enter a label for this device first.');
+    if (label.isEmpty) {
+      return _showMessage('Enter a label for this device first.');
+    }
     await _register(baseUrl: nexaposPlatformBaseUrl, inviteCode: host.code);
   }
 
@@ -162,39 +182,74 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
     await _register(baseUrl: nexaposPlatformBaseUrl, inviteCode: code);
   }
 
-  Future<void> _register({required String baseUrl, required String? inviteCode}) async {
+  Future<void> _register({
+    required String baseUrl,
+    required String? inviteCode,
+  }) async {
+    if (widget.joinOnly && (inviteCode == null || inviteCode.trim().isEmpty)) {
+      return;
+    }
+    if (await ref.read(licenseServiceProvider).membershipBlocked) {
+      _showMessage(
+        'Shop access ended. Contact support to recover the retained local records.',
+      );
+      return;
+    }
     setState(() => _submitting = true);
     try {
       await ref.read(syncServiceProvider).exclusive(() async {
-      if (inviteCode != null && await ref.read(authServiceProvider).hasAnyUsers()) {
-        throw StateError('Reconnect the existing shop first, then use Switch shop to preserve a recovery backup.');
-      }
-      final deviceId = await ref.read(syncMetadataProvider).deviceId();
-      final registrationSecret = await ref.read(syncMetadataProvider).registrationSecret();
-      final registration = await ref.read(platformOnboardingGatewayProvider).registerDevice(
-            baseUrl: baseUrl,
-            deviceId: deviceId,
-            deviceLabel: _deviceLabelController.text.trim(),
-            registrationSecret: registrationSecret,
+        if (inviteCode != null &&
+            await ref.read(authServiceProvider).hasAnyUsers()) {
+          throw StateError(
+            'Reconnect the existing shop first, then use Switch shop to preserve a recovery backup.',
           );
-      await ref.read(paystackCredentialsServiceProvider).save(
-          PaystackCredentials(baseUrl: baseUrl, apiKey: registration.apiKey, currency: 'KES', defaultEmail: ''));
-      if (inviteCode != null) {
-        final status = await ref.read(platformOnboardingGatewayProvider).getClientStatus(
-            baseUrl: baseUrl, apiKey: registration.apiKey);
-        await ref.read(syncServiceProvider).prepareInitialJoin(status.shopId);
-        await ref.read(platformOnboardingGatewayProvider).joinShop(
+        }
+        final deviceId = await ref.read(syncMetadataProvider).deviceId();
+        final registrationSecret = await ref
+            .read(syncMetadataProvider)
+            .registrationSecret();
+        final registration = await ref
+            .read(platformOnboardingGatewayProvider)
+            .registerDevice(
               baseUrl: baseUrl,
-              apiKey: registration.apiKey,
-              inviteCode: inviteCode,
+              deviceId: deviceId,
+              deviceLabel: _deviceLabelController.text.trim(),
+              registrationSecret: registrationSecret,
             );
-      }
-      await ref.read(paystackCredentialsServiceProvider).saveDeviceLabel(_deviceLabelController.text.trim());
+        await ref
+            .read(paystackCredentialsServiceProvider)
+            .save(
+              PaystackCredentials(
+                baseUrl: baseUrl,
+                apiKey: registration.apiKey,
+                currency: 'KES',
+                defaultEmail: '',
+              ),
+            );
+        if (inviteCode != null) {
+          final status = await ref
+              .read(platformOnboardingGatewayProvider)
+              .getClientStatus(baseUrl: baseUrl, apiKey: registration.apiKey);
+          await ref.read(syncServiceProvider).prepareInitialJoin(status.shopId);
+          await ref
+              .read(platformOnboardingGatewayProvider)
+              .joinShop(
+                baseUrl: baseUrl,
+                apiKey: registration.apiKey,
+                inviteCode: inviteCode,
+              );
+          await ref.read(licenseServiceProvider).confirmJoinedMembership();
+        }
+        await ref
+            .read(paystackCredentialsServiceProvider)
+            .saveDeviceLabel(_deviceLabelController.text.trim());
       });
       ref.invalidate(currentPaymentCredentialsProvider);
-      _showMessage(inviteCode != null
-          ? 'Connected - your data will sync with the rest of that shop shortly.'
-          : 'This device is now set up as its own shop.');
+      _showMessage(
+        inviteCode != null
+            ? 'Connected - your data will sync with the rest of that shop shortly.'
+            : 'This device is now set up as its own shop.',
+      );
       await _safeSyncNow();
       ref.invalidate(hasAnyUsersProvider);
       // _register only ever runs from _buildRegisterView, i.e. while
@@ -215,18 +270,28 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
   // --- Already connected: add another device, or join a different shop ---
 
   Future<void> _generateInvite(PaystackCredentials credentials) async {
-    final approval = await requestSensitiveApproval(context, action: 'Invite a device');
+    final approval = await requestSensitiveApproval(
+      context,
+      action: 'Invite a device',
+    );
     if (approval == null) return;
     setState(() => _generating = true);
     try {
-      await ref.read(sensitiveActionProvider).consume(approval, 'Invite a device');
+      await ref
+          .read(sensitiveActionProvider)
+          .consume(approval, 'Invite a device');
       final invite = await ref
           .read(platformOnboardingGatewayProvider)
-          .generateInvite(baseUrl: credentials.baseUrl, apiKey: credentials.apiKey);
+          .generateInvite(
+            baseUrl: credentials.baseUrl,
+            apiKey: credentials.apiKey,
+          );
       if (!mounted) return;
       setState(() => _generatedInvite = invite);
       _startCountdown(invite.expiresAt);
-      final label = await ref.read(paystackCredentialsServiceProvider).loadDeviceLabel();
+      final label = await ref
+          .read(paystackCredentialsServiceProvider)
+          .loadDeviceLabel();
       final advertiser = LanHostAdvertiser();
       _advertiser = advertiser;
       await advertiser.start(
@@ -250,7 +315,9 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
     void tick() {
       final remaining = expiry.difference(DateTime.now().toUtc());
       if (!mounted) return;
-      setState(() => _timeRemaining = remaining.isNegative ? Duration.zero : remaining);
+      setState(
+        () => _timeRemaining = remaining.isNegative ? Duration.zero : remaining,
+      );
       if (remaining.isNegative) {
         _countdownTimer?.cancel();
         _advertiser?.stop();
@@ -265,7 +332,9 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
     setState(() => _scanningOther = true);
     final scanner = LanHostScanner();
     _scannerOther = scanner;
-    _scanSubOther = scanner.hosts.listen((hosts) => setState(() => _discoveredOther = hosts));
+    _scanSubOther = scanner.hosts.listen(
+      (hosts) => setState(() => _discoveredOther = hosts),
+    );
     await scanner.start();
   }
 
@@ -273,17 +342,33 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
     await _scanSubOther?.cancel();
     await _scannerOther?.stop();
     _scannerOther = null;
-    if (mounted) setState(() { _scanningOther = false; _discoveredOther = const []; });
+    if (mounted) {
+      setState(() {
+        _scanningOther = false;
+        _discoveredOther = const [];
+      });
+    }
   }
 
-  Future<void> _joinOther(PaystackCredentials credentials, {required String code}) async {
-    final approval = await requestSensitiveApproval(context, action: 'Switch shop');
+  Future<void> _joinOther(
+    PaystackCredentials credentials, {
+    required String code,
+  }) async {
+    final approval = await requestSensitiveApproval(
+      context,
+      action: 'Switch shop',
+    );
     if (approval == null || !mounted) return;
     setState(() => _submittingOther = true);
     try {
-      final changed = await ref.read(shopSafetyProvider).changeShop(
-        approval: approval, credentials: credentials, inviteCode: code,
-        saveRecovery: (archive) => saveRecoveryArchive(context, archive));
+      final changed = await ref
+          .read(shopSafetyProvider)
+          .changeShop(
+            approval: approval,
+            credentials: credentials,
+            inviteCode: code,
+            saveRecovery: (archive) => saveRecoveryArchive(context, archive),
+          );
       if (changed) await _afterShopChange();
     } catch (e) {
       _showMessage(e is PaystackException ? e.message : '$e');
@@ -298,6 +383,8 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
   /// failures everywhere else it's called unawaited.
   Future<void> _safeSyncNow() async {
     try {
+      await ref.read(licenseServiceProvider).verifyJoinedMembership();
+      if (!await ref.read(licenseServiceProvider).hasAppAccess()) return;
       await ref.read(syncServiceProvider).runSyncCycle();
     } catch (_) {
       // Next scheduled sync cycle (app resume / periodic timer) will retry.
@@ -321,9 +408,14 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
           'recovery backup are required before its local records are removed. Keep the backup password.',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Continue to verification'),
           ),
@@ -332,14 +424,21 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
     );
     if (confirmed != true) return;
     if (!mounted) return;
-    final approval = await requestSensitiveApproval(context, action: 'Leave this shop');
+    final approval = await requestSensitiveApproval(
+      context,
+      action: 'Leave this shop',
+    );
     if (approval == null || !mounted) return;
 
     setState(() => _leaving = true);
     try {
-      final changed = await ref.read(shopSafetyProvider).changeShop(
-        approval: approval, credentials: credentials,
-        saveRecovery: (archive) => saveRecoveryArchive(context, archive));
+      final changed = await ref
+          .read(shopSafetyProvider)
+          .changeShop(
+            approval: approval,
+            credentials: credentials,
+            saveRecovery: (archive) => saveRecoveryArchive(context, archive),
+          );
       if (changed) await _afterShopChange();
     } catch (e) {
       _showMessage(e is PaystackException ? e.message : '$e');
@@ -361,13 +460,19 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
   /// null means cancelled, false means identity only, true means both.
   Future<void> _resetDeviceIdentity() async {
     final db = ref.read(appDatabaseProvider);
-    final records = await db.customSelect('SELECT (SELECT COUNT(*) FROM users) + '
-      '(SELECT COUNT(*) FROM products) + (SELECT COUNT(*) FROM sales) + '
-      '(SELECT COUNT(*) FROM expenses) + (SELECT COUNT(*) FROM categories) + '
-      '(SELECT COUNT(*) FROM stock_movements) + (SELECT COUNT(*) FROM payment_records) + '
-      '(SELECT COUNT(*) FROM sale_items) AS count').getSingle();
+    final records = await db
+        .customSelect(
+          'SELECT (SELECT COUNT(*) FROM users) + '
+          '(SELECT COUNT(*) FROM products) + (SELECT COUNT(*) FROM sales) + '
+          '(SELECT COUNT(*) FROM expenses) + (SELECT COUNT(*) FROM categories) + '
+          '(SELECT COUNT(*) FROM stock_movements) + (SELECT COUNT(*) FROM payment_records) + '
+          '(SELECT COUNT(*) FROM sale_items) AS count',
+        )
+        .getSingle();
     if (records.read<int>('count') > 0) {
-      _showMessage('This device contains shop data. Reconnect it or contact the shop administrator; identity reset is blocked.');
+      _showMessage(
+        'This device contains shop data. Reconnect it or contact the shop administrator; identity reset is blocked.',
+      );
       return;
     }
     if (!mounted) return;
@@ -382,10 +487,18 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
           'so it starts as a completely fresh shop.',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Reset identity only')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Reset identity only'),
+          ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Reset identity + erase data'),
           ),
@@ -402,9 +515,11 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
       await ref.read(appDatabaseProvider).regenerateDeviceIdentity();
       if (!mounted) return;
       setState(() => _existingRegistration = null);
-      _showMessage(choice
-          ? 'Ready - this device is starting as a completely fresh shop. Try registering again.'
-          : 'Ready - this device now has a fresh identity. Try registering again.');
+      _showMessage(
+        choice
+            ? 'Ready - this device is starting as a completely fresh shop. Try registering again.'
+            : 'Ready - this device now has a fresh identity. Try registering again.',
+      );
     } finally {
       if (mounted) setState(() => _resettingIdentity = false);
     }
@@ -414,12 +529,20 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
   Widget build(BuildContext context) {
     final credentialsAsync = ref.watch(currentPaymentCredentialsProvider);
     return Scaffold(
-      appBar: AppBar(title: const Text('Device Sync')),
+      appBar: AppBar(
+        leading: BackButton(
+          onPressed: () => context.go(widget.joinOnly ? '/activate' : '/'),
+        ),
+        title: Text(widget.joinOnly ? 'Join a shop' : 'Device Sync'),
+      ),
       body: credentialsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (error, _) => Center(child: Text('Failed to load: $error')),
-        data: (credentials) =>
-            credentials.isConfigured ? _buildConnectedView(credentials) : _buildRegisterView(),
+        data: (credentials) => widget.joinOnly
+            ? _buildJoinOnlyView(credentials)
+            : credentials.isConfigured
+            ? _buildConnectedView(credentials)
+            : _buildRegisterView(),
       ),
     );
   }
@@ -457,9 +580,9 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
             child: Text(
               existing.isDisabled
                   ? 'This device was disabled by $_existingShopName and can\'t reconnect with its current identity. '
-                      'Ask that shop\'s owner if this is a mistake, or reinstall the app to set this device up fresh.'
+                        'Ask that shop\'s owner if this is a mistake, or reinstall the app to set this device up fresh.'
                   : 'This device was already registered as "${existing.deviceLabel}" for $_existingShopName. '
-                      'Tap below to reconnect using that name, or change it first to update it.',
+                        'Tap below to reconnect using that name, or change it first to update it.',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),
@@ -468,29 +591,36 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
         TextField(
           controller: _deviceLabelController,
           enabled: existing?.isDisabled != true,
-          decoration: const InputDecoration(labelText: 'Label for this device (e.g. your shop name or counter)'),
+          decoration: const InputDecoration(
+            labelText: 'Label for this device (e.g. your shop name or counter)',
+          ),
         ),
         const SizedBox(height: 16),
-        Wrap(
-          spacing: 8,
-          children: [
-            ChoiceChip(
-              label: const Text('Set up a new shop'),
-              selected: !_joinExisting,
-              onSelected: (_) => setState(() => _joinExisting = false),
-            ),
-            ChoiceChip(
-              label: const Text('Join an existing shop'),
-              selected: _joinExisting,
-              onSelected: (_) => setState(() => _joinExisting = true),
-            ),
-          ],
-        ),
+        if (!widget.joinOnly)
+          Wrap(
+            spacing: 8,
+            children: [
+              ChoiceChip(
+                label: const Text('Set up a new shop'),
+                selected: !_joinExisting,
+                onSelected: (_) => setState(() => _joinExisting = false),
+              ),
+              ChoiceChip(
+                label: const Text('Join an existing shop'),
+                selected: _joinExisting,
+                onSelected: (_) => setState(() => _joinExisting = true),
+              ),
+            ],
+          ),
         const SizedBox(height: 16),
         if (!_joinExisting) ...[
           FilledButton(
-            onPressed: (_submitting || existing?.isDisabled == true) ? null : _registerNewShop,
-            child: _submitting ? _smallSpinner() : const Text('Set up this device'),
+            onPressed: (_submitting || existing?.isDisabled == true)
+                ? null
+                : _registerNewShop,
+            child: _submitting
+                ? _smallSpinner()
+                : const Text('Set up this device'),
           ),
         ] else ...[
           Text(
@@ -507,10 +637,16 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
           else ...[
             Row(
               children: [
-                const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                const SizedBox(
+                  height: 16,
+                  width: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
                 const SizedBox(width: 12),
                 Text(
-                  _discovered.isEmpty ? 'Scanning...' : '${_discovered.length} found',
+                  _discovered.isEmpty
+                      ? 'Scanning...'
+                      : '${_discovered.length} found',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
                 const Spacer(),
@@ -521,9 +657,13 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
             for (final host in _discovered)
               Card(
                 child: ListTile(
-                  title: Text(host.deviceLabel.isEmpty ? 'Nearby shop' : host.deviceLabel),
+                  title: Text(
+                    host.deviceLabel.isEmpty ? 'Nearby shop' : host.deviceLabel,
+                  ),
                   trailing: FilledButton(
-                    onPressed: (_submitting || existing?.isDisabled == true) ? null : () => _joinDiscovered(host),
+                    onPressed: (_submitting || existing?.isDisabled == true)
+                        ? null
+                        : () => _joinDiscovered(host),
                     child: const Text('Join'),
                   ),
                 ),
@@ -532,7 +672,10 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
           const SizedBox(height: 20),
           const Divider(),
           const SizedBox(height: 8),
-          Text('Or enter the invite code manually', style: Theme.of(context).textTheme.labelLarge),
+          Text(
+            'Or enter the invite code manually',
+            style: Theme.of(context).textTheme.labelLarge,
+          ),
           const SizedBox(height: 8),
           TextField(
             controller: _manualCodeController,
@@ -541,22 +684,25 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
           ),
           const SizedBox(height: 12),
           FilledButton(
-            onPressed: (_submitting || existing?.isDisabled == true) ? null : _joinManually,
+            onPressed: (_submitting || existing?.isDisabled == true)
+                ? null
+                : _joinManually,
             child: _submitting ? _smallSpinner() : const Text('Join'),
           ),
         ],
         const SizedBox(height: 24),
-        Center(
-          child: TextButton(
-            onPressed: _resettingIdentity ? null : _resetDeviceIdentity,
-            child: _resettingIdentity
-                ? _smallSpinner()
-                : Text(
-                    'Registering keeps failing? Reset this device\'s identity',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
+        if (!widget.joinOnly)
+          Center(
+            child: TextButton(
+              onPressed: _resettingIdentity ? null : _resetDeviceIdentity,
+              child: _resettingIdentity
+                  ? _smallSpinner()
+                  : Text(
+                      'Registering keeps failing? Reset this device\'s identity',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+            ),
           ),
-        ),
       ],
     );
   }
@@ -570,33 +716,57 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
         ListTile(
           contentPadding: EdgeInsets.zero,
           title: const Text('Sync status'),
-          subtitle: Text(ref.read(syncServiceProvider).lastError ??
-            (ref.read(syncServiceProvider).lastSuccess == null ? 'No successful sync in this session.' :
-            'Last successful sync: ${ref.read(syncServiceProvider).lastSuccess!.toLocal()}')),
-          trailing: IconButton(tooltip: 'Sync now', icon: const Icon(Icons.sync),
-            onPressed: (_leaving || _submittingOther) ? null : () async {
-              final wasJoining = await ref.read(syncServiceProvider).needsInitialPull;
-              await _safeSyncNow();
-              if (wasJoining && mounted && !await ref.read(syncServiceProvider).needsInitialPull) {
-                ref.invalidate(hasAnyUsersProvider);
-                if (mounted) context.go('/');
-              }
-              if (mounted) setState(() {});
-            }),
+          subtitle: Text(
+            ref.read(syncServiceProvider).lastError ??
+                (ref.read(syncServiceProvider).lastSuccess == null
+                    ? 'No successful sync in this session.'
+                    : 'Last successful sync: ${ref.read(syncServiceProvider).lastSuccess!.toLocal()}'),
+          ),
+          trailing: IconButton(
+            tooltip: 'Sync now',
+            icon: const Icon(Icons.sync),
+            onPressed: (_leaving || _submittingOther)
+                ? null
+                : () async {
+                    final wasJoining = await ref
+                        .read(syncServiceProvider)
+                        .needsInitialPull;
+                    await _safeSyncNow();
+                    if (wasJoining &&
+                        mounted &&
+                        !await ref.read(syncServiceProvider).needsInitialPull) {
+                      ref.invalidate(hasAnyUsersProvider);
+                      if (mounted) context.go('/');
+                    }
+                    if (mounted) setState(() {});
+                  },
+          ),
         ),
-        FutureBuilder<bool>(future: ref.read(syncServiceProvider).hasPendingShopChange,
-          builder: (context, snapshot) => snapshot.data == true ? ListTile(
-            title: const Text('Interrupted shop change'),
-            subtitle: const Text('Sync is paused. The recovery backup contains the previous shop data.'),
-            trailing: TextButton(onPressed: () => _resolveChange(credentials), child: const Text('Resolve')),
-          ) : const SizedBox.shrink()),
+        FutureBuilder<bool>(
+          future: ref.read(syncServiceProvider).hasPendingShopChange,
+          builder: (context, snapshot) => snapshot.data == true
+              ? ListTile(
+                  title: const Text('Interrupted shop change'),
+                  subtitle: const Text(
+                    'Sync is paused. The recovery backup contains the previous shop data.',
+                  ),
+                  trailing: TextButton(
+                    onPressed: () => _resolveChange(credentials),
+                    child: const Text('Resolve'),
+                  ),
+                )
+              : const SizedBox.shrink(),
+        ),
         Card(
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Add another device', style: Theme.of(context).textTheme.titleMedium),
+                Text(
+                  'Add another device',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
                 const SizedBox(height: 4),
                 Text(
                   'Generate a code so another device on the same Wi-Fi network can find and join this shop automatically.',
@@ -604,7 +774,9 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
                 ),
                 const SizedBox(height: 12),
                 OutlinedButton.icon(
-                  onPressed: _generating ? null : () => _generateInvite(credentials),
+                  onPressed: _generating
+                      ? null
+                      : () => _generateInvite(credentials),
                   icon: const Icon(Icons.group_add_outlined),
                   label: const Text('Generate code'),
                 ),
@@ -621,18 +793,19 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
                       children: [
                         SelectableText(
                           invite.code,
-                          style: Theme.of(context)
-                              .textTheme
-                              .headlineSmall
-                              ?.copyWith(fontWeight: FontWeight.bold, letterSpacing: 2),
+                          style: Theme.of(context).textTheme.headlineSmall
+                              ?.copyWith(
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 2,
+                              ),
                         ),
                         const SizedBox(height: 4),
                         Text(
                           remaining == null
                               ? 'Broadcasting on this network - the other device should find it automatically.'
                               : remaining == Duration.zero
-                                  ? 'Expired - generate a new one.'
-                                  : 'Broadcasting - expires in ${remaining.inMinutes}m ${remaining.inSeconds.remainder(60)}s',
+                              ? 'Expired - generate a new one.'
+                              : 'Broadcasting - expires in ${remaining.inMinutes}m ${remaining.inSeconds.remainder(60)}s',
                           textAlign: TextAlign.center,
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
@@ -651,7 +824,10 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Join a different shop instead', style: Theme.of(context).textTheme.titleMedium),
+                Text(
+                  'Join a different shop instead',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
                 const SizedBox(height: 4),
                 Text(
                   'Only do this if this device should stop syncing with its current shop and switch to another one.',
@@ -667,19 +843,36 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
                 else ...[
                   Row(
                     children: [
-                      const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                      const SizedBox(
+                        height: 16,
+                        width: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
                       const SizedBox(width: 12),
-                      Text(_discoveredOther.isEmpty ? 'Scanning...' : '${_discoveredOther.length} found'),
+                      Text(
+                        _discoveredOther.isEmpty
+                            ? 'Scanning...'
+                            : '${_discoveredOther.length} found',
+                      ),
                       const Spacer(),
-                      TextButton(onPressed: _stopScanningOther, child: const Text('Stop')),
+                      TextButton(
+                        onPressed: _stopScanningOther,
+                        child: const Text('Stop'),
+                      ),
                     ],
                   ),
                   for (final host in _discoveredOther)
                     Card(
                       child: ListTile(
-                        title: Text(host.deviceLabel.isEmpty ? 'Nearby shop' : host.deviceLabel),
+                        title: Text(
+                          host.deviceLabel.isEmpty
+                              ? 'Nearby shop'
+                              : host.deviceLabel,
+                        ),
                         trailing: FilledButton(
-                          onPressed: _submittingOther ? null : () => _joinOther(credentials, code: host.code),
+                          onPressed: _submittingOther
+                              ? null
+                              : () => _joinOther(credentials, code: host.code),
                           child: const Text('Join'),
                         ),
                       ),
@@ -703,7 +896,9 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
                           }
                           _joinOther(credentials, code: code);
                         },
-                  child: _submittingOther ? _smallSpinner() : const Text('Join'),
+                  child: _submittingOther
+                      ? _smallSpinner()
+                      : const Text('Join'),
                 ),
               ],
             ),
@@ -716,7 +911,10 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Leave this shop', style: Theme.of(context).textTheme.titleMedium),
+                Text(
+                  'Leave this shop',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
                 const SizedBox(height: 4),
                 Text(
                   'Starts a new shop on this device after administrator password, authenticator code, '
@@ -726,10 +924,18 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
                 const SizedBox(height: 12),
                 OutlinedButton.icon(
                   onPressed: _leaving ? null : () => _leaveShop(credentials),
-                  icon: Icon(Icons.logout, color: Theme.of(context).colorScheme.error),
+                  icon: Icon(
+                    Icons.logout,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
                   label: _leaving
                       ? _smallSpinner()
-                      : Text('Leave this shop', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                      : Text(
+                          'Leave this shop',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
                 ),
               ],
             ),
@@ -739,10 +945,14 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
     );
   }
 
-  Widget _smallSpinner() =>
-      const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2));
+  Widget _smallSpinner() => const SizedBox(
+    height: 18,
+    width: 18,
+    child: CircularProgressIndicator(strokeWidth: 2),
+  );
 
   Future<void> _afterShopChange() async {
+    if (!mounted) return;
     ref.read(cartProvider.notifier).clear();
     ref.invalidate(pendingPaystackSalesProvider);
     await ref.read(sessionProvider.notifier).logout();
@@ -751,13 +961,79 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
     if (mounted) context.go('/');
   }
 
+  Widget _buildJoinOnlyView(PaystackCredentials credentials) {
+    return FutureBuilder<bool>(
+      future: ref.read(syncServiceProvider).needsInitialPull,
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.data != true) return _buildRegisterView();
+        return Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Waiting for the shop users and settings'),
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                icon: const Icon(Icons.sync),
+                label: const Text('Retry sync'),
+                onPressed: _submitting
+                    ? null
+                    : () async {
+                        setState(() => _submitting = true);
+                        try {
+                          final status = await ref
+                              .read(platformOnboardingGatewayProvider)
+                              .getClientStatus(
+                                baseUrl: credentials.baseUrl,
+                                apiKey: credentials.apiKey,
+                              );
+                          if (status.isOwner) {
+                            // Reconcile an invitation that failed before changing membership.
+                            await ref
+                                .read(syncServiceProvider)
+                                .reconcileFailedInitialJoin();
+                            if (mounted) setState(() {});
+                            return;
+                          }
+                          await ref
+                              .read(licenseServiceProvider)
+                              .confirmJoinedMembership();
+                          await _safeSyncNow();
+                          ref.invalidate(hasAnyUsersProvider);
+                          if (mounted) this.context.go('/');
+                        } catch (e) {
+                          _showMessage('$e');
+                        } finally {
+                          if (mounted) setState(() => _submitting = false);
+                        }
+                      },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _resolveChange(PaystackCredentials credentials) async {
-    final approval = await requestSensitiveApproval(context, action: 'Resolve shop change');
+    final approval = await requestSensitiveApproval(
+      context,
+      action: 'Resolve shop change',
+    );
     if (approval == null) return;
     try {
-      final changed = await ref.read(shopSafetyProvider).resolveChange(approval, credentials);
-      if (changed) { await _afterShopChange(); }
-      else if (mounted) { setState(() {}); }
-    } catch (e) { _showMessage(e.toString()); }
+      final changed = await ref
+          .read(shopSafetyProvider)
+          .resolveChange(approval, credentials);
+      if (changed) {
+        await _afterShopChange();
+      } else if (mounted) {
+        setState(() {});
+      }
+    } catch (e) {
+      _showMessage(e.toString());
+    }
   }
 }

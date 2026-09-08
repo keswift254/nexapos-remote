@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/services/session_service.dart';
+import '../../domain/services/app_security_service.dart';
 import 'support_recovery_dialog.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -46,6 +47,24 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         .read(sessionProvider.notifier)
         .login(_usernameController.text, _passwordController.text);
 
+    result.when(
+      ok: (_) {},
+      failure: (message) => setState(() {
+        _submitting = false;
+        _error = message;
+      }),
+    );
+  }
+
+  Future<void> _useDeviceAuthentication() async {
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    final result = await ref
+        .read(sessionProvider.notifier)
+        .loginWithDeviceAuthentication();
+    if (!mounted) return;
     result.when(
       ok: (_) {},
       failure: (message) => setState(() {
@@ -117,6 +136,25 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Text('Sign in'),
+                  ),
+                  FutureBuilder<bool>(
+                    future: ref
+                        .read(appSecurityServiceProvider)
+                        .canUseBiometricLogin(),
+                    builder: (context, snapshot) => snapshot.data == true
+                        ? Padding(
+                            padding: const EdgeInsets.only(top: 12),
+                            child: OutlinedButton.icon(
+                              onPressed: _submitting
+                                  ? null
+                                  : _useDeviceAuthentication,
+                              icon: const Icon(Icons.fingerprint),
+                              label: const Text(
+                                'Use fingerprint, face, or Windows Hello',
+                              ),
+                            ),
+                          )
+                        : const SizedBox.shrink(),
                   ),
                   TextButton.icon(
                     onPressed: _submitting

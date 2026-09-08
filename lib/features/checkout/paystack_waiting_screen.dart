@@ -1,10 +1,13 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
+
 import '../../domain/services/paystack_payment_service.dart';
 import '../dashboard/dashboard_screen.dart';
+import '../../core/checkout_return_bridge.dart';
 
 const _pollInterval = Duration(seconds: 4);
 const _maxAutoPolls = 75; // ~5 minutes
@@ -24,10 +27,12 @@ class PaystackWaitingScreen extends ConsumerStatefulWidget {
   const PaystackWaitingScreen({super.key, required this.session});
 
   @override
-  ConsumerState<PaystackWaitingScreen> createState() => _PaystackWaitingScreenState();
+  ConsumerState<PaystackWaitingScreen> createState() =>
+      _PaystackWaitingScreenState();
 }
 
-class _PaystackWaitingScreenState extends ConsumerState<PaystackWaitingScreen> with WidgetsBindingObserver {
+class _PaystackWaitingScreenState extends ConsumerState<PaystackWaitingScreen>
+    with WidgetsBindingObserver {
   Timer? _timer;
   int _attempts = 0;
   bool _autoPollingStopped = false;
@@ -39,6 +44,7 @@ class _PaystackWaitingScreenState extends ConsumerState<PaystackWaitingScreen> w
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    CheckoutReturnBridge.signal.addListener(_checkNow);
     _openCheckoutPage();
     _timer = Timer.periodic(_pollInterval, (_) => _poll());
   }
@@ -46,6 +52,7 @@ class _PaystackWaitingScreenState extends ConsumerState<PaystackWaitingScreen> w
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    CheckoutReturnBridge.signal.removeListener(_checkNow);
     _timer?.cancel();
     super.dispose();
   }
@@ -68,7 +75,9 @@ class _PaystackWaitingScreenState extends ConsumerState<PaystackWaitingScreen> w
     if (_resolved || _checkingNow) return;
     setState(() => _checkingNow = true);
 
-    final outcome = await ref.read(paystackPaymentServiceProvider).poll(
+    final outcome = await ref
+        .read(paystackPaymentServiceProvider)
+        .poll(
           widget.session.sale.id,
           widget.session.reference,
           widget.session.sale.total,
@@ -124,8 +133,14 @@ class _PaystackWaitingScreenState extends ConsumerState<PaystackWaitingScreen> w
           'Only do this if the customer did not complete the Paystack payment.',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Keep waiting')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Cancel sale')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Keep waiting'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Cancel sale'),
+          ),
         ],
       ),
     );
@@ -133,14 +148,17 @@ class _PaystackWaitingScreenState extends ConsumerState<PaystackWaitingScreen> w
 
     setState(() => _cancelling = true);
     _timer?.cancel();
-    final result = await ref.read(paystackPaymentServiceProvider).cancel(widget.session.sale.id);
+    final result = await ref
+        .read(paystackPaymentServiceProvider)
+        .cancel(widget.session.sale.id);
     if (!mounted) return;
     _resolved = true;
     result.when(
       ok: (_) => context.go('/'),
       failure: (message) {
         setState(() => _cancelling = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(message)));
       },
     );
   }
@@ -154,14 +172,17 @@ class _PaystackWaitingScreenState extends ConsumerState<PaystackWaitingScreen> w
         _cancelSale();
       },
       child: Scaffold(
-        appBar: AppBar(title: const Text('Paystack payment')),
+        appBar: AppBar(title: const Text('M-Pesa Prompt')),
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text('Sale ${widget.session.sale.saleNumber}', style: Theme.of(context).textTheme.titleLarge),
+                Text(
+                  'Sale ${widget.session.sale.saleNumber}',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
                 const SizedBox(height: 8),
                 Text('Total: ${widget.session.sale.total.format()}'),
                 const SizedBox(height: 24),

@@ -68,7 +68,7 @@ final class HasCachedLicenseProvider
   }
 }
 
-String _$hasCachedLicenseHash() => r'578079816d98081a1697b100e4f8c5fc93041a67';
+String _$hasCachedLicenseHash() => r'5558561994d54cf911a32f8df32d2b5485452f3d';
 
 /// Purely a ping for _RouterRefreshNotifier to listen to - the int
 /// itself carries no meaning beyond "something changed, re-run

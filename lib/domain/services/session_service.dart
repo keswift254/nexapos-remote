@@ -1,10 +1,12 @@
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+
 import '../../core/providers.dart';
 import '../../core/result.dart';
 import '../../data/repositories/user_repository_impl.dart';
 import '../entities/user.dart';
 import '../entities/user_role.dart';
 import 'auth_service.dart';
+import 'app_security_service.dart';
 
 part 'session_service.g.dart';
 
@@ -39,15 +41,33 @@ class SessionNotifier extends _$SessionNotifier {
   }
 
   Future<Result<User>> login(String username, String password) async {
-    final result = await ref.read(authServiceProvider).login(username, password);
+    final result = await ref
+        .read(authServiceProvider)
+        .login(username, password);
     return result.when(
       ok: (user) {
         state = user;
-        ref.read(secureStorageProvider).write(key: _storedUserIdKey, value: user.id);
+        ref
+            .read(secureStorageProvider)
+            .write(key: _storedUserIdKey, value: user.id);
         return Result.ok(user);
       },
       failure: (message) => Result.failure(message),
     );
+  }
+
+  Future<Result<User>> loginWithDeviceAuthentication() async {
+    final user = await ref.read(appSecurityServiceProvider).authenticateUser();
+    if (user == null) {
+      return const Result.failure(
+        'Fingerprint, face recognition, or Windows Hello could not verify you.',
+      );
+    }
+    state = user;
+    await ref
+        .read(secureStorageProvider)
+        .write(key: _storedUserIdKey, value: user.id);
+    return Result.ok(user);
   }
 
   Future<void> logout() async {

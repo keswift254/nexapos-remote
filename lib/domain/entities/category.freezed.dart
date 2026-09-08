@@ -26,16 +26,21 @@ $CategoryCopyWith<Category> get copyWith => _$CategoryCopyWithImpl<Category>(thi
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is Category&&(identical(other.id, id) || other.id == id)&&(identical(other.name, name) || other.name == name)&&(identical(other.status, status) || other.status == status));
+  final _this = this as Category;
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is Category&&(identical(other.id, _this.id) || other.id == _this.id)&&(identical(other.name, _this.name) || other.name == _this.name)&&(identical(other.status, _this.status) || other.status == _this.status));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,id,name,status);
+int get hashCode {
+  final _this = this as Category;
+  return Object.hash(runtimeType,_this.id,_this.name,_this.status);
+}
 
 @override
 String toString() {
-  return 'Category(id: $id, name: $name, status: $status)';
+  final _this = this as Category;
+  return 'Category(id: ${_this.id}, name: ${_this.name}, status: ${_this.status})';
 }
 
 
@@ -226,16 +231,18 @@ _$CategoryCopyWith<_Category> get copyWith => __$CategoryCopyWithImpl<_Category>
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _Category&&(identical(other.id, id) || other.id == id)&&(identical(other.name, name) || other.name == name)&&(identical(other.status, status) || other.status == status));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is _Category&&(identical(other.id, id) || other.id == id)&&(identical(other.name, name) || other.name == name)&&(identical(other.status, status) || other.status == status));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,id,name,status);
+int get hashCode {
+    return Object.hash(runtimeType,id,name,status);
+}
 
 @override
 String toString() {
-  return 'Category(id: $id, name: $name, status: $status)';
+    return 'Category(id: $id, name: $name, status: $status)';
 }
 
 

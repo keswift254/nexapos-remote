@@ -26,16 +26,21 @@ $CartItemCopyWith<CartItem> get copyWith => _$CartItemCopyWithImpl<CartItem>(thi
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is CartItem&&(identical(other.productId, productId) || other.productId == productId)&&(identical(other.name, name) || other.name == name)&&(identical(other.unitPrice, unitPrice) || other.unitPrice == unitPrice)&&(identical(other.costPrice, costPrice) || other.costPrice == costPrice)&&(identical(other.quantity, quantity) || other.quantity == quantity));
+  final _this = this as CartItem;
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is CartItem&&(identical(other.productId, _this.productId) || other.productId == _this.productId)&&(identical(other.name, _this.name) || other.name == _this.name)&&(identical(other.unitPrice, _this.unitPrice) || other.unitPrice == _this.unitPrice)&&(identical(other.costPrice, _this.costPrice) || other.costPrice == _this.costPrice)&&(identical(other.quantity, _this.quantity) || other.quantity == _this.quantity));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,productId,name,unitPrice,costPrice,quantity);
+int get hashCode {
+  final _this = this as CartItem;
+  return Object.hash(runtimeType,_this.productId,_this.name,_this.unitPrice,_this.costPrice,_this.quantity);
+}
 
 @override
 String toString() {
-  return 'CartItem(productId: $productId, name: $name, unitPrice: $unitPrice, costPrice: $costPrice, quantity: $quantity)';
+  final _this = this as CartItem;
+  return 'CartItem(productId: ${_this.productId}, name: ${_this.name}, unitPrice: ${_this.unitPrice}, costPrice: ${_this.costPrice}, quantity: ${_this.quantity})';
 }
 
 
@@ -230,16 +235,18 @@ _$CartItemCopyWith<_CartItem> get copyWith => __$CartItemCopyWithImpl<_CartItem>
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _CartItem&&(identical(other.productId, productId) || other.productId == productId)&&(identical(other.name, name) || other.name == name)&&(identical(other.unitPrice, unitPrice) || other.unitPrice == unitPrice)&&(identical(other.costPrice, costPrice) || other.costPrice == costPrice)&&(identical(other.quantity, quantity) || other.quantity == quantity));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is _CartItem&&(identical(other.productId, productId) || other.productId == productId)&&(identical(other.name, name) || other.name == name)&&(identical(other.unitPrice, unitPrice) || other.unitPrice == unitPrice)&&(identical(other.costPrice, costPrice) || other.costPrice == costPrice)&&(identical(other.quantity, quantity) || other.quantity == quantity));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,productId,name,unitPrice,costPrice,quantity);
+int get hashCode {
+    return Object.hash(runtimeType,productId,name,unitPrice,costPrice,quantity);
+}
 
 @override
 String toString() {
-  return 'CartItem(productId: $productId, name: $name, unitPrice: $unitPrice, costPrice: $costPrice, quantity: $quantity)';
+    return 'CartItem(productId: $productId, name: $name, unitPrice: $unitPrice, costPrice: $costPrice, quantity: $quantity)';
 }
 
 

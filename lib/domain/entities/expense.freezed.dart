@@ -26,16 +26,21 @@ $ExpenseCopyWith<Expense> get copyWith => _$ExpenseCopyWithImpl<Expense>(this as
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is Expense&&(identical(other.id, id) || other.id == id)&&(identical(other.userId, userId) || other.userId == userId)&&(identical(other.expenseDate, expenseDate) || other.expenseDate == expenseDate)&&(identical(other.title, title) || other.title == title)&&(identical(other.amount, amount) || other.amount == amount)&&(identical(other.note, note) || other.note == note)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt));
+  final _this = this as Expense;
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is Expense&&(identical(other.id, _this.id) || other.id == _this.id)&&(identical(other.userId, _this.userId) || other.userId == _this.userId)&&(identical(other.expenseDate, _this.expenseDate) || other.expenseDate == _this.expenseDate)&&(identical(other.title, _this.title) || other.title == _this.title)&&(identical(other.amount, _this.amount) || other.amount == _this.amount)&&(identical(other.note, _this.note) || other.note == _this.note)&&(identical(other.createdAt, _this.createdAt) || other.createdAt == _this.createdAt));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,id,userId,expenseDate,title,amount,note,createdAt);
+int get hashCode {
+  final _this = this as Expense;
+  return Object.hash(runtimeType,_this.id,_this.userId,_this.expenseDate,_this.title,_this.amount,_this.note,_this.createdAt);
+}
 
 @override
 String toString() {
-  return 'Expense(id: $id, userId: $userId, expenseDate: $expenseDate, title: $title, amount: $amount, note: $note, createdAt: $createdAt)';
+  final _this = this as Expense;
+  return 'Expense(id: ${_this.id}, userId: ${_this.userId}, expenseDate: ${_this.expenseDate}, title: ${_this.title}, amount: ${_this.amount}, note: ${_this.note}, createdAt: ${_this.createdAt})';
 }
 
 
@@ -234,16 +239,18 @@ _$ExpenseCopyWith<_Expense> get copyWith => __$ExpenseCopyWithImpl<_Expense>(thi
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _Expense&&(identical(other.id, id) || other.id == id)&&(identical(other.userId, userId) || other.userId == userId)&&(identical(other.expenseDate, expenseDate) || other.expenseDate == expenseDate)&&(identical(other.title, title) || other.title == title)&&(identical(other.amount, amount) || other.amount == amount)&&(identical(other.note, note) || other.note == note)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is _Expense&&(identical(other.id, id) || other.id == id)&&(identical(other.userId, userId) || other.userId == userId)&&(identical(other.expenseDate, expenseDate) || other.expenseDate == expenseDate)&&(identical(other.title, title) || other.title == title)&&(identical(other.amount, amount) || other.amount == amount)&&(identical(other.note, note) || other.note == note)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,id,userId,expenseDate,title,amount,note,createdAt);
+int get hashCode {
+    return Object.hash(runtimeType,id,userId,expenseDate,title,amount,note,createdAt);
+}
 
 @override
 String toString() {
-  return 'Expense(id: $id, userId: $userId, expenseDate: $expenseDate, title: $title, amount: $amount, note: $note, createdAt: $createdAt)';
+    return 'Expense(id: $id, userId: $userId, expenseDate: $expenseDate, title: $title, amount: $amount, note: $note, createdAt: $createdAt)';
 }
 
 

@@ -10,6 +10,11 @@ import '../../data/payments/platform_onboarding_gateway.dart';
 import '../entities/paystack_credentials.dart';
 import 'sensitive_action_service.dart';
 import 'sync_service.dart';
+import 'license_service.dart';
+import 'session_service.dart';
+import 'pending_sales_notifier.dart';
+import '../../data/repositories/user_repository_impl.dart';
+import '../../features/checkout/cart_notifier.dart';
 
 final shopSafetyProvider = Provider<ShopSafetyService>(
   (ref) => ShopSafetyService(
@@ -17,6 +22,18 @@ final shopSafetyProvider = Provider<ShopSafetyService>(
     ref.watch(syncServiceProvider),
     ref.watch(sensitiveActionProvider),
     ref.watch(platformOnboardingGatewayProvider),
+    onShopChanged: (joining) async {
+      final license = ref.read(licenseServiceProvider);
+      ref.read(cartProvider.notifier).clear();
+      ref.invalidate(pendingPaystackSalesProvider);
+      ref.invalidate(userRepositoryProvider);
+      await ref.read(sessionProvider.notifier).logout();
+      if (joining) {
+        await license.confirmJoinedMembership();
+      } else {
+        await license.clearJoinedMembership();
+      }
+    },
   ),
 );
 
@@ -27,7 +44,14 @@ class ShopSafetyService {
   final SyncService sync;
   final SensitiveActionService security;
   final PlatformOnboardingGateway gateway;
-  ShopSafetyService(this.db, this.sync, this.security, this.gateway);
+  final Future<void> Function(bool joining)? onShopChanged;
+  ShopSafetyService(
+    this.db,
+    this.sync,
+    this.security,
+    this.gateway, {
+    this.onShopChanged,
+  });
 
   Future<bool> changeShop({
     required ActionApproval approval,
@@ -106,6 +130,7 @@ class ShopSafetyService {
           ),
         );
         if (joining) await sync.prepareJoinedShop();
+        await onShopChanged?.call(joining);
       });
 
   Future<bool> resolveChange(

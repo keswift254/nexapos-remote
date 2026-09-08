@@ -65,6 +65,7 @@ void main() {
       Text value(String key) => tester.widget<Text>(find.byKey(Key(key)));
       expect(value('sales-today-value').data, '******');
       expect(value('net-profit-today-value').data, '******');
+      expect(value('stock-value').data, '******');
       expect(find.text('Back up data now'), findsNothing);
 
       await tester.tap(find.byTooltip('Settings'));
@@ -77,16 +78,19 @@ void main() {
       await tester.pump();
       expect(value('sales-today-value').data, isNot('******'));
       expect(value('net-profit-today-value').data, isNot('******'));
+      expect(value('stock-value').data, isNot('******'));
 
       await tester.pump(const Duration(seconds: 59));
       expect(value('sales-today-value').data, isNot('******'));
       await tester.pump(const Duration(seconds: 1));
       expect(value('sales-today-value').data, '******');
+      expect(value('stock-value').data, '******');
 
       await tester.tap(find.byTooltip('Show financial values').first);
       await tester.pump();
       container.invalidate(dashboardDataProvider);
       await tester.pumpAndSettle();
+      expect(value('stock-value').data, '******');
       expect(value('sales-today-value').data, '******');
       expect(value('net-profit-today-value').data, '******');
     },

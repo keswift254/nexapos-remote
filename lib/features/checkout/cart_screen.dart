@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+
 import '../../core/utils/money.dart';
 import '../../domain/services/checkout_service.dart';
 import '../../domain/services/paystack_payment_service.dart';
@@ -9,10 +10,7 @@ import '../dashboard/dashboard_screen.dart';
 import 'cart_notifier.dart';
 import 'paystack_waiting_screen.dart';
 
-const _paymentMethodLabels = {
-  'cash': 'Cash',
-  'paystack': 'Paystack',
-};
+const _paymentMethodLabels = {'cash': 'Cash', 'paystack': 'M-Pesa Prompt'};
 
 /// Cart review + checkout details. Cash completes
 /// immediately through CheckoutService; paystack hands off to
@@ -25,8 +23,12 @@ class CartScreen extends ConsumerStatefulWidget {
 }
 
 class _CartScreenState extends ConsumerState<CartScreen> {
-  late final _nameController = TextEditingController(text: ref.read(cartProvider).customerName);
-  late final _phoneController = TextEditingController(text: ref.read(cartProvider).customerPhone);
+  late final _nameController = TextEditingController(
+    text: ref.read(cartProvider).customerName,
+  );
+  late final _phoneController = TextEditingController(
+    text: ref.read(cartProvider).customerPhone,
+  );
   late final _discountController = TextEditingController(
     text: ref.read(cartProvider).discount.cents == 0
         ? ''
@@ -42,7 +44,11 @@ class _CartScreenState extends ConsumerState<CartScreen> {
     super.dispose();
   }
 
-  Future<void> _submit(CartNotifier cart, String paymentMethod, String userId) async {
+  Future<void> _submit(
+    CartNotifier cart,
+    String paymentMethod,
+    String userId,
+  ) async {
     setState(() => _submitting = true);
 
     if (paymentMethod == 'paystack') {
@@ -62,7 +68,9 @@ class _CartScreenState extends ConsumerState<CartScreen> {
         ok: (session) {
           cart.clear();
           Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => PaystackWaitingScreen(session: session)),
+            MaterialPageRoute(
+              builder: (_) => PaystackWaitingScreen(session: session),
+            ),
           );
         },
         failure: (message) => _showError(message),
@@ -104,7 +112,8 @@ class _CartScreenState extends ConsumerState<CartScreen> {
   }
 
   void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -113,7 +122,9 @@ class _CartScreenState extends ConsumerState<CartScreen> {
     final cart = ref.read(cartProvider.notifier);
     final userId = ref.watch(sessionProvider)?.id;
     final discount = cartState.discount;
-    final total = discount > cartState.subtotal ? const Money.zero() : cartState.subtotal - discount;
+    final total = discount > cartState.subtotal
+        ? const Money.zero()
+        : cartState.subtotal - discount;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Cart & Checkout')),
@@ -128,7 +139,8 @@ class _CartScreenState extends ConsumerState<CartScreen> {
                 subtitle: Text('${cartState.items[i].unitPrice.format()} each'),
                 leading: IconButton(
                   icon: const Icon(Icons.remove_circle_outline),
-                  onPressed: () => cart.updateQuantity(i, cartState.items[i].quantity - 1),
+                  onPressed: () =>
+                      cart.updateQuantity(i, cartState.items[i].quantity - 1),
                 ),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -136,7 +148,10 @@ class _CartScreenState extends ConsumerState<CartScreen> {
                     Text('${cartState.items[i].quantity}'),
                     IconButton(
                       icon: const Icon(Icons.add_circle_outline),
-                      onPressed: () => cart.updateQuantity(i, cartState.items[i].quantity + 1),
+                      onPressed: () => cart.updateQuantity(
+                        i,
+                        cartState.items[i].quantity + 1,
+                      ),
                     ),
                     IconButton(
                       icon: const Icon(Icons.delete_outline),
@@ -167,13 +182,17 @@ class _CartScreenState extends ConsumerState<CartScreen> {
           const SizedBox(height: 16),
           TextField(
             controller: _nameController,
-            decoration: const InputDecoration(labelText: 'Customer name (optional)'),
+            decoration: const InputDecoration(
+              labelText: 'Customer name (optional)',
+            ),
             onChanged: cart.setCustomerName,
           ),
           const SizedBox(height: 12),
           TextField(
             controller: _phoneController,
-            decoration: const InputDecoration(labelText: 'Customer phone (optional)'),
+            decoration: const InputDecoration(
+              labelText: 'Customer phone (optional)',
+            ),
             keyboardType: TextInputType.phone,
             onChanged: cart.setCustomerPhone,
           ),
@@ -183,11 +202,13 @@ class _CartScreenState extends ConsumerState<CartScreen> {
           Wrap(
             spacing: 8,
             children: _paymentMethodLabels.entries
-                .map((entry) => ChoiceChip(
-                      label: Text(entry.value),
-                      selected: cartState.paymentMethod == entry.key,
-                      onSelected: (_) => cart.setPaymentMethod(entry.key),
-                    ))
+                .map(
+                  (entry) => ChoiceChip(
+                    label: Text(entry.value),
+                    selected: cartState.paymentMethod == entry.key,
+                    onSelected: (_) => cart.setPaymentMethod(entry.key),
+                  ),
+                )
                 .toList(),
           ),
           const SizedBox(height: 16),
@@ -195,7 +216,9 @@ class _CartScreenState extends ConsumerState<CartScreen> {
             controller: _discountController,
             decoration: const InputDecoration(labelText: 'Discount'),
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            onChanged: (value) => cart.setDiscount(Money.fromMajor(double.tryParse(value.trim()) ?? 0)),
+            onChanged: (value) => cart.setDiscount(
+              Money.fromMajor(double.tryParse(value.trim()) ?? 0),
+            ),
           ),
           const SizedBox(height: 16),
           _TotalsRow(label: 'Subtotal', value: cartState.subtotal),
@@ -211,7 +234,11 @@ class _CartScreenState extends ConsumerState<CartScreen> {
                 ? null
                 : () => _submit(cart, cartState.paymentMethod, userId),
             child: _submitting
-                ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
                 : const Text('Complete Sale'),
           ),
         ),
@@ -225,18 +252,26 @@ class _TotalsRow extends StatelessWidget {
   final Money value;
   final bool emphasize;
 
-  const _TotalsRow({required this.label, required this.value, this.emphasize = false});
+  const _TotalsRow({
+    required this.label,
+    required this.value,
+    this.emphasize = false,
+  });
 
   @override
   Widget build(BuildContext context) {
     final style = emphasize
-        ? Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)
+        ? Theme.of(context).textTheme.titleMedium
+              ?.copyWith(fontWeight: FontWeight.bold)
         : Theme.of(context).textTheme.bodyMedium;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [Text(label, style: style), Text(value.format(), style: style)],
+        children: [
+          Text(label, style: style),
+          Text(value.format(), style: style),
+        ],
       ),
     );
   }

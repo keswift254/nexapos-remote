@@ -1,15 +1,23 @@
+import 'dart:convert';
+
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../core/providers.dart';
 import '../../core/result.dart';
 import '../../data/licensing/license_gateway.dart';
+import '../../data/payments/platform_onboarding_gateway.dart';
+import '../../data/payments/platform_http_client.dart';
+import 'paystack_credentials_service.dart';
+import 'session_service.dart';
+import 'sync_service.dart';
 
 part 'license_service.g.dart';
 
 const _tokenKey = 'nexapos.license.activationToken';
 const _validUntilKey = 'nexapos.license.validUntil';
 const _lastSeenKey = 'nexapos.license.lastSeenAt';
+const _membershipKey = 'nexapos.license.shopMembership';
 // Small grace for legitimate clock jitter (NTP corrections, DST edge
 // cases) - real rollback attempts to dodge a days/weeks-long expiry
 // window are far larger than this, so it doesn't meaningfully widen
@@ -27,7 +35,7 @@ const _clockRollbackTolerance = Duration(minutes: 10);
 /// LicenseService.backgroundVerify.
 @riverpod
 Future<bool> hasCachedLicense(Ref ref) {
-  return ref.watch(licenseServiceProvider).hasValidCachedLicense();
+  return ref.watch(licenseServiceProvider).hasAppAccess();
 }
 
 /// Purely a ping for _RouterRefreshNotifier to listen to - the int
@@ -61,6 +69,136 @@ class LicenseService {
   final Ref _ref;
 
   LicenseService(this._ref);
+
+  Future<Map<String, dynamic>?> _membership() async {
+    final raw = await _ref
+        .read(secureStorageProvider)
+        .read(key: _membershipKey);
+    if (raw == null) return null;
+    try {
+      return jsonDecode(raw) as Map<String, dynamic>;
+    } catch (_) {
+      return {'blocked': true};
+    }
+  }
+
+  Future<bool> get membershipBlocked async =>
+      (await _membership())?['blocked'] == true;
+
+  Future<bool> hasAppAccess() async {
+    final membership = await _membership();
+    if (membership?['blocked'] == true) return false;
+    if (await hasValidCachedLicense()) return true;
+    if (membership == null) return false;
+    final verified = DateTime.tryParse(
+      membership['verifiedAt'] as String? ?? '',
+    );
+    if (verified == null) return false;
+    final now = _ref.read(clockProvider).now();
+    if (now.isBefore(verified.subtract(_clockRollbackTolerance)) ||
+        now.difference(verified) >= const Duration(hours: 24)) {
+      return false;
+    }
+    return membership['deviceId'] ==
+        await _ref.read(syncMetadataProvider).deviceId();
+  }
+
+  /// Called only after a successful invite redemption, never registration alone.
+  Future<void> confirmJoinedMembership() async {
+    if (await membershipBlocked) {
+      throw StateError('Shop access was removed. Contact support.');
+    }
+    final credentials = await _ref
+        .read(paystackCredentialsServiceProvider)
+        .load();
+    final status = await _ref
+        .read(platformOnboardingGatewayProvider)
+        .getClientStatus(
+          baseUrl: credentials.baseUrl,
+          apiKey: credentials.apiKey,
+        );
+    if (status.isOwner || status.shopId <= 0 || status.status == 'disabled') {
+      throw StateError('An active invitation to an existing shop is required.');
+    }
+    await _writeMembership(status.shopId);
+  }
+
+  Future<void> _writeMembership(int shopId) async {
+    await _ref
+        .read(secureStorageProvider)
+        .write(
+          key: _membershipKey,
+          value: jsonEncode({
+            'shopId': shopId,
+            'deviceId': await _ref.read(syncMetadataProvider).deviceId(),
+            'verifiedAt': _ref
+                .read(clockProvider)
+                .now()
+                .toUtc()
+                .toIso8601String(),
+            'blocked': false,
+          }),
+        );
+    _notifyAccessChanged();
+  }
+
+  Future<void> clearJoinedMembership() async {
+    await _ref.read(secureStorageProvider).delete(key: _membershipKey);
+    _notifyAccessChanged();
+  }
+
+  void _notifyAccessChanged() {
+    _ref.invalidate(hasCachedLicenseProvider);
+    _ref.read(licenseChangeSignalProvider.notifier).bump();
+  }
+
+  Future<void> _blockMembership(Map<String, dynamic> membership) async {
+    await _ref
+        .read(secureStorageProvider)
+        .write(
+          key: _membershipKey,
+          value: jsonEncode({...membership, 'blocked': true}),
+        );
+    await _ref.read(sessionProvider.notifier).logout();
+    _notifyAccessChanged();
+  }
+
+  Future<void> verifyJoinedMembership() =>
+      _ref.read(syncServiceProvider).exclusive(() async {
+        if (await _ref.read(syncServiceProvider).hasPendingShopChange) return;
+        final membership = await _membership();
+        if (membership == null || membership['blocked'] == true) return;
+        final credentials = await _ref
+            .read(paystackCredentialsServiceProvider)
+            .load();
+        if (!credentials.isConfigured) {
+          await _blockMembership(membership);
+          return;
+        }
+        try {
+          final status = await _ref
+              .read(platformOnboardingGatewayProvider)
+              .getClientStatus(
+                baseUrl: credentials.baseUrl,
+                apiKey: credentials.apiKey,
+              );
+          if (status.isOwner ||
+              status.shopId != membership['shopId'] ||
+              status.status == 'disabled') {
+            await _blockMembership(membership);
+          } else {
+            await _writeMembership(status.shopId);
+          }
+        } on PaystackOfflineException {
+          _notifyAccessChanged();
+        } on PaystackException catch (e) {
+          if (e.statusCode == 401 || e.statusCode == 403) {
+            await _blockMembership(membership);
+          } else {
+            _notifyAccessChanged();
+          }
+        }
+      });
 
   Future<void> _resetQueue = Future.value();
 
@@ -104,6 +242,11 @@ class LicenseService {
   }
 
   Future<Result<void>> activate(String code) async {
+    if (await membershipBlocked) {
+      return const Result.failure(
+        'This device was removed from its shop. Local records are retained. Contact support to recover them before setting up a new shop.',
+      );
+    }
     final trimmedCode = code.trim();
     if (trimmedCode.isEmpty) {
       return const Result.failure('Enter your license key.');
@@ -159,6 +302,7 @@ class LicenseService {
   /// server's own valid_until check agrees it's expired) clears the
   /// cached token and locks the app back to the activation screen.
   Future<void> backgroundVerify() async {
+    await verifyJoinedMembership();
     final storage = _ref.read(secureStorageProvider);
     final token = await storage.read(key: _tokenKey);
     if (token == null || token.isEmpty) return;

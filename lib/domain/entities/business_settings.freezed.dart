@@ -26,16 +26,21 @@ $BusinessSettingsCopyWith<BusinessSettings> get copyWith => _$BusinessSettingsCo
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BusinessSettings&&(identical(other.businessName, businessName) || other.businessName == businessName)&&(identical(other.address, address) || other.address == address)&&(identical(other.phone, phone) || other.phone == phone)&&(identical(other.receiptFooter, receiptFooter) || other.receiptFooter == receiptFooter)&&(identical(other.currency, currency) || other.currency == currency)&&(identical(other.paperWidthMm, paperWidthMm) || other.paperWidthMm == paperWidthMm));
+  final _this = this as BusinessSettings;
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BusinessSettings&&(identical(other.businessName, _this.businessName) || other.businessName == _this.businessName)&&(identical(other.address, _this.address) || other.address == _this.address)&&(identical(other.phone, _this.phone) || other.phone == _this.phone)&&(identical(other.receiptFooter, _this.receiptFooter) || other.receiptFooter == _this.receiptFooter)&&(identical(other.currency, _this.currency) || other.currency == _this.currency)&&(identical(other.paperWidthMm, _this.paperWidthMm) || other.paperWidthMm == _this.paperWidthMm));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,businessName,address,phone,receiptFooter,currency,paperWidthMm);
+int get hashCode {
+  final _this = this as BusinessSettings;
+  return Object.hash(runtimeType,_this.businessName,_this.address,_this.phone,_this.receiptFooter,_this.currency,_this.paperWidthMm);
+}
 
 @override
 String toString() {
-  return 'BusinessSettings(businessName: $businessName, address: $address, phone: $phone, receiptFooter: $receiptFooter, currency: $currency, paperWidthMm: $paperWidthMm)';
+  final _this = this as BusinessSettings;
+  return 'BusinessSettings(businessName: ${_this.businessName}, address: ${_this.address}, phone: ${_this.phone}, receiptFooter: ${_this.receiptFooter}, currency: ${_this.currency}, paperWidthMm: ${_this.paperWidthMm})';
 }
 
 
@@ -232,16 +237,18 @@ _$BusinessSettingsCopyWith<_BusinessSettings> get copyWith => __$BusinessSetting
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _BusinessSettings&&(identical(other.businessName, businessName) || other.businessName == businessName)&&(identical(other.address, address) || other.address == address)&&(identical(other.phone, phone) || other.phone == phone)&&(identical(other.receiptFooter, receiptFooter) || other.receiptFooter == receiptFooter)&&(identical(other.currency, currency) || other.currency == currency)&&(identical(other.paperWidthMm, paperWidthMm) || other.paperWidthMm == paperWidthMm));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is _BusinessSettings&&(identical(other.businessName, businessName) || other.businessName == businessName)&&(identical(other.address, address) || other.address == address)&&(identical(other.phone, phone) || other.phone == phone)&&(identical(other.receiptFooter, receiptFooter) || other.receiptFooter == receiptFooter)&&(identical(other.currency, currency) || other.currency == currency)&&(identical(other.paperWidthMm, paperWidthMm) || other.paperWidthMm == paperWidthMm));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,businessName,address,phone,receiptFooter,currency,paperWidthMm);
+int get hashCode {
+    return Object.hash(runtimeType,businessName,address,phone,receiptFooter,currency,paperWidthMm);
+}
 
 @override
 String toString() {
-  return 'BusinessSettings(businessName: $businessName, address: $address, phone: $phone, receiptFooter: $receiptFooter, currency: $currency, paperWidthMm: $paperWidthMm)';
+    return 'BusinessSettings(businessName: $businessName, address: $address, phone: $phone, receiptFooter: $receiptFooter, currency: $currency, paperWidthMm: $paperWidthMm)';
 }
 
 

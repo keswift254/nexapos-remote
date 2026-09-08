@@ -26,17 +26,17 @@ $UserCopyWith<User> get copyWith => _$UserCopyWithImpl<User>(this as User, _$ide
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is User&&(identical(other.id, id) || other.id == id)&&(identical(other.role, role) || other.role == role)&&(identical(other.name, name) || other.name == name)&&(identical(other.username, username) || other.username == username)&&(identical(other.email, email) || other.email == email)&&(identical(other.passwordHash, passwordHash) || other.passwordHash == passwordHash)&&(identical(other.phone, phone) || other.phone == phone)&&(identical(other.status, status) || other.status == status));
+  final _this = this as User;
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is User&&(identical(other.id, _this.id) || other.id == _this.id)&&(identical(other.role, _this.role) || other.role == _this.role)&&(identical(other.name, _this.name) || other.name == _this.name)&&(identical(other.username, _this.username) || other.username == _this.username)&&(identical(other.email, _this.email) || other.email == _this.email)&&(identical(other.passwordHash, _this.passwordHash) || other.passwordHash == _this.passwordHash)&&(identical(other.phone, _this.phone) || other.phone == _this.phone)&&(identical(other.status, _this.status) || other.status == _this.status));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,id,role,name,username,email,passwordHash,phone,status);
-
-@override
-String toString() {
-  return 'User(id: $id, role: $role, username: $username, passwordHash: [REDACTED], status: $status)';
+int get hashCode {
+  final _this = this as User;
+  return Object.hash(runtimeType,_this.id,_this.role,_this.name,_this.username,_this.email,_this.passwordHash,_this.phone,_this.status);
 }
+
 
 
 }
@@ -236,17 +236,15 @@ _$UserCopyWith<_User> get copyWith => __$UserCopyWithImpl<_User>(this, _$identit
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _User&&(identical(other.id, id) || other.id == id)&&(identical(other.role, role) || other.role == role)&&(identical(other.name, name) || other.name == name)&&(identical(other.username, username) || other.username == username)&&(identical(other.email, email) || other.email == email)&&(identical(other.passwordHash, passwordHash) || other.passwordHash == passwordHash)&&(identical(other.phone, phone) || other.phone == phone)&&(identical(other.status, status) || other.status == status));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is _User&&(identical(other.id, id) || other.id == id)&&(identical(other.role, role) || other.role == role)&&(identical(other.name, name) || other.name == name)&&(identical(other.username, username) || other.username == username)&&(identical(other.email, email) || other.email == email)&&(identical(other.passwordHash, passwordHash) || other.passwordHash == passwordHash)&&(identical(other.phone, phone) || other.phone == phone)&&(identical(other.status, status) || other.status == status));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,id,role,name,username,email,passwordHash,phone,status);
-
-@override
-String toString() {
-  return 'User(id: $id, role: $role, username: $username, passwordHash: [REDACTED], status: $status)';
+int get hashCode {
+    return Object.hash(runtimeType,id,role,name,username,email,passwordHash,phone,status);
 }
+
 
 
 }

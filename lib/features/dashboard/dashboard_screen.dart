@@ -236,35 +236,37 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             tooltip: 'Reports',
             onPressed: () => context.push('/reports'),
           ),
-          if (user != null && user.role != UserRole.admin)
-            IconButton(
-              icon: const Icon(Icons.system_update_alt),
-              tooltip: 'Check for Updates',
-              onPressed: () => context.push('/update'),
-            ),
-          if (user?.role == UserRole.admin)
+          if (user != null)
             PopupMenuButton<String>(
               icon: const Icon(Icons.settings_outlined),
               tooltip: 'Settings',
               onSelected: _handleSettingsAction,
-              itemBuilder: (context) => const [
-                PopupMenuItem(
-                  value: '/business-settings',
-                  child: Text('Business Settings'),
+              itemBuilder: (context) => [
+                const PopupMenuItem(
+                  value: '/privacy-settings',
+                  child: Text('Privacy'),
                 ),
-                PopupMenuItem(
-                  value: '/payment-settings',
-                  child: Text('Payment Settings'),
-                ),
-                PopupMenuItem(
-                  value: '/device-sync',
-                  child: Text('Device Sync'),
-                ),
-                PopupMenuItem(
-                  value: 'manual-backup',
-                  child: Text('Back up data now'),
-                ),
-                PopupMenuItem(
+                if (user.role == UserRole.admin)
+                  const PopupMenuItem(
+                    value: '/business-settings',
+                    child: Text('Business Settings'),
+                  ),
+                if (user.role == UserRole.admin)
+                  const PopupMenuItem(
+                    value: '/payment-settings',
+                    child: Text('Payment Settings'),
+                  ),
+                if (user.role == UserRole.admin)
+                  const PopupMenuItem(
+                    value: '/device-sync',
+                    child: Text('Device Sync'),
+                  ),
+                if (user.role == UserRole.admin)
+                  const PopupMenuItem(
+                    value: 'manual-backup',
+                    child: Text('Back up data now'),
+                  ),
+                const PopupMenuItem(
                   value: '/update',
                   child: Text('Check for Updates'),
                 ),
@@ -520,7 +522,11 @@ class _DashboardStatsState extends State<_DashboardStats> {
               Expanded(
                 child: _StatCard(
                   label: 'Stock Value',
-                  value: data.stockValue.format(),
+                  value: _financialsVisible
+                      ? data.stockValue.format()
+                      : hiddenValue,
+                  trailing: _visibilityButton(),
+                  valueKey: const Key('stock-value'),
                   subtitle: 'at cost price',
                 ),
               ),

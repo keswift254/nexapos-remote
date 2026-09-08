@@ -4,6 +4,7 @@
          Android denies network access by default, unlike Windows where
          there's no such per-app permission to grant. -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
     <!-- Lets the in-app update feature (see UpdateService) trigger the
          system package installer on a downloaded APK. This is a Play
          Protect "special" permission - declaring it here only makes it

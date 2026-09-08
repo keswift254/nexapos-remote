@@ -263,7 +263,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) =>
-            _ReportPdfPreviewScreen(bytes: bytes, fileName: fileName),
+            ReportPdfPreviewScreen(bytes: bytes, fileName: fileName),
       ),
     );
   }
@@ -277,7 +277,12 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
         .maybeWhen(data: (s) => s.currency, orElse: () => 'KES');
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Reports')),
+      appBar: AppBar(
+        leading: BackButton(
+          onPressed: () => context.canPop() ? context.pop() : context.go('/'),
+        ),
+        title: const Text('Reports'),
+      ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -409,18 +414,21 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
   }
 }
 
-class _ReportPdfPreviewScreen extends StatefulWidget {
-  const _ReportPdfPreviewScreen({required this.bytes, required this.fileName});
+class ReportPdfPreviewScreen extends StatefulWidget {
+  const ReportPdfPreviewScreen({
+    super.key,
+    required this.bytes,
+    required this.fileName,
+  });
 
   final Uint8List bytes;
   final String fileName;
 
   @override
-  State<_ReportPdfPreviewScreen> createState() =>
-      _ReportPdfPreviewScreenState();
+  State<ReportPdfPreviewScreen> createState() => _ReportPdfPreviewScreenState();
 }
 
-class _ReportPdfPreviewScreenState extends State<_ReportPdfPreviewScreen> {
+class _ReportPdfPreviewScreenState extends State<ReportPdfPreviewScreen> {
   static const _minPreviewWidth = 300.0;
   static const _maxPreviewWidth = 760.0;
   static const _zoomStep = 80.0;
@@ -475,9 +483,15 @@ class _ReportPdfPreviewScreenState extends State<_ReportPdfPreviewScreen> {
         ],
       ),
       body: PdfPreview(
+        key: ValueKey((_previewWidth, MediaQuery.devicePixelRatioOf(context))),
         build: (_) async => widget.bytes,
         pdfFileName: widget.fileName,
         maxPageWidth: _previewWidth,
+        // Rasterize for the smallest supported roll, including high-DPI screens.
+        dpi:
+            (_previewWidth * MediaQuery.devicePixelRatioOf(context) * 25.4 / 58)
+                .clamp(300.0, 900.0),
+        canDebug: false,
         canChangePageFormat: false,
         canChangeOrientation: false,
         allowPrinting: false,

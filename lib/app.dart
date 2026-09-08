@@ -34,6 +34,8 @@ import 'features/expenses/expenses_screen.dart';
 import 'features/reports/reports_screen.dart';
 import 'domain/services/update_service.dart';
 import 'domain/services/automatic_backup_service.dart';
+import 'domain/services/app_lock_settings.dart';
+import 'features/settings/privacy_settings_screen.dart';
 
 part 'app.g.dart';
 
@@ -59,35 +61,24 @@ class _RouterRefreshNotifier extends ChangeNotifier {
 Future<String?> _redirect(Ref ref, String location) async {
   final hasLicense = await ref.read(hasCachedLicenseProvider.future);
   if (!hasLicense) {
-    return location == '/activate' ? null : '/activate';
+    return location == '/activate' || location == '/join-shop'
+        ? null
+        : '/activate';
   }
+  if (location == '/join-shop') return null;
   if (location == '/activate') {
     return '/';
   }
 
-  // Device Sync registration (register_device) used to be an optional,
-  // admin-only settings action - now mandatory for every device, right
-  // after license and before local setup/login, mirroring the license
-  // gate above. A device that just left its shop (DeviceSyncScreen's
-  // "Leave this shop") stays configured (leave_shop keeps api_key
-  // valid, it just moves shop_id) so this gate passes straight through
-  // for it and the hasUsers check below is what actually catches it,
-  // sending it to /setup for its new shop instead of back through
-  // registration it doesn't need to repeat.
+  // Registration is started in the background after paid activation so
+  // first-time account setup is never held behind a network round trip.
+  // Joined-only devices are different: their hydration marker keeps them
+  // on the join screen until the invited shop users and settings arrive.
   final credentials = await ref.read(currentPaymentCredentialsProvider.future);
-  if (!credentials.isConfigured) {
-    return location == '/device-sync' ? null : '/device-sync';
-  }
-  // Deliberately no "bounce away from /device-sync once configured" rule
-  // here, unlike /activate above: that route is a pure one-time gate,
-  // but this one stays a real, current settings destination afterward
-  // (generate invite, join a different shop, leave this shop) - forcing
-  // people off it every time they navigate there would break all of
-  // that, not just the first-run registration step.
-
   final hasUsers = await ref.read(hasAnyUsersProvider.future);
-  if (await ref.read(syncServiceProvider).needsInitialPull) {
-    return location == '/device-sync' ? null : '/device-sync';
+  if (credentials.isConfigured &&
+      await ref.read(syncServiceProvider).needsInitialPull) {
+    return '/join-shop';
   }
   final user = ref.read(sessionProvider);
   final loggedIn = user != null;
@@ -138,6 +129,10 @@ GoRouter router(Ref ref) {
         path: '/activate',
         builder: (context, state) => const ActivationScreen(),
       ),
+      GoRoute(
+        path: '/join-shop',
+        builder: (context, state) => const DeviceSyncScreen(joinOnly: true),
+      ),
       GoRoute(path: '/setup', builder: (context, state) => const SetupScreen()),
       GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
       GoRoute(path: '/', builder: (context, state) => const DashboardScreen()),
@@ -186,6 +181,10 @@ GoRouter router(Ref ref) {
         builder: (context, state) => const UpdateScreen(),
       ),
       GoRoute(
+        path: '/privacy-settings',
+        builder: (context, state) => const PrivacySettingsScreen(),
+      ),
+      GoRoute(
         path: '/expenses',
         builder: (context, state) => const ExpensesScreen(),
       ),
@@ -211,8 +210,7 @@ const _syncInterval = Duration(minutes: 2);
 // own class doc) - an in-progress sale survives this exactly like it
 // survives a manual logout today, so the next person to log in (same
 // cashier or not) picks up where the cart was left, not an empty one.
-const _inactivityTimeout = Duration(minutes: 28);
-const _inactivityCheckInterval = Duration(seconds: 30);
+const _inactivityCheckInterval = Duration(seconds: 5);
 
 class NexaPosApp extends ConsumerStatefulWidget {
   const NexaPosApp({super.key});
@@ -238,6 +236,7 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
   Timer? _timer;
   Timer? _inactivityTimer;
   DateTime? _lastActivity;
+  DateTime? _backgroundedAt;
   bool _syncing = false;
 
   @override
@@ -266,14 +265,26 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Bringing the window back into focus is itself a deliberate
-    // interaction - without this, a window left backgrounded past the
-    // timeout would log the user out the instant they click back in,
-    // rather than giving them the same 28 minutes from when they
-    // actually returned.
     if (state == AppLifecycleState.resumed) {
+      final backgroundedAt = _backgroundedAt;
+      final minutes = ref.read(appLockSettingsProvider);
+      if (ref.read(sessionProvider) != null &&
+          minutes > 0 &&
+          backgroundedAt != null &&
+          ref.read(clockProvider).now().difference(backgroundedAt) >=
+              Duration(minutes: minutes)) {
+        ref.read(sessionProvider.notifier).logout();
+      }
+      _backgroundedAt = null;
       _recordActivity();
       _runSync();
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      _backgroundedAt = ref.read(clockProvider).now();
+      if (ref.read(sessionProvider) != null &&
+          ref.read(appLockSettingsProvider) == 0) {
+        ref.read(sessionProvider.notifier).logout();
+      }
     }
   }
 
@@ -281,8 +292,10 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
     if (_syncing) return;
     _syncing = true;
     try {
-      await ref.read(syncServiceProvider).runSyncCycle();
       await ref.read(licenseServiceProvider).backgroundVerify();
+      if (await ref.read(licenseServiceProvider).hasAppAccess()) {
+        await ref.read(syncServiceProvider).runSyncCycle();
+      }
       await ref.read(updateAvailabilityProvider.notifier).check();
       if (ref.read(sessionProvider) != null) {
         await ref.read(automaticBackupServiceProvider).runIfDue();
@@ -307,8 +320,10 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
     if (ref.read(sessionProvider) == null) return;
     final lastActivity = _lastActivity;
     if (lastActivity == null) return;
+    final minutes = ref.read(appLockSettingsProvider);
+    if (minutes == 0) return;
     if (ref.read(clockProvider).now().difference(lastActivity) >=
-        _inactivityTimeout) {
+        Duration(minutes: minutes)) {
       ref.read(sessionProvider.notifier).logout();
     }
   }
