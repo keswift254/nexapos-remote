@@ -409,16 +409,37 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
   }
 }
 
-class _ReportPdfPreviewScreen extends StatelessWidget {
+class _ReportPdfPreviewScreen extends StatefulWidget {
   const _ReportPdfPreviewScreen({required this.bytes, required this.fileName});
 
   final Uint8List bytes;
   final String fileName;
 
+  @override
+  State<_ReportPdfPreviewScreen> createState() =>
+      _ReportPdfPreviewScreenState();
+}
+
+class _ReportPdfPreviewScreenState extends State<_ReportPdfPreviewScreen> {
+  static const _minPreviewWidth = 300.0;
+  static const _maxPreviewWidth = 760.0;
+  static const _zoomStep = 80.0;
+
+  double _previewWidth = 520;
+
+  void _zoom(double amount) {
+    setState(() {
+      _previewWidth = (_previewWidth + amount).clamp(
+        _minPreviewWidth,
+        _maxPreviewWidth,
+      );
+    });
+  }
+
   Future<void> _save(BuildContext context) async {
     final uri = await FilePicker.saveFile(
-      fileName: fileName,
-      bytes: bytes,
+      fileName: widget.fileName,
+      bytes: widget.bytes,
       mimeType: 'application/pdf',
     );
     if (!context.mounted || uri == null) return;
@@ -433,6 +454,20 @@ class _ReportPdfPreviewScreen extends StatelessWidget {
         title: const Text('PDF Preview'),
         actions: [
           IconButton(
+            onPressed: _previewWidth > _minPreviewWidth
+                ? () => _zoom(-_zoomStep)
+                : null,
+            icon: const Icon(Icons.zoom_out),
+            tooltip: 'Zoom out',
+          ),
+          IconButton(
+            onPressed: _previewWidth < _maxPreviewWidth
+                ? () => _zoom(_zoomStep)
+                : null,
+            icon: const Icon(Icons.zoom_in),
+            tooltip: 'Zoom in',
+          ),
+          IconButton(
             onPressed: () => _save(context),
             icon: const Icon(Icons.save_outlined),
             tooltip: 'Save PDF',
@@ -440,9 +475,9 @@ class _ReportPdfPreviewScreen extends StatelessWidget {
         ],
       ),
       body: PdfPreview(
-        build: (_) async => bytes,
-        pdfFileName: fileName,
-        maxPageWidth: 300,
+        build: (_) async => widget.bytes,
+        pdfFileName: widget.fileName,
+        maxPageWidth: _previewWidth,
         canChangePageFormat: false,
         canChangeOrientation: false,
         allowPrinting: false,
