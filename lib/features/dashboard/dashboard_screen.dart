@@ -266,6 +266,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                     value: 'manual-backup',
                     child: Text('Back up data now'),
                   ),
+                if (user.role == UserRole.admin)
+                  const PopupMenuItem(
+                    value: '/google-drive-backup',
+                    child: Text('Google Drive Backup'),
+                  ),
                 const PopupMenuItem(
                   value: '/update',
                   child: Text('Check for Updates'),

@@ -87,6 +87,9 @@ dependencies:
   ffi: ^2.2.0
   win32: ^6.4.0
   local_auth: ^3.0.2
+  google_sign_in: ^7.2.0
+  googleapis: ^15.0.0
+  googleapis_auth: ^2.0.0
 
 dev_dependencies:
   flutter_test:

@@ -56,6 +56,7 @@ class PlatformSyncGateway {
       baseUrl,
       apiKey: apiKey,
       body: {'changes': changes},
+      timeout: platformSyncRequestTimeout,
     );
     if (response['success'] != true) {
       throw PaystackException(platformResponseMessage(response, 'Could not push changes.'));
@@ -70,6 +71,7 @@ class PlatformSyncGateway {
       baseUrl,
       apiKey: apiKey,
       queryParameters: {'since': '$since'},
+      timeout: platformSyncRequestTimeout,
     );
     if (response['success'] != true) {
       throw PaystackException(platformResponseMessage(response, 'Could not pull changes.'));

@@ -25,21 +25,32 @@ class _NewSaleScreenState extends ConsumerState<NewSaleScreen> {
     final priceController = TextEditingController();
     final saved = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) {
+        void submit() => Navigator.pop(context, true);
+        return AlertDialog(
         title: const Text('Add manual item'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(controller: nameController, decoration: const InputDecoration(labelText: 'Item name')),
+            TextField(
+              controller: nameController,
+              decoration: const InputDecoration(labelText: 'Item name'),
+              textInputAction: TextInputAction.next,
+              onSubmitted: (_) => submit(),
+            ),
             TextField(
               controller: qtyController,
               decoration: const InputDecoration(labelText: 'Quantity'),
               keyboardType: TextInputType.number,
+              textInputAction: TextInputAction.next,
+              onSubmitted: (_) => submit(),
             ),
             TextField(
               controller: priceController,
               decoration: const InputDecoration(labelText: 'Price'),
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => submit(),
             ),
           ],
         ),
@@ -47,7 +58,8 @@ class _NewSaleScreenState extends ConsumerState<NewSaleScreen> {
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Add')),
         ],
-      ),
+        );
+      },
     );
     if (saved != true) return;
 

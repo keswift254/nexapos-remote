@@ -36,6 +36,8 @@ import 'domain/services/update_service.dart';
 import 'domain/services/automatic_backup_service.dart';
 import 'domain/services/app_lock_settings.dart';
 import 'features/settings/privacy_settings_screen.dart';
+import 'features/settings/google_drive_backup_screen.dart';
+import 'domain/services/google_drive_backup_service.dart';
 
 part 'app.g.dart';
 
@@ -111,7 +113,8 @@ Future<String?> _redirect(Ref ref, String location) async {
   }
   if ((location == '/payment-settings' ||
           location == '/business-settings' ||
-          location == '/device-sync') &&
+          location == '/device-sync' ||
+          location == '/google-drive-backup') &&
       user.role != UserRole.admin) {
     return '/';
   }
@@ -183,6 +186,10 @@ GoRouter router(Ref ref) {
       GoRoute(
         path: '/privacy-settings',
         builder: (context, state) => const PrivacySettingsScreen(),
+      ),
+      GoRoute(
+        path: '/google-drive-backup',
+        builder: (context, state) => const GoogleDriveBackupScreen(),
       ),
       GoRoute(
         path: '/expenses',
@@ -298,7 +305,15 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
       }
       await ref.read(updateAvailabilityProvider.notifier).check();
       if (ref.read(sessionProvider) != null) {
-        await ref.read(automaticBackupServiceProvider).runIfDue();
+        final newBackup = await ref.read(automaticBackupServiceProvider).runIfDue();
+        if (newBackup != null) {
+          // Best-effort mirror: a flaky Drive connection must not break the
+          // sync cycle that runs this. The local backup above already
+          // succeeded regardless of what happens here.
+          try {
+            await ref.read(googleDriveBackupServiceProvider).uploadLatestBackupIfConnected();
+          } catch (_) {}
+        }
       }
     } finally {
       _syncing = false;

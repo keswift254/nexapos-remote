@@ -6,6 +6,12 @@ import 'package:http/http.dart' as http;
 
 const platformRequestTimeout = Duration(seconds: 25);
 
+/// Sync isn't blocking a till transaction the way a Paystack charge is,
+/// so it can afford to ride out a cold start on the Render-hosted
+/// platform backend instead of timing out and forcing the cashier to
+/// notice and press the refresh button again.
+const platformSyncRequestTimeout = Duration(seconds: 55);
+
 /// nexapos_platform now runs as a single central server this vendor
 /// operates, same as nexapos_license (see license_gateway.dart's
 /// licenseServerBaseUrl) - not something each shop self-hosts, which
@@ -50,6 +56,7 @@ Future<Map<String, dynamic>> platformRequest(
   String? apiKey,
   Map<String, dynamic>? body,
   Map<String, String>? queryParameters,
+  Duration timeout = platformRequestTimeout,
 }) async {
   final uri = Uri.parse(baseUrl)
       .replace(queryParameters: {'action': action, ...?queryParameters});
@@ -65,7 +72,7 @@ Future<Map<String, dynamic>> platformRequest(
         await (method == 'POST'
                 ? client.post(uri, headers: headers, body: jsonEncode(body))
                 : client.get(uri, headers: headers))
-            .timeout(platformRequestTimeout);
+            .timeout(timeout);
   } on TimeoutException {
     throw const PaystackOfflineException();
   } on SocketException {
