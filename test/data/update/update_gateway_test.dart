@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -200,5 +201,34 @@ void main() {
         throwsA(isA<UpdateOfflineException>()),
       );
     });
+
+    test(
+      'a connection dropped mid-stream throws UpdateOfflineException, not the raw ClientException, and deletes the partial file',
+      () async {
+        final gateway = UpdateGateway(_MidStreamFailureClient());
+        final destination = File(path.join(tempDir.path, 'update.zip'));
+
+        await expectLater(
+          () => gateway.downloadTo('https://example.com/update.zip', destination),
+          throwsA(isA<UpdateOfflineException>()),
+        );
+        expect(await destination.exists(), isFalse);
+      },
+    );
   });
+}
+
+/// Simulates a connection that closes partway through the response body -
+/// the "Connection closed while receiving data" ClientException a real
+/// interrupted download produces, as opposed to MockClient's simpler
+/// "never connects at all" failure.
+class _MidStreamFailureClient extends http.BaseClient {
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    final controller = StreamController<List<int>>();
+    controller.add([1, 2, 3]);
+    controller.addError(http.ClientException('Connection closed while receiving data'));
+    unawaited(controller.close());
+    return http.StreamedResponse(controller.stream, 200, contentLength: 100);
+  }
 }

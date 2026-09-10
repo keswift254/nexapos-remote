@@ -176,6 +176,15 @@ class UpdateGateway {
       await sink.close();
       if (await destination.exists()) await destination.delete();
       throw const UpdateOfflineException();
+    } on http.ClientException {
+      // Same failure mode as a SocketException here - the connection
+      // dropped mid-transfer (flaky wifi, a proxy/CDN closing an idle
+      // or slow connection) - not something the user did wrong, so it
+      // gets the same "try again" framing instead of leaking the raw
+      // exception text through the generic catch below.
+      await sink.close();
+      if (await destination.exists()) await destination.delete();
+      throw const UpdateOfflineException();
     } catch (_) {
       await sink.close();
       if (await destination.exists()) await destination.delete();
