@@ -11,17 +11,13 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../core/providers.dart';
 import '../../core/utils/money.dart';
-import '../../data/import/shop_archive.dart';
 import '../../domain/entities/user_role.dart';
 import '../../domain/services/pending_sales_notifier.dart';
 import '../../domain/services/product_service.dart';
 import '../../domain/services/reports_service.dart';
-import '../../domain/services/sensitive_action_service.dart';
 import '../../domain/services/session_service.dart';
 import '../../domain/services/sync_service.dart';
 import '../../domain/services/update_service.dart';
-import '../settings/save_recovery.dart';
-import '../settings/sensitive_action_dialog.dart';
 import 'product_search_dialog.dart';
 
 part 'dashboard_screen.g.dart';
@@ -120,49 +116,8 @@ class DashboardScreen extends ConsumerStatefulWidget {
 
 class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   bool _manualSyncing = false;
-  bool _savingBackup = false;
-
-  Future<void> _saveManualBackup() async {
-    if (_savingBackup) return;
-    final approval = await requestSensitiveApproval(
-      context,
-      action: 'Back up shop data',
-    );
-    if (approval == null || !mounted) return;
-    setState(() => _savingBackup = true);
-    try {
-      await ref
-          .read(sensitiveActionProvider)
-          .consume(approval, 'Back up shop data');
-      final archive = await ref.read(syncServiceProvider).exclusive(() async {
-        final snapshot = await ShopArchive.capture(
-          ref.read(appDatabaseProvider),
-        );
-        await snapshot.validate();
-        return snapshot;
-      });
-      if (!mounted) return;
-      final saved = await saveRecoveryArchive(context, archive);
-      if (mounted && saved) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Done. Encrypted backup saved.')),
-        );
-      }
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('$error')));
-      }
-    } finally {
-      if (mounted) setState(() => _savingBackup = false);
-    }
-  }
 
   void _handleSettingsAction(String action) {
-    if (action == 'manual-backup') {
-      unawaited(_saveManualBackup());
-      return;
-    }
     context.push(action);
   }
 
@@ -175,10 +130,24 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   Future<void> _manualRefresh() async {
     if (_manualSyncing) return;
     setState(() => _manualSyncing = true);
+    // The platform API runs on a free-tier host that sleeps when idle and
+    // can take tens of seconds to wake up - a bare spinner for that long
+    // reads as stuck rather than working, so say so once it's actually
+    // taking a while instead of leaving the cashier guessing.
+    final slowHint = Timer(const Duration(seconds: 4), () {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Still syncing - the server may be waking up, this can take up to a minute.'),
+          duration: Duration(seconds: 8),
+        ),
+      );
+    });
     try {
       await ref.read(syncServiceProvider).runSyncCycle();
       await ref.read(pendingPaystackSalesProvider.notifier).reconcile();
     } finally {
+      slowHint.cancel();
       if (mounted) setState(() => _manualSyncing = false);
       ref.invalidate(dashboardDataProvider);
     }
@@ -263,13 +232,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   ),
                 if (user.role == UserRole.admin)
                   const PopupMenuItem(
-                    value: 'manual-backup',
-                    child: Text('Back up data now'),
-                  ),
-                if (user.role == UserRole.admin)
-                  const PopupMenuItem(
-                    value: '/google-drive-backup',
-                    child: Text('Google Drive Backup'),
+                    value: '/backup',
+                    child: Text('Backup'),
                   ),
                 const PopupMenuItem(
                   value: '/update',

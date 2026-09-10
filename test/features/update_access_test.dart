@@ -79,7 +79,7 @@ void main() {
         expect(find.text('Business Settings'), findsNothing);
         expect(find.text('Payment Settings'), findsNothing);
         expect(find.text('Device Sync'), findsNothing);
-        expect(find.text('Back up data now'), findsNothing);
+        expect(find.text('Backup'), findsNothing);
       }
       await tester.tap(find.text('Check for Updates'));
       await tester.pumpAndSettle();

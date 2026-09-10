@@ -35,14 +35,19 @@ Future<List<GoogleDriveBackupSummary>> googleDriveBackups(Ref ref) async {
 /// sees or stores the merchant's Google credentials - the token lives
 /// only on this device, exactly like every other business-critical
 /// setting on this screen tier.
-class GoogleDriveBackupScreen extends ConsumerStatefulWidget {
-  const GoogleDriveBackupScreen({super.key});
+///
+/// A plain section widget (no Scaffold of its own) so BackupScreen can
+/// embed it alongside the local-backup section on one page - Drive
+/// backup is an extra off-device copy of the same local backups, not a
+/// separate concern from a merchant's point of view.
+class GoogleDriveBackupSection extends ConsumerStatefulWidget {
+  const GoogleDriveBackupSection({super.key});
 
   @override
-  ConsumerState<GoogleDriveBackupScreen> createState() => _GoogleDriveBackupScreenState();
+  ConsumerState<GoogleDriveBackupSection> createState() => _GoogleDriveBackupSectionState();
 }
 
-class _GoogleDriveBackupScreenState extends ConsumerState<GoogleDriveBackupScreen> {
+class _GoogleDriveBackupSectionState extends ConsumerState<GoogleDriveBackupSection> {
   bool _busy = false;
   String? _error;
 
@@ -263,15 +268,19 @@ class _GoogleDriveBackupScreenState extends ConsumerState<GoogleDriveBackupScree
     final emailAsync = ref.watch(connectedGoogleDriveEmailProvider);
     final backupsAsync = ref.watch(googleDriveBackupsProvider);
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Google Drive Backup')),
-      body: emailAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, _) => Center(child: Text('Could not load status: $error')),
-        data: (email) => ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            if (_error != null)
+    return emailAsync.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (error, _) => Center(child: Text('Could not load status: $error')),
+      data: (email) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Google Drive backup', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          const Text(
+            'Keep an extra encrypted copy of your local backups in your own Google account.',
+          ),
+          const SizedBox(height: 12),
+          if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
@@ -345,7 +354,6 @@ class _GoogleDriveBackupScreenState extends ConsumerState<GoogleDriveBackupScree
               ),
             ],
           ],
-        ),
       ),
     );
   }

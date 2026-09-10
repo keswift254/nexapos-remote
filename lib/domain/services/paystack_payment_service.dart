@@ -171,16 +171,19 @@ class PaystackPaymentService {
     final pending = await _checkoutService.pendingPaystackSales();
     if (pending.isEmpty) return const [];
 
-    final stillPending = <Sale>[];
-    for (final sale in pending) {
-      final reference = await _checkoutService.paystackReferenceFor(sale.id);
-      if (reference == null) {
-        stillPending.add(sale);
-        continue;
-      }
-      final outcome = await poll(sale.id, reference, sale.total);
-      if (outcome is! PaystackPollPaid) stillPending.add(sale);
-    }
-    return stillPending;
+    // Polled in parallel, not sequentially - each sale is an independent
+    // network round trip against an unrelated reference, so N pending
+    // sales shouldn't cost N times the wait (especially painful right
+    // after a cold start on the platform's Render free tier, where a
+    // single poll can already take tens of seconds).
+    final results = await Future.wait(
+      pending.map((sale) async {
+        final reference = await _checkoutService.paystackReferenceFor(sale.id);
+        if (reference == null) return sale;
+        final outcome = await poll(sale.id, reference, sale.total);
+        return outcome is PaystackPollPaid ? null : sale;
+      }),
+    );
+    return results.whereType<Sale>().toList();
   }
 }

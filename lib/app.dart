@@ -36,7 +36,7 @@ import 'domain/services/update_service.dart';
 import 'domain/services/automatic_backup_service.dart';
 import 'domain/services/app_lock_settings.dart';
 import 'features/settings/privacy_settings_screen.dart';
-import 'features/settings/google_drive_backup_screen.dart';
+import 'features/settings/backup_screen.dart';
 import 'domain/services/google_drive_backup_service.dart';
 
 part 'app.g.dart';
@@ -114,7 +114,7 @@ Future<String?> _redirect(Ref ref, String location) async {
   if ((location == '/payment-settings' ||
           location == '/business-settings' ||
           location == '/device-sync' ||
-          location == '/google-drive-backup') &&
+          location == '/backup') &&
       user.role != UserRole.admin) {
     return '/';
   }
@@ -188,8 +188,8 @@ GoRouter router(Ref ref) {
         builder: (context, state) => const PrivacySettingsScreen(),
       ),
       GoRoute(
-        path: '/google-drive-backup',
-        builder: (context, state) => const GoogleDriveBackupScreen(),
+        path: '/backup',
+        builder: (context, state) => const BackupScreen(),
       ),
       GoRoute(
         path: '/expenses',

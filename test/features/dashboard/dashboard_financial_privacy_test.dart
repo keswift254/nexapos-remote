@@ -66,11 +66,11 @@ void main() {
       expect(value('sales-today-value').data, '******');
       expect(value('net-profit-today-value').data, '******');
       expect(value('stock-value').data, '******');
-      expect(find.text('Back up data now'), findsNothing);
+      expect(find.text('Backup'), findsNothing);
 
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
-      expect(find.text('Back up data now'), findsOneWidget);
+      expect(find.text('Backup'), findsOneWidget);
       await tester.tapAt(const Offset(1, 1));
       await tester.pumpAndSettle();
 
