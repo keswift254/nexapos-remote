@@ -16,7 +16,6 @@ import '../../domain/services/pending_sales_notifier.dart';
 import '../../domain/services/product_service.dart';
 import '../../domain/services/reports_service.dart';
 import '../../domain/services/session_service.dart';
-import '../../domain/services/sync_service.dart';
 import '../../domain/services/update_service.dart';
 import 'product_search_dialog.dart';
 
@@ -115,42 +114,21 @@ class DashboardScreen extends ConsumerStatefulWidget {
 }
 
 class _DashboardScreenState extends ConsumerState<DashboardScreen> {
-  bool _manualSyncing = false;
-
   void _handleSettingsAction(String action) {
     context.push(action);
   }
 
   /// Desktop has no pull-to-refresh gesture, so Windows gets an explicit
-  /// button for the same thing the periodic timer/app-resume already do
-  /// automatically (see app.dart) - this doesn't change that auto sync
-  /// logic at all, it just lets the cashier force an immediate round
-  /// rather than waiting up to 2 minutes for the next tick. Android
-  /// keeps its existing pull-to-refresh instead; no icon there.
-  Future<void> _manualRefresh() async {
-    if (_manualSyncing) return;
-    setState(() => _manualSyncing = true);
-    // The platform API runs on a free-tier host that sleeps when idle and
-    // can take tens of seconds to wake up - a bare spinner for that long
-    // reads as stuck rather than working, so say so once it's actually
-    // taking a while instead of leaving the cashier guessing.
-    final slowHint = Timer(const Duration(seconds: 4), () {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Still syncing - the server may be waking up, this can take up to a minute.'),
-          duration: Duration(seconds: 8),
-        ),
-      );
-    });
-    try {
-      await ref.read(syncServiceProvider).runSyncCycle();
-      await ref.read(pendingPaystackSalesProvider.notifier).reconcile();
-    } finally {
-      slowHint.cancel();
-      if (mounted) setState(() => _manualSyncing = false);
-      ref.invalidate(dashboardDataProvider);
-    }
+  /// button for the same thing Android's pull-to-refresh does below
+  /// (`onRefresh: () async => ref.invalidate(dashboardDataProvider)`) -
+  /// recompute the figures from the local database right now, on demand.
+  /// Deliberately local-only: pulling/pushing against the remote platform
+  /// is the periodic timer/app-resume sync's job (see app.dart), not
+  /// this button's - conflating the two made this feel broken whenever
+  /// the platform API's free-tier host happened to be cold, for a button
+  /// whose actual job never needed the network at all.
+  void _refreshLocalFigures() {
+    ref.invalidate(dashboardDataProvider);
   }
 
   @override
@@ -175,15 +153,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             ),
             if (isWindows)
               IconButton(
-                icon: _manualSyncing
-                    ? const SizedBox(
-                        height: 18,
-                        width: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.sync),
-                tooltip: 'Sync now',
-                onPressed: _manualSyncing ? null : _manualRefresh,
+                icon: const Icon(Icons.refresh),
+                tooltip: 'Refresh',
+                onPressed: _refreshLocalFigures,
               ),
             if (availableUpdate != null && user != null)
               IconButton(
