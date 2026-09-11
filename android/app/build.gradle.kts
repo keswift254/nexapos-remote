@@ -53,29 +53,26 @@ android {
         }
     }
 
-    // Play Store builds use the real upload key below - a fresh
-    // distribution channel, nothing installed from it yet. The
-    // direct-download build published to nexapos-site and installed via
-    // this app's own self-update mechanism deliberately keeps using the
-    // debug key every existing real install already has - Android
-    // refuses to install an update signed with a different key than
-    // what's already on the device, so switching it would silently
-    // break self-update for every current user.
-    //
-    // Gated on an explicit env var, NOT on which Gradle task got
-    // invoked - gradle.startParameter.taskNames looked like a clean way
-    // to tell `flutter build appbundle` (bundleRelease) apart from
-    // `flutter build apk` (assembleRelease) automatically, but tested it
-    // for real and it did NOT work as expected: a plain `flutter build
-    // apk --release` still picked up the upload-key signing. Caught via
-    // apksigner before anything got published, not left as a landmine -
-    // this explicit opt-in is deliberately impossible to trigger by
-    // accident.
-    val isPlayStoreBuild = System.getenv("NEXAPOS_PLAYSTORE_BUILD") == "true"
-
+    // Every release build - direct-download and any future Play Store
+    // listing alike - now signs with the one permanent upload key in
+    // key.properties. This used to be gated behind NEXAPOS_PLAYSTORE_BUILD
+    // so the direct-download/self-update channel kept using whatever
+    // debug key happened to already be on real devices, on the theory
+    // that switching would break in-place updates for existing installs
+    // (Android refuses to install an update signed with a different key
+    // than what's already there). That theory held right up until an
+    // *unpinned* debug key - regenerated fresh by Gradle whenever the
+    // build environment was reset - silently changed multiple times
+    // across this app's own release history anyway (1.0.12/13, then
+    // 1.0.14-19, then 1.0.20/21, then 1.0.22 onward each got a
+    // different signing cert), stranding every real device that
+    // happened to update during one of those windows. Pinning to this
+    // one permanent, backed-up key is what actually fixes it going
+    // forward - the debug key was never actually stable, it just
+    // happened to hold for a few releases at a time.
     buildTypes {
         release {
-            signingConfig = if (isPlayStoreBuild && keystorePropertiesFile.exists()) {
+            signingConfig = if (keystorePropertiesFile.exists()) {
                 signingConfigs.getByName("release")
             } else {
                 signingConfigs.getByName("debug")
