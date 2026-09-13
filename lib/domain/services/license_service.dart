@@ -4,6 +4,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../core/providers.dart';
+import '../../core/secure_storage_provider.dart';
 import '../../core/result.dart';
 import '../../data/licensing/license_gateway.dart';
 import '../../data/payments/platform_onboarding_gateway.dart';

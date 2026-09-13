@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:nexapos_mobile/core/providers.dart';
+import 'package:nexapos_mobile/core/secure_storage_provider.dart';
 import 'package:nexapos_mobile/data/licensing/license_gateway.dart';
 import 'package:nexapos_mobile/data/local/database.dart' show AppDatabase;
 import 'package:nexapos_mobile/domain/entities/user_role.dart';

@@ -1,4 +1,3 @@
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../data/local/database.dart';
 import '../data/local/sync_metadata.dart';
@@ -27,6 +26,3 @@ Clock clock(Ref ref) => const SystemClock();
 
 @Riverpod(keepAlive: true)
 IdGenerator idGenerator(Ref ref) => UuidIdGenerator();
-
-@Riverpod(keepAlive: true)
-FlutterSecureStorage secureStorage(Ref ref) => const FlutterSecureStorage();

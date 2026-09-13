@@ -3,7 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
-import '../../core/providers.dart';
+import '../../core/secure_storage_provider.dart';
 import 'thermal_receipt_builder.dart';
 import '../../features/checkout/receipt_screen.dart' show ReceiptData;
 

@@ -1,6 +1,6 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
-import '../../core/providers.dart';
+import '../../core/secure_storage_provider.dart';
 import '../entities/paystack_credentials.dart';
 
 part 'paystack_credentials_service.g.dart';

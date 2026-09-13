@@ -14,7 +14,7 @@ import 'package:googleapis_auth/auth_io.dart' as gauth;
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 
-import '../../core/providers.dart';
+import '../../core/secure_storage_provider.dart';
 import 'automatic_backup_service.dart';
 
 final googleDriveBackupServiceProvider = Provider<GoogleDriveBackupService>(

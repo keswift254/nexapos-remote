@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:local_auth/local_auth.dart';
 
-import '../../core/providers.dart';
+import '../../core/secure_storage_provider.dart';
 import '../entities/user.dart';
 import '../../data/repositories/user_repository_impl.dart';
 

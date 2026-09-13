@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../../core/providers.dart';
+import '../../core/secure_storage_provider.dart';
 import '../../data/import/shop_archive.dart';
 import '../../data/local/database.dart';
 import 'sync_service.dart';

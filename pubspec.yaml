@@ -94,6 +94,12 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  # Direct dependency (not just transitive via flutter_test) because
+  # test/web_spike and test/web_spike_trivial import package:test/test.dart
+  # directly - they run via `dart test -p chrome`, not `flutter test`,
+  # since flutter_tools' own Chrome launcher was found unreliable (see
+  # memory: project-drive-backup-and-ios-browser-design).
+  test: ^1.31.1
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is

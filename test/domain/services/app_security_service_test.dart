@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:nexapos_mobile/core/providers.dart';
+import 'package:nexapos_mobile/core/secure_storage_provider.dart';
 import 'package:nexapos_mobile/data/local/database.dart';
 import 'package:nexapos_mobile/domain/entities/user_role.dart';
 import 'package:nexapos_mobile/domain/services/app_security_service.dart';

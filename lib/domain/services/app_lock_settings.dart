@@ -1,6 +1,6 @@
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
-import '../../core/providers.dart';
+import '../../core/secure_storage_provider.dart';
 
 part 'app_lock_settings.g.dart';
 

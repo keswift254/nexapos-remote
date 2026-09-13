@@ -6,6 +6,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:otp/otp.dart';
 
 import '../../core/providers.dart';
+import '../../core/secure_storage_provider.dart';
 import '../../core/utils/clock.dart';
 import '../entities/user_role.dart';
 import 'auth_service.dart';

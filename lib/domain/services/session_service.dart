@@ -1,6 +1,6 @@
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
-import '../../core/providers.dart';
+import '../../core/secure_storage_provider.dart';
 import '../../core/result.dart';
 import '../../data/repositories/user_repository_impl.dart';
 import '../entities/user.dart';
