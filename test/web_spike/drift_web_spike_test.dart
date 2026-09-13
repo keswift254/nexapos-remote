@@ -2,8 +2,8 @@
 library;
 
 import 'package:drift/drift.dart';
-import 'package:drift_flutter/drift_flutter.dart';
-import 'package:flutter_test/flutter_test.dart';
+import 'package:drift/wasm.dart';
+import 'package:test/test.dart';
 import 'package:nexapos_mobile/core/utils/clock.dart';
 import 'package:nexapos_mobile/core/utils/id_generator.dart';
 import 'package:nexapos_mobile/core/utils/money.dart';
@@ -37,21 +37,34 @@ import 'package:nexapos_mobile/domain/services/stock_service.dart';
 ///
 /// Requires web/sqlite3mc.wasm and web/drift_worker.js to exist (fetched/
 /// copied once for this spike - see the memory note on where they came
-/// from). Run with: flutter test -p chrome test/web_spike
+/// from).
+///
+/// Deliberately uses drift's own low-level `WasmDatabase.open` (from
+/// package:drift/wasm.dart, pure Dart) rather than drift_flutter's
+/// `driftDatabase()` convenience wrapper - drift_flutter transitively
+/// pulls in the real Flutter framework (dart:ui and friends), which
+/// only Flutter's own toolchain can provide. Using the low-level API
+/// instead means this test needs no Flutter-specific compilation at
+/// all, so it can run via the plain Dart SDK's own test/browser runner:
+///
+///   dart test -p chrome test/web_spike
+///
+/// Prefer this over `flutter test --platform chrome` - that command's
+/// own Chrome-launching code (in flutter_tools) was found to be
+/// unreliable against current Chrome versions (confirmed on two
+/// separate machines, two different failure modes), whereas `dart
+/// test`'s separately-maintained browser launcher worked immediately.
 void main() {
   int dbCounter = 0;
 
   Future<AppDatabase> openWebDb() async {
     dbCounter++;
-    return AppDatabase(
-      driftDatabase(
-        name: 'nexapos_web_spike_${DateTime.now().microsecondsSinceEpoch}_$dbCounter',
-        web: DriftWebOptions(
-          sqlite3Wasm: Uri.parse('sqlite3mc.wasm'),
-          driftWorker: Uri.parse('drift_worker.js'),
-        ),
-      ),
+    final result = await WasmDatabase.open(
+      databaseName: 'nexapos_web_spike_${DateTime.now().microsecondsSinceEpoch}_$dbCounter',
+      sqlite3Uri: Uri.parse('sqlite3mc.wasm'),
+      driftWorkerUri: Uri.parse('drift_worker.js'),
     );
+    return AppDatabase(result.resolvedExecutor);
   }
 
   test('drift web driver opens this schema, runs migration/triggers/WAL, and completes a full checkout', () async {
@@ -145,18 +158,19 @@ void main() {
     expect(items.single.lineTotal.cents, 30000);
   });
 
+  Future<AppDatabase> openNamedWebDb(String name) async {
+    final result = await WasmDatabase.open(
+      databaseName: name,
+      sqlite3Uri: Uri.parse('sqlite3mc.wasm'),
+      driftWorkerUri: Uri.parse('drift_worker.js'),
+    );
+    return AppDatabase(result.resolvedExecutor);
+  }
+
   test('sqlite3mc PRAGMA key encrypts data at rest, same as the native SQLCipher path', () async {
     final dbName = 'nexapos_web_spike_encryption_${DateTime.now().microsecondsSinceEpoch}';
 
-    final db1 = AppDatabase(
-      driftDatabase(
-        name: dbName,
-        web: DriftWebOptions(
-          sqlite3Wasm: Uri.parse('sqlite3mc.wasm'),
-          driftWorker: Uri.parse('drift_worker.js'),
-        ),
-      ),
-    );
+    final db1 = await openNamedWebDb(dbName);
     // Must be the very first statement executed against a fresh database
     // - same requirement as the native PRAGMA key path in
     // AppDatabase.defaults(), just applied here instead of via
@@ -169,12 +183,7 @@ void main() {
 
     // Reopen the SAME named database with the CORRECT key - data must
     // still be there.
-    final db2 = AppDatabase(
-      driftDatabase(
-        name: dbName,
-        web: DriftWebOptions(sqlite3Wasm: Uri.parse('sqlite3mc.wasm'), driftWorker: Uri.parse('drift_worker.js')),
-      ),
-    );
+    final db2 = await openNamedWebDb(dbName);
     await db2.customStatement("PRAGMA key = 'spike-correct-key';");
     final rows = await db2.customSelect('SELECT name FROM categories WHERE id = ?', variables: [Variable('cat-1')]).get();
     expect(rows, hasLength(1), reason: 'the correct key must decrypt what was written');
@@ -189,12 +198,7 @@ void main() {
     // empty/garbled) counts as encryption actually being enforced; only
     // "reads back the correct plaintext row with the wrong key" is a
     // real failure here.
-    final db3 = AppDatabase(
-      driftDatabase(
-        name: dbName,
-        web: DriftWebOptions(sqlite3Wasm: Uri.parse('sqlite3mc.wasm'), driftWorker: Uri.parse('drift_worker.js')),
-      ),
-    );
+    final db3 = await openNamedWebDb(dbName);
     await db3.customStatement("PRAGMA key = 'spike-WRONG-key';");
     try {
       final wrongKeyRows = await db3.customSelect('SELECT name FROM categories WHERE id = ?', variables: [Variable('cat-1')]).get();
