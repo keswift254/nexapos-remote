@@ -624,7 +624,9 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
           ),
         ] else ...[
           Text(
-            'Make sure this device is connected to the same Wi-Fi network as the shop\'s other device.',
+            'On the same Wi-Fi as the shop\'s other device? Scan below to find it automatically. '
+            'Otherwise, ask the shop for an invite code and enter it manually - that works over the '
+            'internet from anywhere, no shared Wi-Fi needed.',
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 12),
@@ -769,7 +771,9 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Generate a code so another device on the same Wi-Fi network can find and join this shop automatically.',
+                  'Generate a code for another device to join this shop. On the same Wi-Fi, it\'s found '
+                  'automatically; otherwise, share the code so it can be entered manually - joining works '
+                  'over the internet from anywhere, no shared Wi-Fi needed.',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
                 const SizedBox(height: 12),
