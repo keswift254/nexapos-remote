@@ -39,7 +39,7 @@ CheckoutService checkoutService(Ref ref) {
   );
 }
 
-const paymentMethods = ['cash', 'mpesa', 'mpesa_manual', 'paystack'];
+const paymentMethods = ['cash', 'mpesa', 'mpesa_manual', 'paystack', 'intasend'];
 const saleTypes = ['retail', 'wholesale'];
 
 class CheckoutTotals {
@@ -70,12 +70,14 @@ class _CheckoutAbort implements Exception {
 /// while offline" note:
 /// - cash/mpesa/mpesa_manual: [checkout] records the sale as 'paid'
 ///   immediately - there is no confirmation to wait for.
-/// - paystack: a genuinely real gateway round-trip (see
-///   PaystackPaymentService), so it needs three steps instead of one -
-///   [beginPaystackSale] reserves stock and records the sale as
-///   'pending' *after* the gateway checkout has already been created,
-///   then [finalizePaystackSale] or [cancelPaystackSale] resolves it
-///   once the customer has paid or the cashier gives up waiting.
+/// - paystack/intasend: a genuinely real gateway round-trip (see
+///   PaystackPaymentService/IntaSendPaymentService), so each needs three
+///   steps instead of one - [beginPaystackSale]/[beginIntaSendSale]
+///   reserves stock and records the sale as 'pending' *after* the
+///   gateway has already accepted the charge attempt, then
+///   [finalizePaystackSale] or [cancelPaystackSale] (shared by both
+///   gateways despite the name) resolves it once the customer has paid
+///   or the cashier gives up waiting.
 class CheckoutService {
   final AppDatabase _db;
   final SaleRepository _saleRepository;
@@ -126,9 +128,9 @@ class CheckoutService {
     }
   }
 
-  /// cash/mpesa/mpesa_manual only - paystack must go through
-  /// [beginPaystackSale] since it needs a real gateway round-trip
-  /// before anything is written.
+  /// cash/mpesa/mpesa_manual only - paystack and intasend must go
+  /// through [beginPaystackSale]/[beginIntaSendSale] since each needs a
+  /// real gateway round-trip before anything is written.
   Future<Result<Sale>> checkout({
     required List<CartItem> cart,
     required Money discount,
@@ -140,7 +142,7 @@ class CheckoutService {
     required String userId,
   }) async {
     if (!saleTypes.contains(saleType)) return const Result.failure('Select a valid sale type.');
-    if (!paymentMethods.contains(paymentMethod) || paymentMethod == 'paystack') {
+    if (!paymentMethods.contains(paymentMethod) || paymentMethod == 'paystack' || paymentMethod == 'intasend') {
       return const Result.failure('Select a valid payment method.');
     }
 
@@ -258,9 +260,76 @@ class CheckoutService {
     return Result.ok(sale);
   }
 
+  /// IntaSend's sibling of [beginPaystackSale] - same job (reserve stock,
+  /// record the sale as pending, atomically) after IntaSendPaymentService
+  /// has already sent the STK push and gotten an invoice id back. Kept as
+  /// its own method rather than a generalized "beginGatewaySale(gateway:
+  /// ...)" since the two gateways' request/response shapes differ enough
+  /// (authorizationUrl vs. nothing to open) that a shared signature would
+  /// mostly be optional fields.
+  Future<Result<Sale>> beginIntaSendSale({
+    required List<CartItem> cart,
+    required Money discount,
+    String customerName = '',
+    required String customerPhone,
+    required String saleType,
+    required String userId,
+    required String saleNumber,
+    required String intasendReference,
+  }) async {
+    if (!saleTypes.contains(saleType)) return const Result.failure('Select a valid sale type.');
+
+    final _ValidatedCart validated;
+    try {
+      validated = await _validateCart(cart);
+    } on _CheckoutAbort catch (e) {
+      return Result.failure(e.message);
+    }
+
+    final totals = _computeTotals(validated.subtotal, discount);
+    final saleId = _idGenerator.newId();
+    final trimmedPhone = customerPhone.trim();
+
+    final sale = Sale(
+      id: saleId,
+      saleNumber: saleNumber,
+      userId: userId,
+      customerName: customerName.trim().isEmpty ? 'Walk-in customer' : customerName.trim(),
+      customerPhone: trimmedPhone.isEmpty ? null : trimmedPhone,
+      saleType: saleType,
+      paymentMethod: 'intasend',
+      subtotal: totals.subtotal,
+      discount: totals.discount,
+      total: totals.total,
+      status: 'pending',
+      createdAt: _clock.now(),
+    );
+
+    try {
+      await _db.transaction(() async {
+        await _saleRepository.create(sale);
+        await _insertItemsAndStock(saleId, saleNumber, validated.items, userId);
+        await _paymentRecordRepository.create(PaymentRecord(
+          id: '',
+          saleId: saleId,
+          method: 'intasend',
+          amount: totals.total,
+          referenceNote: intasendReference,
+          status: 'initiated',
+        ));
+      });
+    } on _CheckoutAbort catch (e) {
+      return Result.failure(e.message);
+    }
+
+    return Result.ok(sale);
+  }
+
   /// Idempotent: calling this again on an already-resolved sale is a
-  /// no-op that just returns the current row, since the poll loop in
-  /// PaystackPaymentService may call this more than once in a race.
+  /// no-op that just returns the current row. Shared by every online
+  /// gateway (Paystack, IntaSend, ...) despite the name - each one's poll
+  /// loop may call this more than once in a race, and none of the actual
+  /// logic below is Paystack-specific.
   Future<Result<Sale>> finalizePaystackSale(String saleId) async {
     final sale = await _saleRepository.findById(saleId);
     if (sale == null) return const Result.failure('Sale not found.');
@@ -277,11 +346,12 @@ class CheckoutService {
     return Result.ok(sale.copyWith(status: 'paid'));
   }
 
-  /// Restores the stock [beginPaystackSale] reserved (as 'return'
-  /// movements, the same movement-type vocabulary used everywhere else
-  /// in this app - see stock_movements_table.dart) and marks the sale
-  /// cancelled. Also idempotent, for the same reason as above.
-  Future<Result<void>> cancelPaystackSale(String saleId, {String reason = 'Paystack payment not completed'}) async {
+  /// Restores the stock [beginPaystackSale]/[beginIntaSendSale] reserved
+  /// (as 'return' movements, the same movement-type vocabulary used
+  /// everywhere else in this app - see stock_movements_table.dart) and
+  /// marks the sale cancelled. Also idempotent, for the same reason as
+  /// above, and also shared across every online gateway despite the name.
+  Future<Result<void>> cancelPaystackSale(String saleId, {String reason = 'Online payment not completed'}) async {
     final sale = await _saleRepository.findById(saleId);
     if (sale == null) return const Result.failure('Sale not found.');
     if (!sale.isPending) return const Result.ok(null);
@@ -309,19 +379,27 @@ class CheckoutService {
   }
 
   /// Sales left stranded in 'pending' by the app being killed outright
-  /// while PaystackWaitingScreen was still polling - see
-  /// PaystackPaymentService.reconcilePendingSales.
+  /// while PaystackWaitingScreen/IntaSendWaitingScreen was still polling
+  /// - returns both gateways' stranded sales together; each service's own
+  /// reconcilePendingSales filters to its own paymentMethod before
+  /// polling, since a Paystack reference can't be verified against
+  /// IntaSend or vice versa.
   Future<List<Sale>> pendingPaystackSales() => _saleRepository.findPendingPaystack();
 
   /// The gateway reference beginPaystackSale stashed in the payment
   /// record's referenceNote - needed to re-poll a sale found by
   /// [pendingPaystackSales], since PaystackWaitingScreen's own session
   /// object (and the checkout page's authorizationUrl) doesn't survive
-  /// an app restart.
+  /// an app restart. The underlying lookup is gateway-agnostic (a plain
+  /// referenceNote read), so [intasendReferenceFor] is just a same-named
+  /// pair for IntaSendPaymentService's call sites rather than separate
+  /// logic.
   Future<String?> paystackReferenceFor(String saleId) async {
     final record = await _paymentRecordRepository.forSale(saleId);
     return record?.referenceNote;
   }
+
+  Future<String?> intasendReferenceFor(String saleId) => paystackReferenceFor(saleId);
 
   Future<void> _insertItemsAndStock(
     String saleId,

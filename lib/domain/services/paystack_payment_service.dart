@@ -168,7 +168,12 @@ class PaystackPaymentService {
   /// back for the dashboard to surface, since those need a human
   /// decision (keep waiting vs. cancel and restore stock).
   Future<List<Sale>> reconcilePendingSales() async {
-    final pending = await _checkoutService.pendingPaystackSales();
+    // pendingPaystackSales() now also returns stranded intasend sales
+    // (see that method's doc) - filtered out here since a Paystack
+    // reference can't be verified against IntaSend's API.
+    final pending = (await _checkoutService.pendingPaystackSales())
+        .where((sale) => sale.paymentMethod == 'paystack')
+        .toList();
     if (pending.isEmpty) return const [];
 
     // Polled in parallel, not sequentially - each sale is an independent

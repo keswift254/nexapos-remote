@@ -16,13 +16,19 @@ class SalesDao extends DatabaseAccessor<AppDatabase> with _$SalesDaoMixin {
     return (select(sales)..where((s) => s.id.equals(id) & s.deletedAt.isNull())).getSingleOrNull();
   }
 
-  /// A sale only ever sits in 'pending' while it's a paystack sale
-  /// awaiting gateway confirmation - see sales_table.dart's status doc.
-  /// Used at app startup to reconcile any left stranded by the app being
-  /// killed outright while PaystackWaitingScreen was still polling.
+  /// A sale only ever sits in 'pending' while it's awaiting confirmation
+  /// from an online gateway - paystack or intasend, see sales_table.dart's
+  /// status doc. Used at app startup to reconcile any left stranded by
+  /// the app being killed outright while PaystackWaitingScreen/
+  /// IntaSendWaitingScreen was still polling. Despite the name, this
+  /// covers both gateways - each PaymentService's own
+  /// reconcilePendingSales filters the result to its own paymentMethod.
   Future<List<Sale>> findPendingPaystack() {
     return (select(sales)
-          ..where((s) => s.status.equals('pending') & s.paymentMethod.equals('paystack') & s.deletedAt.isNull()))
+          ..where((s) =>
+              s.status.equals('pending') &
+              (s.paymentMethod.equals('paystack') | s.paymentMethod.equals('intasend')) &
+              s.deletedAt.isNull()))
         .get();
   }
 

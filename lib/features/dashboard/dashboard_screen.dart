@@ -262,8 +262,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                         leading: const Icon(Icons.warning_amber_outlined),
                         title: Text(
                           pendingPaystackSales.length == 1
-                              ? '1 pending Paystack payment needs attention'
-                              : '${pendingPaystackSales.length} pending Paystack payments need attention',
+                              ? '1 pending online payment needs attention'
+                              : '${pendingPaystackSales.length} pending online payments need attention',
                         ),
                         subtitle: const Text(
                           'Tap to check status or cancel and restore stock.',

@@ -341,4 +341,96 @@ void main() {
     product = await productRepository.findById(productId);
     expect(product!.stockQty, 10);
   });
+
+  test('checkout() refuses intasend - it must go through beginIntaSendSale', () async {
+    final result = await checkout.checkout(
+      cart: [CartItem(productId: productId, name: 'Widget', unitPrice: const Money(10000), costPrice: const Money(5000), quantity: 1)],
+      discount: const Money.zero(),
+      saleType: 'retail',
+      paymentMethod: 'intasend',
+      userId: userId,
+    );
+    expect(result.isFailure, isTrue);
+  });
+
+  test('beginIntaSendSale reserves stock and records the sale as pending', () async {
+    final saleNumber = await checkout.generateSaleNumber();
+    final result = await checkout.beginIntaSendSale(
+      cart: [CartItem(productId: productId, name: 'Widget', unitPrice: const Money(10000), costPrice: const Money(5000), quantity: 4)],
+      discount: const Money.zero(),
+      customerPhone: '254712345678',
+      saleType: 'retail',
+      userId: userId,
+      saleNumber: saleNumber,
+      intasendReference: saleNumber,
+    );
+
+    expect(result.isOk, isTrue);
+    late String saleId;
+    result.when(
+      ok: (sale) {
+        saleId = sale.id;
+        expect(sale.status, 'pending');
+        expect(sale.paymentMethod, 'intasend');
+      },
+      failure: (m) => fail(m),
+    );
+
+    final product = await productRepository.findById(productId);
+    expect(product!.stockQty, 6, reason: 'stock is reserved immediately, before payment confirms');
+
+    final record = await paymentRecordRepository.forSale(saleId);
+    expect(record!.method, 'intasend');
+    expect(record.referenceNote, saleNumber);
+  });
+
+  test('finalizePaystackSale and cancelPaystackSale also resolve an intasend sale (shared, gateway-agnostic logic)', () async {
+    final saleNumber = await checkout.generateSaleNumber();
+    final beginResult = await checkout.beginIntaSendSale(
+      cart: [CartItem(productId: productId, name: 'Widget', unitPrice: const Money(10000), costPrice: const Money(5000), quantity: 1)],
+      discount: const Money.zero(),
+      customerPhone: '254712345678',
+      saleType: 'retail',
+      userId: userId,
+      saleNumber: saleNumber,
+      intasendReference: saleNumber,
+    );
+    late String saleId;
+    beginResult.when(ok: (sale) => saleId = sale.id, failure: (m) => fail(m));
+
+    final finalized = await checkout.finalizePaystackSale(saleId);
+    finalized.when(ok: (sale) => expect(sale.status, 'paid'), failure: (m) => fail(m));
+    final record = await paymentRecordRepository.forSale(saleId);
+    expect(record!.status, 'paid');
+  });
+
+  test('pendingPaystackSales (the shared stranded-sale query) returns both a pending paystack and a pending intasend sale', () async {
+    final paystackSaleNumber = await checkout.generateSaleNumber();
+    final paystackResult = await checkout.beginPaystackSale(
+      cart: [CartItem(productId: productId, name: 'Widget', unitPrice: const Money(10000), costPrice: const Money(5000), quantity: 1)],
+      discount: const Money.zero(),
+      saleType: 'retail',
+      userId: userId,
+      saleNumber: paystackSaleNumber,
+      paystackReference: paystackSaleNumber,
+    );
+    late String paystackSaleId;
+    paystackResult.when(ok: (sale) => paystackSaleId = sale.id, failure: (m) => fail(m));
+
+    final intasendSaleNumber = await checkout.generateSaleNumber();
+    final intasendResult = await checkout.beginIntaSendSale(
+      cart: [CartItem(productId: productId, name: 'Widget', unitPrice: const Money(10000), costPrice: const Money(5000), quantity: 1)],
+      discount: const Money.zero(),
+      customerPhone: '254712345678',
+      saleType: 'retail',
+      userId: userId,
+      saleNumber: intasendSaleNumber,
+      intasendReference: intasendSaleNumber,
+    );
+    late String intasendSaleId;
+    intasendResult.when(ok: (sale) => intasendSaleId = sale.id, failure: (m) => fail(m));
+
+    final pending = await checkout.pendingPaystackSales();
+    expect(pending.map((s) => s.id), containsAll([paystackSaleId, intasendSaleId]));
+  });
 }

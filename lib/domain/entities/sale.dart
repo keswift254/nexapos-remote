@@ -4,11 +4,11 @@ import '../../core/utils/money.dart';
 part 'sale.freezed.dart';
 
 /// saleType: 'retail', 'wholesale'.
-/// paymentMethod: 'cash', 'mpesa', 'mpesa_manual', 'paystack' (same 4
-/// values as PHP).
-/// status: 'paid', 'pending' (paystack only, while awaiting gateway
-/// confirmation), 'cancelled' (a pending paystack sale the cashier
-/// abandoned - stock has been restored).
+/// paymentMethod: 'cash', 'mpesa', 'mpesa_manual', 'paystack', 'intasend'
+/// (the first 4 match PHP; intasend is mobile-only, added 1.0.32).
+/// status: 'paid', 'pending' (paystack/intasend only, while awaiting
+/// gateway confirmation), 'cancelled' (a pending online-gateway sale the
+/// cashier abandoned - stock has been restored).
 @freezed
 abstract class Sale with _$Sale {
   const factory Sale({

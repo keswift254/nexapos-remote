@@ -4,17 +4,19 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/utils/money.dart';
 import '../../domain/services/checkout_service.dart';
+import '../../domain/services/intasend_payment_service.dart';
 import '../../domain/services/paystack_payment_service.dart';
 import '../../domain/services/session_service.dart';
 import '../dashboard/dashboard_screen.dart';
 import 'cart_notifier.dart';
+import 'intasend_waiting_screen.dart';
 import 'paystack_waiting_screen.dart';
 
-const _paymentMethodLabels = {'cash': 'Cash', 'paystack': 'M-Pesa Prompt'};
+const _paymentMethodLabels = {'cash': 'Cash', 'paystack': 'M-Pesa Prompt', 'intasend': 'IntaSend'};
 
 /// Cart review + checkout details. Cash completes
-/// immediately through CheckoutService; paystack hands off to
-/// PaystackPaymentService and, on success, PaystackWaitingScreen.
+/// immediately through CheckoutService; paystack/intasend each hand off
+/// to their own PaymentService and, on success, their own waiting screen.
 class CartScreen extends ConsumerStatefulWidget {
   const CartScreen({super.key});
 
@@ -70,6 +72,33 @@ class _CartScreenState extends ConsumerState<CartScreen> {
           Navigator.of(context).push(
             MaterialPageRoute(
               builder: (_) => PaystackWaitingScreen(session: session),
+            ),
+          );
+        },
+        failure: (message) => _showError(message),
+      );
+      return;
+    }
+
+    if (paymentMethod == 'intasend') {
+      final service = ref.read(intaSendPaymentServiceProvider);
+      final state = ref.read(cartProvider);
+      final result = await service.start(
+        cart: state.items,
+        discount: state.discount,
+        customerName: _nameController.text,
+        customerPhone: _phoneController.text,
+        saleType: state.saleType,
+        userId: userId,
+      );
+      if (!mounted) return;
+      setState(() => _submitting = false);
+      result.when(
+        ok: (session) {
+          cart.clear();
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => IntaSendWaitingScreen(session: session),
             ),
           );
         },
@@ -190,8 +219,10 @@ class _CartScreenState extends ConsumerState<CartScreen> {
           const SizedBox(height: 12),
           TextField(
             controller: _phoneController,
-            decoration: const InputDecoration(
-              labelText: 'Customer phone (optional)',
+            decoration: InputDecoration(
+              labelText: cartState.paymentMethod == 'intasend'
+                  ? 'Customer M-Pesa number (required for IntaSend)'
+                  : 'Customer phone (optional)',
             ),
             keyboardType: TextInputType.phone,
             onChanged: cart.setCustomerPhone,

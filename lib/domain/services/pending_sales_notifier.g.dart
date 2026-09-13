@@ -8,27 +8,39 @@ part of 'pending_sales_notifier.dart';
 
 // GENERATED CODE - DO NOT MODIFY BY HAND
 // ignore_for_file: type=lint, type=warning
-/// Holds whichever paystack sales are still stranded in 'pending' after
-/// the startup reconciliation pass (see
-/// PaystackPaymentService.reconcilePendingSales) - starts empty rather
-/// than loading, since most launches have nothing to reconcile and the
-/// dashboard shouldn't show a spinner for that common case.
+/// Holds whichever online-gateway sales (Paystack or IntaSend) are still
+/// stranded in 'pending' after the startup reconciliation pass - starts
+/// empty rather than loading, since most launches have nothing to
+/// reconcile and the dashboard shouldn't show a spinner for that common
+/// case. Fans out to both services' own reconcilePendingSales (each
+/// already filters to its own paymentMethod - see their doc comments)
+/// and merges what's left; kept as one notifier/one dashboard banner
+/// rather than a separate one per gateway, since a cashier doesn't care
+/// which gateway a stuck payment used, only that money might be stuck.
 
 @ProviderFor(PendingPaystackSalesNotifier)
 final pendingPaystackSalesProvider = PendingPaystackSalesNotifierProvider._();
 
-/// Holds whichever paystack sales are still stranded in 'pending' after
-/// the startup reconciliation pass (see
-/// PaystackPaymentService.reconcilePendingSales) - starts empty rather
-/// than loading, since most launches have nothing to reconcile and the
-/// dashboard shouldn't show a spinner for that common case.
+/// Holds whichever online-gateway sales (Paystack or IntaSend) are still
+/// stranded in 'pending' after the startup reconciliation pass - starts
+/// empty rather than loading, since most launches have nothing to
+/// reconcile and the dashboard shouldn't show a spinner for that common
+/// case. Fans out to both services' own reconcilePendingSales (each
+/// already filters to its own paymentMethod - see their doc comments)
+/// and merges what's left; kept as one notifier/one dashboard banner
+/// rather than a separate one per gateway, since a cashier doesn't care
+/// which gateway a stuck payment used, only that money might be stuck.
 final class PendingPaystackSalesNotifierProvider
     extends $NotifierProvider<PendingPaystackSalesNotifier, List<Sale>> {
-  /// Holds whichever paystack sales are still stranded in 'pending' after
-  /// the startup reconciliation pass (see
-  /// PaystackPaymentService.reconcilePendingSales) - starts empty rather
-  /// than loading, since most launches have nothing to reconcile and the
-  /// dashboard shouldn't show a spinner for that common case.
+  /// Holds whichever online-gateway sales (Paystack or IntaSend) are still
+  /// stranded in 'pending' after the startup reconciliation pass - starts
+  /// empty rather than loading, since most launches have nothing to
+  /// reconcile and the dashboard shouldn't show a spinner for that common
+  /// case. Fans out to both services' own reconcilePendingSales (each
+  /// already filters to its own paymentMethod - see their doc comments)
+  /// and merges what's left; kept as one notifier/one dashboard banner
+  /// rather than a separate one per gateway, since a cashier doesn't care
+  /// which gateway a stuck payment used, only that money might be stuck.
   PendingPaystackSalesNotifierProvider._()
     : super(
         from: null,
@@ -57,13 +69,17 @@ final class PendingPaystackSalesNotifierProvider
 }
 
 String _$pendingPaystackSalesNotifierHash() =>
-    r'31c22ecc75415519894ae7af106d1c3071bc8f30';
+    r'0ef228b0964d09b4d8c48e992a393ff937a4a11e';
 
-/// Holds whichever paystack sales are still stranded in 'pending' after
-/// the startup reconciliation pass (see
-/// PaystackPaymentService.reconcilePendingSales) - starts empty rather
-/// than loading, since most launches have nothing to reconcile and the
-/// dashboard shouldn't show a spinner for that common case.
+/// Holds whichever online-gateway sales (Paystack or IntaSend) are still
+/// stranded in 'pending' after the startup reconciliation pass - starts
+/// empty rather than loading, since most launches have nothing to
+/// reconcile and the dashboard shouldn't show a spinner for that common
+/// case. Fans out to both services' own reconcilePendingSales (each
+/// already filters to its own paymentMethod - see their doc comments)
+/// and merges what's left; kept as one notifier/one dashboard banner
+/// rather than a separate one per gateway, since a cashier doesn't care
+/// which gateway a stuck payment used, only that money might be stuck.
 
 abstract class _$PendingPaystackSalesNotifier extends $Notifier<List<Sale>> {
   List<Sale> build();

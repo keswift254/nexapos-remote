@@ -2,17 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../../domain/entities/sale.dart';
+import '../../domain/services/intasend_payment_service.dart';
 import '../../domain/services/paystack_payment_service.dart';
 import '../../domain/services/pending_sales_notifier.dart';
 
-/// Lists paystack sales left stranded in 'pending' - reached only from
-/// the dashboard's warning banner, which only appears once startup
-/// reconciliation has already resolved everything it silently could
-/// (see PendingPaystackSalesNotifier). Deliberately has no "reopen
-/// checkout page" action like PaystackWaitingScreen does: the original
-/// authorizationUrl was never persisted, so it can't be reconstructed
-/// after an app restart - only "check again" (re-poll the gateway) and
-/// "cancel and restore stock" are honest options here.
+/// Lists online-gateway sales (Paystack or IntaSend) left stranded in
+/// 'pending' - reached only from the dashboard's warning banner, which
+/// only appears once startup reconciliation has already resolved
+/// everything it silently could (see PendingPaystackSalesNotifier).
+/// Deliberately has no "reopen checkout page" action like
+/// PaystackWaitingScreen does: the original authorizationUrl was never
+/// persisted, so it can't be reconstructed after an app restart - only
+/// "check again" (re-poll the gateway) and "cancel and restore stock"
+/// are honest options here.
 class PendingSalesScreen extends ConsumerStatefulWidget {
   const PendingSalesScreen({super.key});
 
@@ -25,9 +27,14 @@ class _PendingSalesScreenState extends ConsumerState<PendingSalesScreen> {
 
   Future<void> _checkNow(Sale sale) async {
     setState(() => _busy.add(sale.id));
-    final outcome = await ref.read(paystackPaymentServiceProvider).checkPending(sale);
+    final bool paid;
+    if (sale.paymentMethod == 'intasend') {
+      paid = await ref.read(intaSendPaymentServiceProvider).checkPending(sale) is IntaSendPollPaid;
+    } else {
+      paid = await ref.read(paystackPaymentServiceProvider).checkPending(sale) is PaystackPollPaid;
+    }
     if (!mounted) return;
-    if (outcome is PaystackPollPaid) {
+    if (paid) {
       await ref.read(pendingPaystackSalesProvider.notifier).reconcile();
       if (!mounted) return;
       ScaffoldMessenger.of(context)
@@ -35,7 +42,7 @@ class _PendingSalesScreenState extends ConsumerState<PendingSalesScreen> {
     } else {
       setState(() => _busy.remove(sale.id));
       ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Still not confirmed by Paystack.')));
+          .showSnackBar(const SnackBar(content: Text('Still not confirmed.')));
     }
   }
 
@@ -46,7 +53,7 @@ class _PendingSalesScreenState extends ConsumerState<PendingSalesScreen> {
         title: const Text('Cancel this sale?'),
         content: Text(
           'The reserved stock for ${sale.saleNumber} will be returned and the sale marked cancelled. '
-          'Only do this if the customer did not complete the Paystack payment.',
+          'Only do this if the customer did not complete the online payment.',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Keep waiting')),
@@ -57,7 +64,9 @@ class _PendingSalesScreenState extends ConsumerState<PendingSalesScreen> {
     if (confirmed != true || !mounted) return;
 
     setState(() => _busy.add(sale.id));
-    final result = await ref.read(paystackPaymentServiceProvider).cancel(sale.id);
+    final result = sale.paymentMethod == 'intasend'
+        ? await ref.read(intaSendPaymentServiceProvider).cancel(sale.id)
+        : await ref.read(paystackPaymentServiceProvider).cancel(sale.id);
     if (!mounted) return;
     result.when(
       ok: (_) async {
@@ -77,7 +86,7 @@ class _PendingSalesScreenState extends ConsumerState<PendingSalesScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Pending Payments')),
       body: pending.isEmpty
-          ? const Center(child: Text('No pending Paystack payments.'))
+          ? const Center(child: Text('No pending online payments.'))
           : ListView.builder(
               padding: const EdgeInsets.all(12),
               itemCount: pending.length,

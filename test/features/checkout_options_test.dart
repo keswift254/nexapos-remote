@@ -13,7 +13,7 @@ class _Session extends SessionNotifier {
 
 void main() {
   testWidgets(
-    'checkout offers only Cash and M-Pesa Prompt and ignores retired methods',
+    'checkout offers only Cash, M-Pesa Prompt, and IntaSend, and ignores retired methods',
     (tester) async {
       final container = ProviderContainer(
         overrides: [sessionProvider.overrideWith(_Session.new)],
@@ -27,6 +27,7 @@ void main() {
       );
       expect(find.widgetWithText(ChoiceChip, 'Cash'), findsOneWidget);
       expect(find.widgetWithText(ChoiceChip, 'M-Pesa Prompt'), findsOneWidget);
+      expect(find.widgetWithText(ChoiceChip, 'IntaSend'), findsOneWidget);
       expect(find.text('M-Pesa'), findsNothing);
       expect(find.text('M-Pesa Till'), findsNothing);
       await tester.ensureVisible(find.text('M-Pesa Prompt'));
@@ -37,6 +38,10 @@ void main() {
       expect(container.read(cartProvider).paymentMethod, 'paystack');
       container.read(cartProvider.notifier).setPaymentMethod('mpesa_manual');
       expect(container.read(cartProvider).paymentMethod, 'paystack');
+      await tester.ensureVisible(find.text('IntaSend'));
+      await tester.tap(find.text('IntaSend'));
+      await tester.pump();
+      expect(container.read(cartProvider).paymentMethod, 'intasend');
     },
   );
 }
