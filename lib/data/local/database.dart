@@ -1,13 +1,8 @@
-import 'dart:io';
-
 import 'package:drift/drift.dart';
-import 'package:drift_flutter/drift_flutter.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 
-import 'database_encryption.dart';
+import 'database_connection_native.dart'
+    if (dart.library.js_interop) 'database_connection_stub.dart' as connection;
 
 import 'tables/roles_table.dart';
 import 'tables/users_table.dart';
@@ -81,36 +76,12 @@ const _syncedTableNames = [
 class AppDatabase extends _$AppDatabase {
   AppDatabase(super.e);
 
-  /// Same 'nexapos.sqlite' file/location driftDatabase() has always
-  /// used (getApplicationDocumentsDirectory() + '$name.sqlite') - real
-  /// devices already have a file there, so this can't switch to a
-  /// different name/path without every existing install looking like
-  /// it lost its data. Wrapped in the same DatabaseConnection.delayed
-  /// pattern driftDatabase() itself uses internally, so resolving the
-  /// encryption key and (if needed) migrating an existing plain file
-  /// happen before the connection driftDatabase() hands back is ever
-  /// touched - by the time any query runs, the file on disk and the
-  /// PRAGMA key driftDatabase's own `native.setup` applies are already
-  /// guaranteed to match.
-  AppDatabase.defaults()
-      : super(
-          DatabaseConnection.delayed(
-            Future(() async {
-              const storage = FlutterSecureStorage();
-              final key = await getOrCreateEncryptionKey(storage);
-              final dir = await getApplicationDocumentsDirectory();
-              final dbFile = File(p.join(dir.path, 'nexapos.sqlite'));
-              await migrateToEncryptedIfNeeded(dbFile, key);
-
-              return driftDatabase(
-                name: 'nexapos',
-                native: DriftNativeOptions(
-                  setup: (db) => db.execute("PRAGMA key = '$key';"),
-                ),
-              );
-            }),
-          ),
-        );
+  /// See database_connection_native.dart's own doc comment for the full
+  /// story - moved out of this file so database.dart itself stays free
+  /// of native-only imports (dart:io, path_provider, the FFI sqlite3
+  /// package) and can compile for web, which everything that imports
+  /// AppDatabase - most of this app's domain/data layer - now also can.
+  AppDatabase.defaults() : super(connection.openConnection());
 
   @override
   int get schemaVersion => 3;
