@@ -1,5 +1,6 @@
 import 'package:http/http.dart' as http;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+import '../../core/is_web.dart';
 import '../../core/utils/money.dart';
 import 'platform_http_client.dart';
 
@@ -58,7 +59,20 @@ class PaystackGateway {
         'amount': amount.cents,
         'currency': currency,
         'reference': reference,
-        'return_to_app': true,
+        // Only ask the platform backend for a callback_url pointing back
+        // into the app on native - that URL is a GitHub Pages page whose
+        // entire job is bouncing the customer into this app via a
+        // nexapos:// custom URI scheme, which does nothing useful (and
+        // nothing broken either - it just silently fails) from a browser
+        // tab. Omitting return_to_app makes the server skip callback_url
+        // entirely, so Paystack shows its own default confirmation page
+        // instead - not custom-branded, but not broken - while this
+        // cashier's tab keeps polling independently regardless of what
+        // the customer sees there (see PaystackWaitingScreen's own doc
+        // comment: the poll, never the redirect, is what confirms
+        // payment). Revisit once NexaPOS Web has a real hosting URL to
+        // point a dedicated /checkout-return route at instead.
+        'return_to_app': !isWeb,
       },
     );
     if (response['status'] != true) {
