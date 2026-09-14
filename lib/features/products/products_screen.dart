@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
+import '../../core/is_web.dart';
 import '../../core/result.dart';
 import '../../data/import/xlsx_catalog_reader.dart';
 import '../../domain/entities/category.dart';
@@ -190,7 +191,14 @@ class _ProductsScreenState extends ConsumerState<ProductsScreen> {
       appBar: AppBar(
         title: Text(widget.lowStockOnly ? 'Low Stock' : 'Inventory'),
         actions: [
-          if (ref.watch(sessionProvider)?.role == UserRole.admin)
+          // Shop transfer imports from a legacy POS install running on
+          // this same machine (its own local MySQL, spawning its own
+          // php.exe) and writes local backup files to disk - neither has
+          // any meaning from a browser tab, so the entry point itself is
+          // hidden on web rather than shown leading to a screen that can
+          // only fail (see AutomaticBackupService.runIfDue's own web
+          // guard for the equivalent reasoning on the automatic path).
+          if (!isWeb && ref.watch(sessionProvider)?.role == UserRole.admin)
             IconButton(
               icon: const Icon(Icons.backup_outlined),
               tooltip: 'Import all data from another POS / Backup and restore',

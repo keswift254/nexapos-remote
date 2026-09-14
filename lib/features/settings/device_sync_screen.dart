@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/is_web.dart';
 import '../../core/providers.dart';
 import '../../data/payments/paystack_gateway.dart' show PaystackException;
 import '../../data/payments/platform_http_client.dart'
@@ -289,16 +290,23 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
       if (!mounted) return;
       setState(() => _generatedInvite = invite);
       _startCountdown(invite.expiresAt);
-      final label = await ref
-          .read(paystackCredentialsServiceProvider)
-          .loadDeviceLabel();
-      final advertiser = LanHostAdvertiser();
-      _advertiser = advertiser;
-      await advertiser.start(
-        deviceLabel: label.isEmpty ? 'NexaPOS shop' : label,
-        baseUrl: credentials.baseUrl,
-        code: invite.code,
-      );
+      // LAN broadcast needs a raw UDP socket, which a browser tab can
+      // never open - the generated code is still fully valid, it just
+      // can't be auto-discovered from this device; the joining side's
+      // manual-entry path covers it either way (see the scan buttons'
+      // own isWeb guard just above).
+      if (!isWeb) {
+        final label = await ref
+            .read(paystackCredentialsServiceProvider)
+            .loadDeviceLabel();
+        final advertiser = LanHostAdvertiser();
+        _advertiser = advertiser;
+        await advertiser.start(
+          deviceLabel: label.isEmpty ? 'NexaPOS shop' : label,
+          baseUrl: credentials.baseUrl,
+          code: invite.code,
+        );
+      }
     } catch (e) {
       _showMessage(e is PaystackException ? e.message : '$e');
     } finally {
@@ -624,56 +632,65 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
           ),
         ] else ...[
           Text(
-            'On the same Wi-Fi as the shop\'s other device? Scan below to find it automatically. '
-            'Otherwise, ask the shop for an invite code and enter it manually - that works over the '
-            'internet from anywhere, no shared Wi-Fi needed.',
+            // LAN auto-discovery needs a raw UDP socket, which a browser
+            // tab can never open - not a missing feature, a real platform
+            // limit - so the scan option itself is hidden on web rather
+            // than shown broken (see isWeb's own doc comment).
+            isWeb
+                ? 'Ask the shop for an invite code and enter it below - that works over the '
+                    'internet from anywhere, no shared Wi-Fi needed.'
+                : 'On the same Wi-Fi as the shop\'s other device? Scan below to find it automatically. '
+                    'Otherwise, ask the shop for an invite code and enter it manually - that works over the '
+                    'internet from anywhere, no shared Wi-Fi needed.',
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 12),
-          if (!_scanning)
-            OutlinedButton.icon(
-              onPressed: _startScanning,
-              icon: const Icon(Icons.wifi_find_outlined),
-              label: const Text('Scan for nearby devices'),
-            )
-          else ...[
-            Row(
-              children: [
-                const SizedBox(
-                  height: 16,
-                  width: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  _discovered.isEmpty
-                      ? 'Scanning...'
-                      : '${_discovered.length} found',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-                const Spacer(),
-                TextButton(onPressed: _stopScanning, child: const Text('Stop')),
-              ],
-            ),
-            const SizedBox(height: 8),
-            for (final host in _discovered)
-              Card(
-                child: ListTile(
-                  title: Text(
-                    host.deviceLabel.isEmpty ? 'Nearby shop' : host.deviceLabel,
+          if (!isWeb) ...[
+            if (!_scanning)
+              OutlinedButton.icon(
+                onPressed: _startScanning,
+                icon: const Icon(Icons.wifi_find_outlined),
+                label: const Text('Scan for nearby devices'),
+              )
+            else ...[
+              Row(
+                children: [
+                  const SizedBox(
+                    height: 16,
+                    width: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
                   ),
-                  trailing: FilledButton(
-                    onPressed: (_submitting || existing?.isDisabled == true)
-                        ? null
-                        : () => _joinDiscovered(host),
-                    child: const Text('Join'),
+                  const SizedBox(width: 12),
+                  Text(
+                    _discovered.isEmpty
+                        ? 'Scanning...'
+                        : '${_discovered.length} found',
+                    style: Theme.of(context).textTheme.bodyMedium,
                   ),
-                ),
+                  const Spacer(),
+                  TextButton(onPressed: _stopScanning, child: const Text('Stop')),
+                ],
               ),
+              const SizedBox(height: 8),
+              for (final host in _discovered)
+                Card(
+                  child: ListTile(
+                    title: Text(
+                      host.deviceLabel.isEmpty ? 'Nearby shop' : host.deviceLabel,
+                    ),
+                    trailing: FilledButton(
+                      onPressed: (_submitting || existing?.isDisabled == true)
+                          ? null
+                          : () => _joinDiscovered(host),
+                      child: const Text('Join'),
+                    ),
+                  ),
+                ),
+            ],
+            const SizedBox(height: 20),
+            const Divider(),
+            const SizedBox(height: 8),
           ],
-          const SizedBox(height: 20),
-          const Divider(),
-          const SizedBox(height: 8),
           Text(
             'Or enter the invite code manually',
             style: Theme.of(context).textTheme.labelLarge,
@@ -805,10 +822,13 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          remaining == null
-                              ? 'Broadcasting on this network - the other device should find it automatically.'
-                              : remaining == Duration.zero
+                          remaining == Duration.zero
                               ? 'Expired - generate a new one.'
+                              : isWeb
+                              ? 'Share this code with the other device - expires in '
+                                    '${remaining?.inMinutes ?? 0}m ${remaining?.inSeconds.remainder(60) ?? 0}s'
+                              : remaining == null
+                              ? 'Broadcasting on this network - the other device should find it automatically.'
                               : 'Broadcasting - expires in ${remaining.inMinutes}m ${remaining.inSeconds.remainder(60)}s',
                           textAlign: TextAlign.center,
                           style: Theme.of(context).textTheme.bodySmall,
@@ -838,51 +858,53 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
                 const SizedBox(height: 12),
-                if (!_scanningOther)
-                  OutlinedButton.icon(
-                    onPressed: _startScanningOther,
-                    icon: const Icon(Icons.wifi_find_outlined),
-                    label: const Text('Scan for nearby shops'),
-                  )
-                else ...[
-                  Row(
-                    children: [
-                      const SizedBox(
-                        height: 16,
-                        width: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                      const SizedBox(width: 12),
-                      Text(
-                        _discoveredOther.isEmpty
-                            ? 'Scanning...'
-                            : '${_discoveredOther.length} found',
-                      ),
-                      const Spacer(),
-                      TextButton(
-                        onPressed: _stopScanningOther,
-                        child: const Text('Stop'),
-                      ),
-                    ],
-                  ),
-                  for (final host in _discoveredOther)
-                    Card(
-                      child: ListTile(
-                        title: Text(
-                          host.deviceLabel.isEmpty
-                              ? 'Nearby shop'
-                              : host.deviceLabel,
+                if (!isWeb) ...[
+                  if (!_scanningOther)
+                    OutlinedButton.icon(
+                      onPressed: _startScanningOther,
+                      icon: const Icon(Icons.wifi_find_outlined),
+                      label: const Text('Scan for nearby shops'),
+                    )
+                  else ...[
+                    Row(
+                      children: [
+                        const SizedBox(
+                          height: 16,
+                          width: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
                         ),
-                        trailing: FilledButton(
-                          onPressed: _submittingOther
-                              ? null
-                              : () => _joinOther(credentials, code: host.code),
-                          child: const Text('Join'),
+                        const SizedBox(width: 12),
+                        Text(
+                          _discoveredOther.isEmpty
+                              ? 'Scanning...'
+                              : '${_discoveredOther.length} found',
                         ),
-                      ),
+                        const Spacer(),
+                        TextButton(
+                          onPressed: _stopScanningOther,
+                          child: const Text('Stop'),
+                        ),
+                      ],
                     ),
+                    for (final host in _discoveredOther)
+                      Card(
+                        child: ListTile(
+                          title: Text(
+                            host.deviceLabel.isEmpty
+                                ? 'Nearby shop'
+                                : host.deviceLabel,
+                          ),
+                          trailing: FilledButton(
+                            onPressed: _submittingOther
+                                ? null
+                                : () => _joinOther(credentials, code: host.code),
+                            child: const Text('Join'),
+                          ),
+                        ),
+                      ),
+                  ],
+                  const SizedBox(height: 12),
                 ],
-                const SizedBox(height: 12),
                 TextField(
                   controller: _manualCodeOtherController,
                   decoration: const InputDecoration(labelText: 'Invite code'),

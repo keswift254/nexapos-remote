@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../../core/is_web.dart';
 import '../../core/providers.dart';
 import '../../core/secure_storage_provider.dart';
 import '../../data/import/shop_archive.dart';
@@ -41,7 +42,22 @@ class AutomaticBackupService {
   /// Callers that mirror backups elsewhere (e.g. GoogleDriveBackupService)
   /// should only do so when this returns non-null, rather than on every
   /// call - runIfDue is checked far more often than it actually writes.
+  ///
+  /// Deliberately a silent no-op on web (matching
+  /// google_drive_backup_service_stub.dart's own no-op for the same
+  /// reason): this writes to the native filesystem via dart:io
+  /// (getApplicationSupportDirectory/File), which has no web
+  /// equivalent here yet, and validate() below goes through the same
+  /// native-only scratch database as shop archive import/export - both
+  /// throw UnsupportedError on web if not guarded. app.dart's periodic
+  /// sync timer calls this unawaited and doesn't catch what it throws,
+  /// so an unguarded call here became an uncaught exception on every
+  /// sync tick once logged in on web - confirmed for real this session.
+  /// Local backup on web is a known, tracked gap (same status as
+  /// database encryption - see database_connection_web.dart), not an
+  /// oversight.
   Future<File?> runIfDue({bool force = false}) async {
+    if (isWeb) return null;
     final now = DateTime.now().toUtc();
     final lastRaw = await _storage.read(key: _lastStorageKey);
     final last = lastRaw == null ? null : DateTime.tryParse(lastRaw);
