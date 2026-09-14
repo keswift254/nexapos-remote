@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import 'database_encryption.dart';
+import 'database_encryption_key.dart';
 
 /// Same 'nexapos.sqlite' file/location driftDatabase() has always used
 /// (getApplicationDocumentsDirectory() + '$name.sqlite') - real devices
@@ -23,7 +24,7 @@ import 'database_encryption.dart';
 /// can compile for web) because this file's own imports - dart:io,
 /// path_provider's filesystem APIs, and (via database_encryption.dart)
 /// the native FFI sqlite3 package - only exist on native platforms.
-/// database.dart picks this file or database_connection_stub.dart via a
+/// database.dart picks this file or database_connection_web.dart via a
 /// conditional import keyed on dart.library.js_interop.
 DatabaseConnection openConnection() {
   return DatabaseConnection.delayed(

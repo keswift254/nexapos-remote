@@ -969,6 +969,26 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
     return FutureBuilder<bool>(
       future: ref.read(syncServiceProvider).needsInitialPull,
       builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          // A transient local read failing here must not strand this
+          // screen on a spinner forever - see needsInitialPull's own
+          // call site for why this is worth guarding against even
+          // though the read itself has no obvious reason to fail.
+          return Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Could not check this device: ${snapshot.error}'),
+                const SizedBox(height: 12),
+                FilledButton.icon(
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Retry'),
+                  onPressed: () => setState(() {}),
+                ),
+              ],
+            ),
+          );
+        }
         if (!snapshot.hasData) {
           return const Center(child: CircularProgressIndicator());
         }

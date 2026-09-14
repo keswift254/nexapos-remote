@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sqlite3/sqlite3.dart';
 
 import 'package:nexapos_mobile/data/local/database_encryption.dart';
+import 'package:nexapos_mobile/data/local/database_encryption_key.dart';
 
 import '../../support/fake_secure_storage.dart';
 

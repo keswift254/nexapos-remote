@@ -1,8 +1,9 @@
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../core/is_web.dart';
 import 'database_connection_native.dart'
-    if (dart.library.js_interop) 'database_connection_stub.dart' as connection;
+    if (dart.library.js_interop) 'database_connection_web.dart' as connection;
 
 import 'tables/roles_table.dart';
 import 'tables/users_table.dart';
@@ -124,8 +125,21 @@ class AppDatabase extends _$AppDatabase {
             }
           }
           // WAL mode so report/list screens can keep reading while a
-          // checkout transaction commits.
-          await customStatement('PRAGMA journal_mode=WAL');
+          // checkout transaction commits - native only. WAL needs
+          // shared-memory-backed locking (a `-shm` file alongside the
+          // main db) that browser storage backends (IndexedDB, and
+          // OPFS without the exact right setup) don't reliably support;
+          // confirmed for real - with this pragma unconditional, opening
+          // the same named web database a second time (e.g. a page
+          // reload) hung indefinitely waiting on a lock nothing could
+          // ever release. Web keeps SQLite's default journal mode
+          // instead - less concurrent-read-friendly, but correct, and
+          // this app's web sessions aren't juggling the same
+          // simultaneous-report-while-checkout-commits load a busy
+          // native till is.
+          if (!isWeb) {
+            await customStatement('PRAGMA journal_mode=WAL');
+          }
           await customStatement('PRAGMA foreign_keys=ON');
         },
       );
