@@ -2,16 +2,17 @@ import 'dart:io';
 
 import 'package:archive/archive_io.dart';
 import 'package:crypto/crypto.dart';
-import 'package:ffi/ffi.dart';
 import 'package:open_file/open_file.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
-import 'package:win32/win32.dart';
 
 import '../../core/result.dart';
 import '../../data/update/update_gateway.dart';
+import 'windows_installer_launcher_native.dart'
+    if (dart.library.js_interop) 'windows_installer_launcher_stub.dart'
+    as installer_launcher;
 
 part 'update_service.g.dart';
 
@@ -185,7 +186,7 @@ class UpdateService {
       );
       if (checksumError != null) return Result.failure(checksumError);
       onProgress?.call(1.0);
-      _launchWindowsInstallerElevated(setupFile.path);
+      installer_launcher.launchWindowsInstallerElevated(setupFile.path);
       exit(0);
     } on UpdateOfflineException {
       return const Result.failure(
@@ -195,28 +196,6 @@ class UpdateService {
       return Result.failure(e.message);
     } catch (e) {
       return Result.failure('Could not start the Windows installer: $e');
-    }
-  }
-
-  /// A setup executable with a `requireAdministrator` manifest cannot be
-  /// launched by CreateProcess from the unelevated Flutter process. Shell
-  /// Execute's `runas` verb delegates the handoff to Windows and shows the
-  /// standard UAC prompt instead.
-  void _launchWindowsInstallerElevated(String setupPath) {
-    final result = using((arena) {
-      return ShellExecute(
-        null,
-        arena.pcwstr('runas'),
-        arena.pcwstr(setupPath),
-        null,
-        null,
-        SW_SHOWNORMAL,
-      );
-    });
-    if (result.address <= 32) {
-      throw StateError(
-        'Windows could not start the installer (ShellExecute code ${result.address}).',
-      );
     }
   }
 

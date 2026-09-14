@@ -1,6 +1,6 @@
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
-import '../../core/secure_storage_provider.dart';
+import '../../core/session_storage_provider.dart';
 import '../../core/result.dart';
 import '../../data/repositories/user_repository_impl.dart';
 import '../entities/user.dart';
@@ -28,7 +28,7 @@ class SessionNotifier extends _$SessionNotifier {
   }
 
   Future<void> _restore() async {
-    final storage = ref.read(secureStorageProvider);
+    final storage = ref.read(sessionStorageProvider);
     final userId = await storage.read(key: _storedUserIdKey);
     if (userId == null) return;
     final repo = ref.read(userRepositoryProvider);
@@ -48,7 +48,7 @@ class SessionNotifier extends _$SessionNotifier {
       ok: (user) {
         state = user;
         ref
-            .read(secureStorageProvider)
+            .read(sessionStorageProvider)
             .write(key: _storedUserIdKey, value: user.id);
         return Result.ok(user);
       },
@@ -65,14 +65,14 @@ class SessionNotifier extends _$SessionNotifier {
     }
     state = user;
     await ref
-        .read(secureStorageProvider)
+        .read(sessionStorageProvider)
         .write(key: _storedUserIdKey, value: user.id);
     return Result.ok(user);
   }
 
   Future<void> logout() async {
     state = null;
-    await ref.read(secureStorageProvider).delete(key: _storedUserIdKey);
+    await ref.read(sessionStorageProvider).delete(key: _storedUserIdKey);
   }
 
   bool get isLoggedIn => state != null;

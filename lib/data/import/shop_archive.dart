@@ -7,10 +7,12 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:cryptography/cryptography.dart';
 import 'package:drift/drift.dart';
-import 'package:drift/native.dart';
 
 import '../local/database.dart';
 import '../local/sync_metadata.dart';
+import 'scratch_database_native.dart'
+    if (dart.library.js_interop) 'scratch_database_stub.dart'
+    as scratch_database;
 
 const archiveTables = [
   'roles',
@@ -110,7 +112,7 @@ class ShopArchive {
         throw const FormatException('Invalid backup images.');
       }
     }
-    final scratch = AppDatabase(NativeDatabase.memory());
+    final scratch = scratch_database.createScratchDatabase();
     try {
       await scratch.customSelect('SELECT 1').get();
       await scratch.transaction(() async {

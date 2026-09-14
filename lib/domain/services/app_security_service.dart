@@ -1,38 +1,19 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:local_auth/local_auth.dart';
 
 import '../../core/secure_storage_provider.dart';
 import '../entities/user.dart';
 import '../../data/repositories/user_repository_impl.dart';
+export 'device_authentication_gateway.dart';
+import 'device_authentication_gateway.dart';
+import 'device_authentication_gateway_native.dart'
+    if (dart.library.js_interop) 'device_authentication_gateway_stub.dart'
+    as device_auth;
 
 const _biometricUserKey = 'nexapos.security.biometricUserId';
 
-abstract class DeviceAuthenticationGateway {
-  Future<bool> isSupported();
-  Future<bool> authenticate();
-}
-
-class LocalDeviceAuthenticationGateway implements DeviceAuthenticationGateway {
-  final LocalAuthentication _auth = LocalAuthentication();
-
-  @override
-  Future<bool> isSupported() async =>
-      await _auth.canCheckBiometrics || await _auth.isDeviceSupported();
-
-  @override
-  Future<bool> authenticate() => _auth.authenticate(
-    localizedReason: defaultTargetPlatform == TargetPlatform.windows
-        ? 'Use Windows Hello to unlock NexaPOS'
-        : 'Use your fingerprint or face to unlock NexaPOS',
-    biometricOnly: defaultTargetPlatform != TargetPlatform.windows,
-    persistAcrossBackgrounding: true,
-  );
-}
-
 final deviceAuthenticationGatewayProvider =
     Provider<DeviceAuthenticationGateway>(
-      (_) => LocalDeviceAuthenticationGateway(),
+      (_) => device_auth.createDeviceAuthenticationGateway(),
     );
 
 final appSecurityServiceProvider = Provider<AppSecurityService>(
