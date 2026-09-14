@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/is_web.dart';
 import '../../domain/services/sensitive_action_service.dart';
 import '../../domain/services/sync_service.dart';
 import 'sensitive_action_dialog.dart';
@@ -262,7 +263,17 @@ class _PaymentSettingsScreenState extends ConsumerState<PaymentSettingsScreen> {
               // enforces this regardless (save_settlement_details 403s
               // either way) - this is just so a non-owner device sees why
               // up front instead of filling in a form that then fails.
-              if (!status.isOwner) return _buildNonOwnerView(status);
+              // isWeb is checked here too, independent of isOwner: a
+              // browser session's own first-run setup could otherwise
+              // legitimately BE a shop's owner, but the server blocks
+              // settlement changes from a browser regardless (see
+              // clients.channel) - this just matches that up front
+              // instead of showing a form that only fails on submit. The
+              // server also already redacts every sensitive field below
+              // to empty/false for a browser client, so this is a UX
+              // nicety on top of a real server-side gate, not the gate
+              // itself.
+              if (!status.isOwner || isWeb) return _buildNonOwnerView(status);
               if (!status.isSettled || _editing) {
                 _prefillFrom(status);
                 return _buildSettlementForm(credentials, status.isSettled ? status : null);
@@ -407,7 +418,9 @@ class _PaymentSettingsScreenState extends ConsumerState<PaymentSettingsScreen> {
         const SizedBox(height: 4),
         Center(
           child: Text(
-            'Only the device that originally set up this shop can view or change where payments are sent.',
+            isWeb
+                ? 'Where payments are sent can only be viewed or changed from the installed app on a phone or PC, never a browser.'
+                : 'Only the device that originally set up this shop can view or change where payments are sent.',
             textAlign: TextAlign.center,
             style: Theme.of(context).textTheme.bodySmall,
           ),

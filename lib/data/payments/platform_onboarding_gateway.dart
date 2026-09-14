@@ -1,5 +1,6 @@
 import 'package:http/http.dart' as http;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+import '../../core/is_web.dart';
 import 'platform_http_client.dart';
 
 part 'platform_onboarding_gateway.g.dart';
@@ -114,7 +115,17 @@ class PlatformOnboardingGateway {
       'POST',
       'register_device',
       baseUrl,
-      body: {'device_id': deviceId, 'device_label': deviceLabel, 'registration_secret': registrationSecret},
+      body: {
+        'device_id': deviceId,
+        'device_label': deviceLabel,
+        'registration_secret': registrationSecret,
+        // Stamped once, server-side, forever - see clients.channel's own
+        // schema comment. isWeb is a genuine compile-time platform
+        // constant (which branch of a conditional import got compiled
+        // in), not a runtime flag - there is no legitimate way for a
+        // native build to send 'browser' or vice versa.
+        'channel': isWeb ? 'browser' : 'native',
+      },
     );
     if (response['success'] != true) {
       throw PaystackException(platformResponseMessage(response, 'Could not register this device.'));
