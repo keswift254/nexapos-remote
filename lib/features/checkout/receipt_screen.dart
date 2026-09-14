@@ -4,10 +4,12 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:image/image.dart' as img;
 
+import '../../core/is_web.dart';
 import '../../data/printing/receipt_branding.dart';
 
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
+import 'browser_print.dart';
 import '../../data/printing/thermal_printer_service.dart';
 import '../../data/repositories/sale_item_repository_impl.dart';
 import '../../data/repositories/sale_repository_impl.dart';
@@ -122,19 +124,34 @@ class _ReceiptScreenState extends ConsumerState<ReceiptScreen> {
               child: Row(
                 children: [
                   Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _thermalPrinting
-                          ? null
-                          : () => _printThermal(data),
-                      icon: _thermalPrinting
-                          ? const SizedBox(
-                              height: 18,
-                              width: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.receipt_long_outlined),
-                      label: const Text('Print to thermal printer'),
-                    ),
+                    // A browser tab can't open the raw TCP socket a
+                    // network thermal printer needs - offering that
+                    // button on web would only ever fail. The plan's
+                    // own design for web is the browser's own print
+                    // dialog instead, printing whatever's currently
+                    // on screen (the receipt card above) rather than
+                    // a second ESC/POS-formatted path.
+                    child: isWeb
+                        ? OutlinedButton.icon(
+                            onPressed: printCurrentPage,
+                            icon: const Icon(Icons.print_outlined),
+                            label: const Text('Print'),
+                          )
+                        : OutlinedButton.icon(
+                            onPressed: _thermalPrinting
+                                ? null
+                                : () => _printThermal(data),
+                            icon: _thermalPrinting
+                                ? const SizedBox(
+                                    height: 18,
+                                    width: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.receipt_long_outlined),
+                            label: const Text('Print to thermal printer'),
+                          ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
