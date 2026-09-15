@@ -110,16 +110,34 @@ void main() {
       meta,
       PlatformSyncGateway(
         MockClient((request) async {
-          requests.add(request.url.queryParameters['action']);
-          return http.Response(
-            jsonEncode({
-              'success': true,
-              'changes': [],
-              'next_cursor': 0,
-              'has_more': false,
-            }),
-            200,
-          );
+          final action = request.url.queryParameters['action'];
+          requests.add(action);
+          if (action == 'start_sync_snapshot') {
+            return http.Response(
+              jsonEncode({
+                'success': true,
+                'snapshot_id': 'shop-safety-snapshot',
+                'high_water': 0,
+                'total': 0,
+              }),
+              200,
+            );
+          }
+          if (action == 'pull_sync_snapshot') {
+            return http.Response(
+              jsonEncode({
+                'success': true,
+                'snapshot_id': 'shop-safety-snapshot',
+                'high_water': 0,
+                'total': 0,
+                'changes': [],
+                'next_cursor': 0,
+                'has_more': false,
+              }),
+              200,
+            );
+          }
+          return http.Response(jsonEncode({'success': true}), 200);
         }),
       ),
       stored,
@@ -245,7 +263,7 @@ void main() {
       expect(await db.select(db.businessSettings).get(), isEmpty);
       expect(await sync.needsInitialPull, isTrue);
       await sync.runSyncCycle();
-      expect(requests, ['pull_changes']);
+      expect(requests, ['start_sync_snapshot', 'pull_sync_snapshot', 'discard_sync_snapshot']);
       expect(await sync.needsInitialPull, isTrue);
       expect(sync.lastError, contains('Waiting for the joined shop'));
     },

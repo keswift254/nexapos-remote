@@ -67,6 +67,7 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
   bool _submittingOther = false;
   bool _leaving = false;
   bool _resettingIdentity = false;
+  String? _syncError;
 
   RegistrationLookup? _existingRegistration;
 
@@ -390,12 +391,24 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
   /// how [SyncService.runSyncCycle] already swallows offline/network
   /// failures everywhere else it's called unawaited.
   Future<void> _safeSyncNow() async {
+    if (mounted) setState(() => _syncError = null);
     try {
       await ref.read(licenseServiceProvider).verifyJoinedMembership();
-      if (!await ref.read(licenseServiceProvider).hasAppAccess()) return;
+      if (!await ref.read(licenseServiceProvider).hasAppAccess()) {
+        throw const PaystackException(
+          'Shop access could not be verified. Check the connection and retry.',
+        );
+      }
       await ref.read(syncServiceProvider).runSyncCycle();
-    } catch (_) {
-      // Next scheduled sync cycle (app resume / periodic timer) will retry.
+      if (mounted) {
+        setState(() => _syncError = ref.read(syncServiceProvider).lastError);
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(
+          () => _syncError = e is PaystackException ? e.message : 'Could not sync with the shop. Check your connection and retry.',
+        );
+      }
     }
   }
 
@@ -638,10 +651,10 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
             // than shown broken (see isWeb's own doc comment).
             isWeb
                 ? 'Ask the shop for an invite code and enter it below - that works over the '
-                    'internet from anywhere, no shared Wi-Fi needed.'
+                      'internet from anywhere, no shared Wi-Fi needed.'
                 : 'On the same Wi-Fi as the shop\'s other device? Scan below to find it automatically. '
-                    'Otherwise, ask the shop for an invite code and enter it manually - that works over the '
-                    'internet from anywhere, no shared Wi-Fi needed.',
+                      'Otherwise, ask the shop for an invite code and enter it manually - that works over the '
+                      'internet from anywhere, no shared Wi-Fi needed.',
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 12),
@@ -668,7 +681,10 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                   const Spacer(),
-                  TextButton(onPressed: _stopScanning, child: const Text('Stop')),
+                  TextButton(
+                    onPressed: _stopScanning,
+                    child: const Text('Stop'),
+                  ),
                 ],
               ),
               const SizedBox(height: 8),
@@ -676,7 +692,9 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
                 Card(
                   child: ListTile(
                     title: Text(
-                      host.deviceLabel.isEmpty ? 'Nearby shop' : host.deviceLabel,
+                      host.deviceLabel.isEmpty
+                          ? 'Nearby shop'
+                          : host.deviceLabel,
                     ),
                     trailing: FilledButton(
                       onPressed: (_submitting || existing?.isDisabled == true)
@@ -897,7 +915,8 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
                           trailing: FilledButton(
                             onPressed: _submittingOther
                                 ? null
-                                : () => _joinOther(credentials, code: host.code),
+                                : () =>
+                                      _joinOther(credentials, code: host.code),
                             child: const Text('Join'),
                           ),
                         ),
@@ -1015,48 +1034,102 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
           return const Center(child: CircularProgressIndicator());
         }
         if (snapshot.data != true) return _buildRegisterView();
-        return Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('Waiting for the shop users and settings'),
-              const SizedBox(height: 12),
-              FilledButton.icon(
-                icon: const Icon(Icons.sync),
-                label: const Text('Retry sync'),
-                onPressed: _submitting
-                    ? null
-                    : () async {
-                        setState(() => _submitting = true);
-                        try {
-                          final status = await ref
-                              .read(platformOnboardingGatewayProvider)
-                              .getClientStatus(
-                                baseUrl: credentials.baseUrl,
-                                apiKey: credentials.apiKey,
-                              );
-                          if (status.isOwner) {
-                            // Reconcile an invitation that failed before changing membership.
-                            await ref
-                                .read(syncServiceProvider)
-                                .reconcileFailedInitialJoin();
-                            if (mounted) setState(() {});
-                            return;
-                          }
-                          await ref
-                              .read(licenseServiceProvider)
-                              .confirmJoinedMembership();
-                          await _safeSyncNow();
-                          ref.invalidate(hasAnyUsersProvider);
-                          if (mounted) this.context.go('/');
-                        } catch (e) {
-                          _showMessage('$e');
-                        } finally {
-                          if (mounted) setState(() => _submitting = false);
-                        }
-                      },
+        return ValueListenableBuilder<SyncProgress>(
+          valueListenable: ref.read(syncServiceProvider).progress,
+          builder: (context, progress, _) => Center(
+            child: SingleChildScrollView(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 460),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        progress.busy ? progress.message : 'Initial shop sync',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 16),
+                      LinearProgressIndicator(
+                        value: progress.total != null && progress.total! > 0
+                            ? (progress.completed / progress.total!).clamp(
+                                0.0,
+                                1.0,
+                              )
+                            : (_submitting || progress.busy ? null : 0),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        progress.total != null
+                            ? '${progress.completed} of ${progress.total} records'
+                            : '${progress.completed} records received',
+                        textAlign: TextAlign.center,
+                      ),
+                      if (_syncError != null ||
+                          ref.read(syncServiceProvider).lastError != null) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          _syncError ??
+                              ref.read(syncServiceProvider).lastError!,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 12),
+                      FilledButton.icon(
+                        icon: const Icon(Icons.sync),
+                        label: const Text('Retry sync'),
+                        onPressed: _submitting || progress.busy
+                            ? null
+                            : () async {
+                                setState(() {
+                                  _submitting = true;
+                                  _syncError = null;
+                                });
+                                try {
+                                  final status = await ref
+                                      .read(platformOnboardingGatewayProvider)
+                                      .getClientStatus(
+                                        baseUrl: credentials.baseUrl,
+                                        apiKey: credentials.apiKey,
+                                      );
+                                  if (status.isOwner) {
+                                    // Reconcile an invitation that failed before changing membership.
+                                    await ref
+                                        .read(syncServiceProvider)
+                                        .reconcileFailedInitialJoin();
+                                    if (mounted) setState(() {});
+                                    return;
+                                  }
+                                  await ref
+                                      .read(licenseServiceProvider)
+                                      .confirmJoinedMembership();
+                                  await _safeSyncNow();
+                                  ref.invalidate(hasAnyUsersProvider);
+                                  if (mounted) this.context.go('/');
+                                } catch (e) {
+                                  if (mounted) {
+                                    setState(
+                                      () => _syncError = e is PaystackException
+                                          ? e.message
+                                          : 'Could not verify the shop. Check your connection and retry.',
+                                    );
+                                  }
+                                } finally {
+                                  if (mounted) {
+                                    setState(() => _submitting = false);
+                                  }
+                                }
+                              },
+                      ),
+                    ],
+                  ),
+                ),
               ),
-            ],
+            ),
           ),
         );
       },
