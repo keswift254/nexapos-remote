@@ -61,6 +61,84 @@ void main() {
     return SyncService(db, syncMeta, PlatformSyncGateway(client), _FakeCredentialsService(configured));
   }
 
+  group('initial snapshot', () {
+    Future<List<Map<String, dynamic>>> records() async {
+      final role = (await db.select(db.roles).get()).first;
+      final settings = (await db.select(db.businessSettings).get()).first.toJson();
+      const stamp = '2099-09-15T10:00:00.000000Z';
+      Map<String, dynamic> common(String id) => {'id': id, 'createdAt': stamp, 'updatedAt': stamp,
+        'deletedAt': null, 'createdByDeviceId': 'owner-device', 'localRev': 100, 'syncState': 'local_only'};
+      Map<String, dynamic> row(int id, String table, Map<String, dynamic> payload) =>
+        {'id': id, 'table_name': table, 'row_id': payload['id'], 'payload': payload};
+      return [
+        row(1, 'products', {...common('remote-product'), 'sku': 'SNAP', 'name': 'Snapshot product',
+          'categoryId': 'remote-category', 'imagePath': null, 'retailPriceCents': 100, 'wholesalePriceCents': 90,
+          'costPriceCents': 50, 'stockQty': 999, 'reorderLevel': 0, 'status': 'active'}),
+        row(2, 'stock_movements', {...common('remote-movement'), 'productId': 'remote-product',
+          'userId': null, 'movementType': 'purchase', 'quantity': 7, 'note': null}),
+        row(3, 'categories', {...common('remote-category'), 'name': 'Parent arrives later', 'status': 'active'}),
+        row(4, 'users', {...common('remote-user'), 'roleId': role.id, 'name': 'Snapshot User',
+          'username': 'snapshot-user', 'email': null, 'phone': null, 'passwordHash': 'test-hash', 'status': 'active'}),
+        row(5, 'business_settings', {...settings, 'updatedAt': stamp, 'createdByDeviceId': 'owner-device'}),
+      ];
+    }
+
+    test('resumes staged pages and atomically applies out-of-order parents and stock', () async {
+      final data = await records();
+      await buildService(MockClient((_) async => throw StateError('unused'))).prepareJoinedShop();
+      var failSecond = true;
+      var starts = 0;
+      final cursors = <String>[];
+      final service = buildService(MockClient((request) async {
+        final action = request.url.queryParameters['action'];
+        const meta = {'success': true, 'snapshot_id': 'snapshot-test', 'high_water': 1000, 'total': 5};
+        if (action == 'start_sync_snapshot') { starts++; return http.Response(jsonEncode(meta), 200); }
+        if (action == 'discard_sync_snapshot') return http.Response('{"success":true}', 200);
+        final after = request.url.queryParameters['after']!;
+        cursors.add(after);
+        if (after == '2' && failSecond) throw http.ClientException('offline');
+        return http.Response(jsonEncode({...meta, 'changes': after == '0' ? data.take(2).toList() : data.skip(2).toList(),
+          'next_cursor': after == '0' ? 2 : 5, 'has_more': after == '0'}), 200);
+      }));
+      await expectLater(service.pullInitialSnapshot(configured.baseUrl, configured.apiKey), throwsA(isA<PaystackOfflineException>()));
+      expect(await db.select(db.products).get(), isEmpty);
+      expect(await syncMeta.lastPulledChangeId(), 0);
+      expect(await service.needsInitialPull, isTrue);
+      failSecond = false;
+      await service.pullInitialSnapshot(configured.baseUrl, configured.apiKey);
+      expect(starts, 1);
+      expect(cursors, ['0', '2', '2']);
+      expect((await db.select(db.products).getSingle()).stockQty, 7);
+      expect((await db.select(db.users).getSingle()).username, 'snapshot-user');
+      expect(await syncMeta.lastPulledChangeId(), 1000);
+      expect(await service.needsInitialPull, isFalse);
+      expect(service.progress.value.completed, 5);
+    });
+
+    test('a missing parent rolls back every applied record and the cursor', () async {
+      final data = await records();
+      data.removeAt(2);
+      final service = buildService(MockClient((request) async {
+        const meta = {'success': true, 'snapshot_id': 'bad-fk', 'high_water': 100, 'total': 4};
+        return http.Response(jsonEncode({...meta, if (request.url.queryParameters['action'] == 'pull_sync_snapshot')
+          ...{'changes': data, 'next_cursor': 5, 'has_more': false}}), 200);
+      }));
+      await service.prepareJoinedShop();
+      await expectLater(service.pullInitialSnapshot(configured.baseUrl, configured.apiKey), throwsA(anything));
+      expect(await db.select(db.products).get(), isEmpty);
+      expect(await db.select(db.users).get(), isEmpty);
+      expect(await syncMeta.lastPulledChangeId(), 0);
+      expect(await service.needsInitialPull, isTrue);
+    });
+
+    test('cannot snapshot an already-operating device', () async {
+      var requested = false;
+      final service = buildService(MockClient((_) async { requested = true; return http.Response('{}', 200); }));
+      await expectLater(service.pullInitialSnapshot(configured.baseUrl, configured.apiKey), throwsStateError);
+      expect(requested, isFalse);
+    });
+  });
+
   group('pushLocalChanges', () {
     test('does nothing when not configured, without touching the network', () async {
       var called = false;

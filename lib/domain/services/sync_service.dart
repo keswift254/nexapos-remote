@@ -1,4 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
 
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
@@ -28,6 +31,19 @@ class _PendingChange {
   final String tableName;
   final Map<String, dynamic> json;
   const _PendingChange(this.tableName, this.json);
+}
+
+class SyncProgress {
+  final String message;
+  final int completed;
+  final int? total;
+  final bool busy;
+  const SyncProgress(
+    this.message, {
+    this.completed = 0,
+    this.total,
+    this.busy = false,
+  });
 }
 
 /// Phase 2 sync: pushes this device's own new/changed rows to
@@ -64,6 +80,23 @@ class SyncService {
   Future<void> _tail = Future.value();
   String? lastError;
   DateTime? lastSuccess;
+  final progress = ValueNotifier<SyncProgress>(
+    const SyncProgress('Ready to sync'),
+  );
+
+  void _progress(
+    String message, {
+    int completed = 0,
+    int? total,
+    bool busy = true,
+  }) {
+    progress.value = SyncProgress(
+      message,
+      completed: completed,
+      total: total,
+      busy: busy,
+    );
+  }
 
   Future<T> exclusive<T>(Future<T> Function() operation) {
     final result = _tail.then((_) => operation());
@@ -88,6 +121,9 @@ class SyncService {
           .isNotEmpty;
 
   Future<void> prepareJoinedShop() => _db.transaction(() async {
+    await _db.customStatement(
+      "DELETE FROM local_safety_state WHERE id='sync_snapshot'",
+    );
     await _db.delete(_db.businessSettings).go();
     final meta = await _db.select(_db.deviceMeta).getSingle();
     await _syncMeta.setLastPushedLocalRev(meta.nextLocalRev - 1);
@@ -145,7 +181,13 @@ class SyncService {
     });
   });
 
-  Future<void> runSyncCycle() => exclusive(() async {
+  Future<void>? _syncInFlight;
+
+  Future<void> runSyncCycle() => _syncInFlight ??= _runSyncCycle().whenComplete(
+    () => _syncInFlight = null,
+  );
+
+  Future<void> _runSyncCycle() => exclusive(() async {
     if (canSync != null && !await canSync!()) {
       lastError = 'Activate this device or reconnect to its invited shop before syncing.';
       return;
@@ -158,6 +200,8 @@ class SyncService {
     final credentials = await _credentials.load();
     if (!credentials.isConfigured) return;
 
+    lastError = null;
+    _progress('Checking shop membership');
     try {
       final initialJoin = await _db
           .customSelect(
@@ -185,6 +229,7 @@ class SyncService {
         });
       }
       if (await needsInitialPull) {
+        await pullInitialSnapshot(credentials.baseUrl, credentials.apiKey);
         await pullRemoteChanges(credentials.baseUrl, credentials.apiKey);
         final users = await _db.select(_db.users).get();
         final settings = await _db.select(_db.businessSettings).get();
@@ -211,8 +256,199 @@ class SyncService {
       // a background process the user didn't explicitly trigger.
     } catch (_) {
       lastError = 'Sync could not complete. Local data is retained; retry from Device Sync.';
+    } finally {
+      _progress(
+        lastError ?? 'Sync complete',
+        completed: progress.value.completed,
+        total: progress.value.total,
+        busy: false,
+      );
     }
   });
+
+  /// Stage every page before applying it: the winning version of a parent
+  /// can have a later change ID than a child. One deferred-FK transaction
+  /// commits the complete dataset and cursor together, never half a snapshot.
+  Future<void> pullInitialSnapshot(String baseUrl, String apiKey) async {
+    if (!await needsInitialPull) {
+      throw StateError('Snapshots are only for initial shop sync.');
+    }
+    await _db.customStatement(
+      'CREATE TABLE IF NOT EXISTS local_sync_snapshot (id INTEGER PRIMARY KEY, record TEXT NOT NULL)',
+    );
+    final stored = await _db
+        .customSelect(
+          "SELECT value FROM local_safety_state WHERE id='sync_snapshot'",
+        )
+        .getSingleOrNull();
+    Map<String, dynamic> state;
+    if (stored == null) {
+      _progress('Preparing shop download');
+      final snapshot = await _gateway.startSnapshot(baseUrl, apiKey);
+      state = {
+        'id': snapshot.snapshotId,
+        'highWater': snapshot.highWater,
+        'total': snapshot.total,
+        'after': 0,
+        'received': 0,
+      };
+      await _db.transaction(() async {
+        await _db.customStatement('DELETE FROM local_sync_snapshot');
+        await _saveSnapshotState(state);
+      });
+    } else {
+      state =
+          jsonDecode(stored.data['value'] as String) as Map<String, dynamic>;
+    }
+    final id = state['id'] as String;
+    final total = state['total'] as int;
+    final highWater = state['highWater'] as int;
+    if (total < 0 || highWater < 0) {
+      throw StateError('Invalid snapshot metadata.');
+    }
+    try {
+      while (state['finished'] != true) {
+        _progress(
+          'Downloading shop records',
+          completed: state['received'] as int,
+          total: total,
+        );
+        final snapshot = await _gateway.pullSnapshot(
+          baseUrl,
+          apiKey,
+          id,
+          state['after'] as int,
+        );
+        final page = snapshot.page;
+        if (snapshot.snapshotId != id ||
+            snapshot.highWater != highWater ||
+            snapshot.total != total ||
+            page.nextCursor < (state['after'] as int) ||
+            page.nextCursor > highWater ||
+            (page.changes.isEmpty && page.hasMore) ||
+            (page.changes.isNotEmpty &&
+                page.nextCursor <= (state['after'] as int))) {
+          throw StateError('Invalid snapshot page.');
+        }
+        var previous = state['after'] as int;
+        await _db.transaction(() async {
+          for (final change in page.changes) {
+            if (change.id <= previous ||
+                change.id > page.nextCursor ||
+                !syncTableAdapters.containsKey(change.tableName) ||
+                change.payload['id'] != change.rowId) {
+              throw StateError('Invalid snapshot record.');
+            }
+            previous = change.id;
+            await _db.customStatement(
+              'INSERT INTO local_sync_snapshot(id, record) VALUES (?, ?)',
+              [
+                change.id,
+                jsonEncode({
+                  'table': change.tableName,
+                  'row': change.rowId,
+                  'payload': change.payload,
+                }),
+              ],
+            );
+          }
+          state = {
+            ...state,
+            'after': page.nextCursor,
+            'received': (state['received'] as int) + page.changes.length,
+            'finished': !page.hasMore,
+          };
+          if ((state['received'] as int) > total) {
+            throw StateError('Invalid snapshot size.');
+          }
+          await _saveSnapshotState(state);
+        });
+      }
+      final rows = await _db
+          .customSelect(
+            'SELECT id, record FROM local_sync_snapshot ORDER BY id',
+          )
+          .get();
+      if (rows.length != total || state['received'] != total) {
+        throw StateError('Incomplete snapshot.');
+      }
+      _progress('Applying shop records', completed: 0, total: total);
+      await _db.transaction(() async {
+        await _db.customStatement('PRAGMA defer_foreign_keys=ON');
+        var applied = 0;
+        final products = <String>{};
+        for (final row in rows) {
+          final record =
+              jsonDecode(row.data['record'] as String) as Map<String, dynamic>;
+          final table = record['table'] as String;
+          final payload = (record['payload'] as Map).cast<String, dynamic>();
+          final adapter = syncTableAdapters[table]!;
+          if (adapter.isAppendOnly) {
+            await adapter.applyPayload(_db, payload);
+          } else {
+            await _applyWithLastWriteWins(
+              adapter,
+              PulledChange(
+                id: row.data['id'] as int,
+                tableName: table,
+                rowId: record['row'] as String,
+                payload: payload,
+              ),
+            );
+          }
+          if (table == 'products') products.add(record['row'] as String);
+          if (table == 'stock_movements') {
+            products.add(payload['productId'] as String);
+          }
+          applied++;
+          if (applied % 100 == 0 || applied == total) {
+            _progress(
+              'Applying shop records',
+              completed: applied,
+              total: total,
+            );
+          }
+        }
+        await _recomputeStockQty(products);
+        final users = await _db.select(_db.users).get();
+        final settings = await _db.select(_db.businessSettings).get();
+        if (!users.any((u) => u.status == 'active') || settings.isEmpty) {
+          throw const PaystackException(
+            'Waiting for the joined shop users and settings. Sync the owner device, then retry here.',
+            statusCode: 409,
+          );
+        }
+        await _syncMeta.setLastPulledChangeId(highWater);
+        await _db.customStatement(
+          "DELETE FROM local_safety_state WHERE id IN ('sync_snapshot','shop_hydration')",
+        );
+        await _db.customStatement('DELETE FROM local_sync_snapshot');
+      });
+      // Cleanup failure must never undo a committed local snapshot.
+      try {
+        await _gateway.discardSnapshot(baseUrl, apiKey, id);
+      } catch (_) {}
+    } on PaystackException catch (e) {
+      if (e.statusCode == 410 || e.statusCode == 409) {
+        if (e.statusCode == 409) {
+          await _gateway.discardSnapshot(baseUrl, apiKey, id);
+        }
+        await _db.transaction(() async {
+          await _db.customStatement('DELETE FROM local_sync_snapshot');
+          await _db.customStatement(
+            "DELETE FROM local_safety_state WHERE id='sync_snapshot'",
+          );
+        });
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> _saveSnapshotState(Map<String, dynamic> state) =>
+      _db.customStatement(
+        "INSERT OR REPLACE INTO local_safety_state(id,value) VALUES('sync_snapshot',?)",
+        [jsonEncode(state)],
+      );
 
   /// Gathers pending rows across ALL synced tables before sending -
   /// correctness-critical, not stylistic. local_rev is one counter
@@ -276,6 +512,8 @@ class SyncService {
   Future<void> pullRemoteChanges(String baseUrl, String apiKey) async {
     var cursor = await _syncMeta.lastPulledChangeId();
     final touchedProductIds = <String>{};
+    var received = 0;
+    _progress('Checking newer shop changes');
 
     while (true) {
       final result = await _gateway.pullChanges(
@@ -315,6 +553,8 @@ class SyncService {
       });
 
       cursor = result.nextCursor;
+      received += result.changes.length;
+      _progress('Receiving newer shop changes', completed: received);
       if (!result.hasMore) break;
     }
   }
