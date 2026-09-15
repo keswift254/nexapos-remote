@@ -1,0 +1,33 @@
+name: Release artifact build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - nexapos-1.0.12-safety
+
+jobs:
+  android-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.1"
+          channel: stable
+          cache: true
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - run: flutter pub get
+      - run: flutter build apk --release --no-pub
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NexaPOS-Android-1.0.33
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
