@@ -60,7 +60,28 @@ class _RouterRefreshNotifier extends ChangeNotifier {
 /// Mirrors PHP's Auth::requireLogin()/requireRole() per-route
 /// whitelist: this is the single choke point for "who can see what",
 /// the same check [SessionNotifier.can] exposes to use cases.
+///
+/// Never lets an exception escape - go_router awaits this on every
+/// route change, starting with the very first one before anything has
+/// painted yet. An unhandled throw here (confirmed possible on iOS
+/// Safari specifically: the web database connection can fail to open -
+/// see database_connection_web.dart's fallback chain - and every branch
+/// below reads through it) left the whole app silently blank with no
+/// error a user could ever see, not just this one navigation failing.
+/// Staying on the current location is the least presumptuous fallback:
+/// unlike guessing '/activate', it doesn't risk telling an already
+/// licensed, already logged-in user their setup is missing just because
+/// one read glitched.
 Future<String?> _redirect(Ref ref, String location) async {
+  try {
+    return await _redirectOrThrow(ref, location);
+  } catch (error, stack) {
+    debugPrint('Redirect check failed, staying at $location: $error\n$stack');
+    return null;
+  }
+}
+
+Future<String?> _redirectOrThrow(Ref ref, String location) async {
   final hasLicense = await ref.read(hasCachedLicenseProvider.future);
   if (!hasLicense) {
     return location == '/activate' || location == '/join-shop'
@@ -253,7 +274,7 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
     _recordActivity();
     _runSync();
     ref.read(pendingPaystackSalesProvider.notifier).reconcile();
-    _timer = Timer.periodic(_syncInterval, (_) => _runSync());
+    _scheduleNextSync();
     _inactivityTimer = Timer.periodic(
       _inactivityCheckInterval,
       (_) => _checkInactivity(),
@@ -293,6 +314,36 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
         ref.read(sessionProvider.notifier).logout();
       }
     }
+  }
+
+  // A one-shot Timer that reschedules itself (rather than Timer.periodic)
+  // so each wait picks the current interval fresh - needsInitialPull can
+  // flip from true to false partway through, and the very next wait
+  // should reflect that immediately, not on whatever cadence a periodic
+  // timer happened to already be running on. While a device is still
+  // waiting on its very first shop snapshot, this uses
+  // hydratingSyncRetryInterval instead of _syncInterval - a fresh join has
+  // real, one-time catching-up to do (see
+  // SyncService.pullInitialSnapshot/pullRemoteChanges), and any single
+  // attempt that stops early (a transient timeout, the server's own
+  // per-request page cap) would otherwise sit idle for up to two full
+  // minutes before the next try, even though there's known, immediate work
+  // left. Confirmed via real production logs during the browser-POS
+  // verification: catch-up happens in ~14s bursts of several thousand
+  // records, then nothing until the next periodic tick - this just makes
+  // "the next tick" arrive in seconds instead of minutes while that
+  // initial backlog is still being worked through.
+  void _scheduleNextSync() {
+    _timer?.cancel();
+    ref.read(syncServiceProvider).needsInitialPull.then((needsPull) {
+      if (!mounted) return;
+      _timer = Timer(
+        needsPull ? hydratingSyncRetryInterval : _syncInterval,
+        () {
+          _runSync().whenComplete(_scheduleNextSync);
+        },
+      );
+    });
   }
 
   Future<void> _runSync() async {

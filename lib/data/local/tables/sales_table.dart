@@ -27,4 +27,9 @@ class Sales extends Table with SyncedColumns {
   IntColumn get discountCents => integer().withDefault(const Constant(0))();
   IntColumn get totalCents => integer()();
   TextColumn get status => text()();
+  // Cash sales only - how much the customer actually handed over, so the
+  // receipt can show the change given. Null (not zero) means "not
+  // recorded" - a cash sale where the cashier didn't bother entering it
+  // (exact change, or just skipped the field), not a real 0 tendered.
+  IntColumn get cashReceivedCents => integer().nullable()();
 }

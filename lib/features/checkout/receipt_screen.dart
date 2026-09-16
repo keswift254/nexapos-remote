@@ -251,7 +251,17 @@ class _ReceiptBody extends StatelessWidget {
             prominent: true,
           ),
           const _SolidDivider(),
-          Text('Payment: ${sale.paymentMethod.toUpperCase()}'),
+          Text('Payment: ${sale.paymentMethodLabel}'),
+          if (sale.cashReceived != null) ...[
+            _AmountRow(
+              'Cash received',
+              sale.cashReceived!.format(currency: data.settings.currency),
+            ),
+            _AmountRow(
+              sale.cashWasShort ? 'Still owed' : 'Change due',
+              sale.changeDueAbs!.format(currency: data.settings.currency),
+            ),
+          ],
           Text(
             'Sale type: ${sale.saleType[0].toUpperCase()}${sale.saleType.substring(1)}',
           ),

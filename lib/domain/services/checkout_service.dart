@@ -140,6 +140,12 @@ class CheckoutService {
     required String paymentMethod,
     String? referenceNote,
     required String userId,
+    // Cash only - how much the customer handed over, purely so the
+    // receipt can show change given. Never validated against total:
+    // this is a convenience calculator, not a hard gate that could block
+    // a cashier from completing a legitimate sale (a partial/rounded
+    // payment, a correction, etc.).
+    Money? cashReceived,
   }) async {
     if (!saleTypes.contains(saleType)) return const Result.failure('Select a valid sale type.');
     if (!paymentMethods.contains(paymentMethod) || paymentMethod == 'paystack' || paymentMethod == 'intasend') {
@@ -172,6 +178,7 @@ class CheckoutService {
       total: totals.total,
       status: 'paid',
       createdAt: _clock.now(),
+      cashReceived: paymentMethod == 'cash' ? cashReceived : null,
     );
 
     try {

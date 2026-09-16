@@ -98,7 +98,19 @@ Future<Uint8List> buildReceiptPdf(ReceiptData data, PdfPageFormat _) async {
               prominent: true,
             ),
             solidDivider(),
-            pw.Text('Payment: ${sale.paymentMethod.toUpperCase()}'),
+            pw.Text('Payment: ${sale.paymentMethodLabel}'),
+            if (sale.cashReceived != null) ...[
+              _amountRow(
+                'Cash received',
+                sale.cashReceived!.format(currency: data.settings.currency),
+                font,
+              ),
+              _amountRow(
+                sale.cashWasShort ? 'Still owed' : 'Change due',
+                sale.changeDueAbs!.format(currency: data.settings.currency),
+                font,
+              ),
+            ],
             pw.Text(
               'Sale type: ${sale.saleType[0].toUpperCase()}${sale.saleType.substring(1)}',
             ),

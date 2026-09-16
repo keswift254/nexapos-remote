@@ -16,6 +16,15 @@ import 'license_service.dart';
 
 part 'sync_service.g.dart';
 
+/// How often app.dart's background timer retries while a device is still
+/// waiting on its first shop snapshot (SyncProgress.busy false, but
+/// needsInitialPull true) - much shorter than the app's normal steady-state
+/// sync cadence, since there's known, immediate work left rather than just
+/// checking in. Shared with device_sync_screen.dart's join-progress screen
+/// so its "retrying automatically every Xs" text can never drift out of
+/// sync with the timer that actually governs it.
+const hydratingSyncRetryInterval = Duration(seconds: 5);
+
 @Riverpod(keepAlive: true)
 SyncService syncService(Ref ref) {
   return SyncService(

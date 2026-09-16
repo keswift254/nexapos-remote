@@ -1046,7 +1046,20 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        progress.busy ? progress.message : 'Initial shop sync',
+                        // Between retries progress.busy is false, but a
+                        // real reason to still be here (the previous
+                        // attempt's error/status) is worth more than a
+                        // static placeholder - this screen used to fall
+                        // back to "Initial shop sync" the instant a cycle
+                        // finished, which read as frozen even mid-catch-up
+                        // (real production catch-up happens in bursts of
+                        // a few seconds separated by a retry wait, not one
+                        // continuous download).
+                        progress.busy
+                            ? progress.message
+                            : (_syncError ??
+                                  ref.read(syncServiceProvider).lastError ??
+                                  'Initial shop sync'),
                         textAlign: TextAlign.center,
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
@@ -1066,16 +1079,14 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
                             : '${progress.completed} records received',
                         textAlign: TextAlign.center,
                       ),
-                      if (_syncError != null ||
-                          ref.read(syncServiceProvider).lastError != null) ...[
-                        const SizedBox(height: 12),
+                      if (!progress.busy) ...[
+                        const SizedBox(height: 8),
                         Text(
-                          _syncError ??
-                              ref.read(syncServiceProvider).lastError!,
+                          'Retrying automatically every '
+                          '${hydratingSyncRetryInterval.inSeconds}s while '
+                          "this shop's data downloads.",
                           textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.error,
-                          ),
+                          style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ],
                       const SizedBox(height: 12),

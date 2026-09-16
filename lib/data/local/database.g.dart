@@ -3088,6 +3088,17 @@ class $SalesTable extends Sales with TableInfo<$SalesTable, Sale> {
     type: DriftSqlType.string,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _cashReceivedCentsMeta = const VerificationMeta(
+    'cashReceivedCents',
+  );
+  @override
+  late final GeneratedColumn<int> cashReceivedCents = GeneratedColumn<int>(
+    'cash_received_cents',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -3107,6 +3118,7 @@ class $SalesTable extends Sales with TableInfo<$SalesTable, Sale> {
     discountCents,
     totalCents,
     status,
+    cashReceivedCents,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -3261,6 +3273,15 @@ class $SalesTable extends Sales with TableInfo<$SalesTable, Sale> {
     } else if (isInserting) {
       context.missing(_statusMeta);
     }
+    if (data.containsKey('cash_received_cents')) {
+      context.handle(
+        _cashReceivedCentsMeta,
+        cashReceivedCents.isAcceptableOrUnknown(
+          data['cash_received_cents']!,
+          _cashReceivedCentsMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -3338,6 +3359,10 @@ class $SalesTable extends Sales with TableInfo<$SalesTable, Sale> {
         DriftSqlType.string,
         data['${effectivePrefix}status'],
       )!,
+      cashReceivedCents: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}cash_received_cents'],
+      ),
     );
   }
 
@@ -3365,6 +3390,7 @@ class Sale extends DataClass implements Insertable<Sale> {
   final int discountCents;
   final int totalCents;
   final String status;
+  final int? cashReceivedCents;
   const Sale({
     required this.id,
     required this.createdAt,
@@ -3383,6 +3409,7 @@ class Sale extends DataClass implements Insertable<Sale> {
     required this.discountCents,
     required this.totalCents,
     required this.status,
+    this.cashReceivedCents,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -3410,6 +3437,9 @@ class Sale extends DataClass implements Insertable<Sale> {
     map['discount_cents'] = Variable<int>(discountCents);
     map['total_cents'] = Variable<int>(totalCents);
     map['status'] = Variable<String>(status);
+    if (!nullToAbsent || cashReceivedCents != null) {
+      map['cash_received_cents'] = Variable<int>(cashReceivedCents);
+    }
     return map;
   }
 
@@ -3438,6 +3468,9 @@ class Sale extends DataClass implements Insertable<Sale> {
       discountCents: Value(discountCents),
       totalCents: Value(totalCents),
       status: Value(status),
+      cashReceivedCents: cashReceivedCents == null && nullToAbsent
+          ? const Value.absent()
+          : Value(cashReceivedCents),
     );
   }
 
@@ -3464,6 +3497,7 @@ class Sale extends DataClass implements Insertable<Sale> {
       discountCents: serializer.fromJson<int>(json['discountCents']),
       totalCents: serializer.fromJson<int>(json['totalCents']),
       status: serializer.fromJson<String>(json['status']),
+      cashReceivedCents: serializer.fromJson<int?>(json['cashReceivedCents']),
     );
   }
   @override
@@ -3487,6 +3521,7 @@ class Sale extends DataClass implements Insertable<Sale> {
       'discountCents': serializer.toJson<int>(discountCents),
       'totalCents': serializer.toJson<int>(totalCents),
       'status': serializer.toJson<String>(status),
+      'cashReceivedCents': serializer.toJson<int?>(cashReceivedCents),
     };
   }
 
@@ -3508,6 +3543,7 @@ class Sale extends DataClass implements Insertable<Sale> {
     int? discountCents,
     int? totalCents,
     String? status,
+    Value<int?> cashReceivedCents = const Value.absent(),
   }) => Sale(
     id: id ?? this.id,
     createdAt: createdAt ?? this.createdAt,
@@ -3528,6 +3564,9 @@ class Sale extends DataClass implements Insertable<Sale> {
     discountCents: discountCents ?? this.discountCents,
     totalCents: totalCents ?? this.totalCents,
     status: status ?? this.status,
+    cashReceivedCents: cashReceivedCents.present
+        ? cashReceivedCents.value
+        : this.cashReceivedCents,
   );
   Sale copyWithCompanion(SalesCompanion data) {
     return Sale(
@@ -3564,6 +3603,9 @@ class Sale extends DataClass implements Insertable<Sale> {
           ? data.totalCents.value
           : this.totalCents,
       status: data.status.present ? data.status.value : this.status,
+      cashReceivedCents: data.cashReceivedCents.present
+          ? data.cashReceivedCents.value
+          : this.cashReceivedCents,
     );
   }
 
@@ -3586,7 +3628,8 @@ class Sale extends DataClass implements Insertable<Sale> {
           ..write('subtotalCents: $subtotalCents, ')
           ..write('discountCents: $discountCents, ')
           ..write('totalCents: $totalCents, ')
-          ..write('status: $status')
+          ..write('status: $status, ')
+          ..write('cashReceivedCents: $cashReceivedCents')
           ..write(')'))
         .toString();
   }
@@ -3610,6 +3653,7 @@ class Sale extends DataClass implements Insertable<Sale> {
     discountCents,
     totalCents,
     status,
+    cashReceivedCents,
   );
   @override
   bool operator ==(Object other) =>
@@ -3631,7 +3675,8 @@ class Sale extends DataClass implements Insertable<Sale> {
           other.subtotalCents == this.subtotalCents &&
           other.discountCents == this.discountCents &&
           other.totalCents == this.totalCents &&
-          other.status == this.status);
+          other.status == this.status &&
+          other.cashReceivedCents == this.cashReceivedCents);
 }
 
 class SalesCompanion extends UpdateCompanion<Sale> {
@@ -3652,6 +3697,7 @@ class SalesCompanion extends UpdateCompanion<Sale> {
   final Value<int> discountCents;
   final Value<int> totalCents;
   final Value<String> status;
+  final Value<int?> cashReceivedCents;
   final Value<int> rowid;
   const SalesCompanion({
     this.id = const Value.absent(),
@@ -3671,6 +3717,7 @@ class SalesCompanion extends UpdateCompanion<Sale> {
     this.discountCents = const Value.absent(),
     this.totalCents = const Value.absent(),
     this.status = const Value.absent(),
+    this.cashReceivedCents = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   SalesCompanion.insert({
@@ -3691,6 +3738,7 @@ class SalesCompanion extends UpdateCompanion<Sale> {
     this.discountCents = const Value.absent(),
     required int totalCents,
     required String status,
+    this.cashReceivedCents = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        createdAt = Value(createdAt),
@@ -3722,6 +3770,7 @@ class SalesCompanion extends UpdateCompanion<Sale> {
     Expression<int>? discountCents,
     Expression<int>? totalCents,
     Expression<String>? status,
+    Expression<int>? cashReceivedCents,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -3742,6 +3791,7 @@ class SalesCompanion extends UpdateCompanion<Sale> {
       if (discountCents != null) 'discount_cents': discountCents,
       if (totalCents != null) 'total_cents': totalCents,
       if (status != null) 'status': status,
+      if (cashReceivedCents != null) 'cash_received_cents': cashReceivedCents,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -3764,6 +3814,7 @@ class SalesCompanion extends UpdateCompanion<Sale> {
     Value<int>? discountCents,
     Value<int>? totalCents,
     Value<String>? status,
+    Value<int?>? cashReceivedCents,
     Value<int>? rowid,
   }) {
     return SalesCompanion(
@@ -3784,6 +3835,7 @@ class SalesCompanion extends UpdateCompanion<Sale> {
       discountCents: discountCents ?? this.discountCents,
       totalCents: totalCents ?? this.totalCents,
       status: status ?? this.status,
+      cashReceivedCents: cashReceivedCents ?? this.cashReceivedCents,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -3842,6 +3894,9 @@ class SalesCompanion extends UpdateCompanion<Sale> {
     if (status.present) {
       map['status'] = Variable<String>(status.value);
     }
+    if (cashReceivedCents.present) {
+      map['cash_received_cents'] = Variable<int>(cashReceivedCents.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -3868,6 +3923,7 @@ class SalesCompanion extends UpdateCompanion<Sale> {
           ..write('discountCents: $discountCents, ')
           ..write('totalCents: $totalCents, ')
           ..write('status: $status, ')
+          ..write('cashReceivedCents: $cashReceivedCents, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -10448,6 +10504,7 @@ typedef $$SalesTableCreateCompanionBuilder = SalesCompanion Function({
   Value<int> discountCents,
   required int totalCents,
   required String status,
+  Value<int?> cashReceivedCents,
   Value<int> rowid,
 });
 typedef $$SalesTableUpdateCompanionBuilder = SalesCompanion Function({
@@ -10468,6 +10525,7 @@ typedef $$SalesTableUpdateCompanionBuilder = SalesCompanion Function({
   Value<int> discountCents,
   Value<int> totalCents,
   Value<String> status,
+  Value<int?> cashReceivedCents,
   Value<int> rowid,
 });
 
@@ -10614,6 +10672,11 @@ class $$SalesTableFilterComposer extends Composer<_$AppDatabase, $SalesTable> {
 
   ColumnFilters<String> get status => $composableBuilder(
     column: $table.status,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get cashReceivedCents => $composableBuilder(
+    column: $table.cashReceivedCents,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -10780,6 +10843,11 @@ class $$SalesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<int> get cashReceivedCents => $composableBuilder(
+    column: $table.cashReceivedCents,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   $$UsersTableOrderingComposer get userId {
     final $$UsersTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -10876,6 +10944,11 @@ class $$SalesTableAnnotationComposer
 
   GeneratedColumn<String> get status =>
       $composableBuilder(column: $table.status, builder: (column) => column);
+
+  GeneratedColumn<int> get cashReceivedCents => $composableBuilder(
+    column: $table.cashReceivedCents,
+    builder: (column) => column,
+  );
 
   $$UsersTableAnnotationComposer get userId {
     final $$UsersTableAnnotationComposer composer = $composerBuilder(
@@ -11000,6 +11073,7 @@ class $$SalesTableTableManager
                 Value<int> discountCents = const Value.absent(),
                 Value<int> totalCents = const Value.absent(),
                 Value<String> status = const Value.absent(),
+                Value<int?> cashReceivedCents = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => SalesCompanion(
                 id: id,
@@ -11019,6 +11093,7 @@ class $$SalesTableTableManager
                 discountCents: discountCents,
                 totalCents: totalCents,
                 status: status,
+                cashReceivedCents: cashReceivedCents,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -11040,6 +11115,7 @@ class $$SalesTableTableManager
                 Value<int> discountCents = const Value.absent(),
                 required int totalCents,
                 required String status,
+                Value<int?> cashReceivedCents = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => SalesCompanion.insert(
                 id: id,
@@ -11059,6 +11135,7 @@ class $$SalesTableTableManager
                 discountCents: discountCents,
                 totalCents: totalCents,
                 status: status,
+                cashReceivedCents: cashReceivedCents,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

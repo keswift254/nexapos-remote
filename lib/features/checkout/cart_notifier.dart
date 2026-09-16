@@ -61,11 +61,18 @@ class CartNotifier extends _$CartNotifier {
   void setCustomerPhone(String phone) => state = state.copyWith(customerPhone: phone);
 
   void setPaymentMethod(String method) {
-    if (method != 'cash' && method != 'paystack' && method != 'intasend') return;
+    // 'intasend' retired alongside 'mpesa'/'mpesa_manual' - no cashier
+    // can select it anymore (cart_screen.dart's picker no longer offers
+    // it), so a new cart should never be settable to it either. Already
+    // recorded/still-pending 'intasend' sales are untouched by this -
+    // this only governs new cart state, never historical data.
+    if (method != 'cash' && method != 'paystack') return;
     state = state.copyWith(paymentMethod: method);
   }
 
   void setReferenceNote(String note) => state = state.copyWith(referenceNote: note);
+
+  void setCashReceived(Money amount) => state = state.copyWith(cashReceived: amount);
 
   void clear() => state = const CartState();
 }

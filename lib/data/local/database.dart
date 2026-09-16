@@ -85,7 +85,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.defaults() : super(connection.openConnection());
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -112,6 +112,12 @@ class AppDatabase extends _$AppDatabase {
             // see registrationSecret's own doc comment for why that's
             // correct for an existing installation.
             await m.addColumn(deviceMeta, deviceMeta.registrationSecret);
+          }
+          if (from < 4) {
+            // Nullable, no backfill needed - every existing sale simply
+            // has no recorded cash-received amount, same as a new cash
+            // sale where the cashier skips the field.
+            await m.addColumn(sales, sales.cashReceivedCents);
           }
         },
         beforeOpen: (details) async {

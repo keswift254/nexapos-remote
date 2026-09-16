@@ -79,7 +79,7 @@ void main() {
           expect(decoded, contains('RCPT-0001'));
           expect(decoded, contains('Felix'));
           expect(decoded, contains('Photocopy A4'));
-          expect(decoded, contains('CASH'));
+          expect(decoded, contains('Payment: Cash'));
           expect(decoded, contains('Thank you for shopping with us'));
           expect(decoded, contains('Support / Installation: 0768415017'));
           expect(

@@ -4,19 +4,23 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/utils/money.dart';
 import '../../domain/services/checkout_service.dart';
-import '../../domain/services/intasend_payment_service.dart';
 import '../../domain/services/paystack_payment_service.dart';
 import '../../domain/services/session_service.dart';
 import '../dashboard/dashboard_screen.dart';
 import 'cart_notifier.dart';
-import 'intasend_waiting_screen.dart';
 import 'paystack_waiting_screen.dart';
 
-const _paymentMethodLabels = {'cash': 'Cash', 'paystack': 'M-Pesa Prompt', 'intasend': 'IntaSend'};
+// IntaSend deliberately removed from here, not from CheckoutService/
+// IntaSendPaymentService/IntaSendWaitingScreen - those stay, since a sale
+// already recorded with paymentMethod 'intasend' (or still 'pending' from
+// before this change) still needs to read/reconcile correctly. This map
+// is the one and only place a cashier can newly choose it, so removing
+// the entry here is the whole of "remove the option".
+const _paymentMethodLabels = {'cash': 'Cash', 'paystack': 'M-Pesa Prompt'};
 
 /// Cart review + checkout details. Cash completes
-/// immediately through CheckoutService; paystack/intasend each hand off
-/// to their own PaymentService and, on success, their own waiting screen.
+/// immediately through CheckoutService; paystack hands off to its own
+/// PaymentService and, on success, its own waiting screen.
 class CartScreen extends ConsumerStatefulWidget {
   const CartScreen({super.key});
 
@@ -36,6 +40,11 @@ class _CartScreenState extends ConsumerState<CartScreen> {
         ? ''
         : ref.read(cartProvider).discount.toMajorDouble.toStringAsFixed(2),
   );
+  late final _cashReceivedController = TextEditingController(
+    text: ref.read(cartProvider).cashReceived.cents == 0
+        ? ''
+        : ref.read(cartProvider).cashReceived.toMajorDouble.toStringAsFixed(2),
+  );
   bool _submitting = false;
 
   @override
@@ -43,6 +52,7 @@ class _CartScreenState extends ConsumerState<CartScreen> {
     _nameController.dispose();
     _phoneController.dispose();
     _discountController.dispose();
+    _cashReceivedController.dispose();
     super.dispose();
   }
 
@@ -80,33 +90,6 @@ class _CartScreenState extends ConsumerState<CartScreen> {
       return;
     }
 
-    if (paymentMethod == 'intasend') {
-      final service = ref.read(intaSendPaymentServiceProvider);
-      final state = ref.read(cartProvider);
-      final result = await service.start(
-        cart: state.items,
-        discount: state.discount,
-        customerName: _nameController.text,
-        customerPhone: _phoneController.text,
-        saleType: state.saleType,
-        userId: userId,
-      );
-      if (!mounted) return;
-      setState(() => _submitting = false);
-      result.when(
-        ok: (session) {
-          cart.clear();
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => IntaSendWaitingScreen(session: session),
-            ),
-          );
-        },
-        failure: (message) => _showError(message),
-      );
-      return;
-    }
-
     final service = ref.read(checkoutServiceProvider);
     final state = ref.read(cartProvider);
     final result = await service.checkout(
@@ -118,6 +101,9 @@ class _CartScreenState extends ConsumerState<CartScreen> {
       paymentMethod: paymentMethod,
       referenceNote: '',
       userId: userId,
+      cashReceived: paymentMethod == 'cash' && state.cashReceived.cents > 0
+          ? state.cashReceived
+          : null,
     );
     if (!mounted) return;
     setState(() => _submitting = false);
@@ -219,10 +205,8 @@ class _CartScreenState extends ConsumerState<CartScreen> {
           const SizedBox(height: 12),
           TextField(
             controller: _phoneController,
-            decoration: InputDecoration(
-              labelText: cartState.paymentMethod == 'intasend'
-                  ? 'Customer M-Pesa number (required for IntaSend)'
-                  : 'Customer phone (optional)',
+            decoration: const InputDecoration(
+              labelText: 'Customer phone (optional)',
             ),
             keyboardType: TextInputType.phone,
             onChanged: cart.setCustomerPhone,
@@ -255,6 +239,23 @@ class _CartScreenState extends ConsumerState<CartScreen> {
           _TotalsRow(label: 'Subtotal', value: cartState.subtotal),
           _TotalsRow(label: 'Discount', value: discount),
           _TotalsRow(label: 'Total', value: total, emphasize: true),
+          if (cartState.paymentMethod == 'cash') ...[
+            const SizedBox(height: 16),
+            TextField(
+              controller: _cashReceivedController,
+              decoration: const InputDecoration(
+                labelText: 'Cash received (optional)',
+              ),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              onChanged: (value) => cart.setCashReceived(
+                Money.fromMajor(double.tryParse(value.trim()) ?? 0),
+              ),
+            ),
+            if (cartState.cashReceived.cents > 0) ...[
+              const SizedBox(height: 4),
+              _ChangeDueRow(cashReceived: cartState.cashReceived, total: total),
+            ],
+          ],
         ],
       ),
       bottomNavigationBar: SafeArea(
@@ -274,6 +275,35 @@ class _CartScreenState extends ConsumerState<CartScreen> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Assistive only, never a checkout gate - a negative value (customer
+/// handed over less than the total) still displays, in the error color,
+/// rather than blocking "Complete Sale". A cashier legitimately
+/// recording a partial/rounded payment shouldn't be stopped by a
+/// calculator field.
+class _ChangeDueRow extends StatelessWidget {
+  final Money cashReceived;
+  final Money total;
+
+  const _ChangeDueRow({required this.cashReceived, required this.total});
+
+  @override
+  Widget build(BuildContext context) {
+    final change = cashReceived - total;
+    final short = change.isNegative;
+    final style = Theme.of(context).textTheme.titleMedium?.copyWith(
+          fontWeight: FontWeight.bold,
+          color: short ? Theme.of(context).colorScheme.error : null,
+        );
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(short ? 'Still owed' : 'Change due', style: style),
+        Text((short ? Money(-change.cents) : change).format(), style: style),
+      ],
     );
   }
 }

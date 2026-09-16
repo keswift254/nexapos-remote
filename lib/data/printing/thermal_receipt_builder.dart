@@ -98,7 +98,23 @@ Future<Uint8List> buildThermalReceipt(ReceiptData data) async {
   );
   bytes.addAll(generator.hr());
 
-  bytes.addAll(generator.text('Payment: ${sale.paymentMethod.toUpperCase()}'));
+  bytes.addAll(generator.text('Payment: ${sale.paymentMethodLabel}'));
+  if (sale.cashReceived != null) {
+    bytes.addAll(
+      _amountRow(
+        generator,
+        'Cash received',
+        sale.cashReceived!.format(currency: currency),
+      ),
+    );
+    bytes.addAll(
+      _amountRow(
+        generator,
+        sale.cashWasShort ? 'Still owed' : 'Change due',
+        sale.changeDueAbs!.format(currency: currency),
+      ),
+    );
+  }
   bytes.addAll(
     generator.text(
       'Sale type: ${sale.saleType[0].toUpperCase()}${sale.saleType.substring(1)}',

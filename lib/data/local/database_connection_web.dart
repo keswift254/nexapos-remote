@@ -64,14 +64,37 @@ DatabaseConnection openConnection() {
         databaseName: 'nexapos',
       );
 
-      const dedicatedWorkerImplementations = [
+      // Ordered by preference, but this list is a fallback CHAIN, not a
+      // fixed pair - iOS Safari is a real, confirmed reason the previous
+      // two-option version wasn't enough. WebKit has long-standing
+      // issues serving IndexedDB from inside a Worker (which is what
+      // both opfsLocks and unsafeIndexedDb do - see this file's own
+      // top-level doc comment for why SharedWorker-hosted storage is
+      // skipped entirely), and OPFS itself needs
+      // Cross-Origin-Opener-Policy/-Embedder-Policy headers GitHub Pages
+      // cannot set - so on Safari, `available` can plausibly contain
+      // NEITHER preferred option. `available.first` on an empty/
+      // unexpected list would throw here, and since this Future backs
+      // the database every provider in the app eventually reads,
+      // that failure surfaced as a silently blank page on first load -
+      // nothing ever painted, not even an error, because it happened
+      // before the very first route's redirect could resolve (see
+      // app.dart's _redirect, now hardened to not propagate this either).
+      // inMemory is the unconditional last resort: always available,
+      // trades "survives a page reload" for "the app actually opens" -
+      // strictly better than a blank page on a browser where nothing
+      // durable works.
+      const preferredImplementations = [
         WasmStorageImplementation.opfsLocks,
         WasmStorageImplementation.unsafeIndexedDb,
+        WasmStorageImplementation.opfsShared,
+        WasmStorageImplementation.sharedIndexedDb,
+        WasmStorageImplementation.inMemory,
       ];
       final available = probed.availableStorages;
-      final implementation = dedicatedWorkerImplementations.firstWhere(
+      final implementation = preferredImplementations.firstWhere(
         available.contains,
-        orElse: () => available.first,
+        orElse: () => WasmStorageImplementation.inMemory,
       );
 
       return probed.open(implementation, 'nexapos');

@@ -18,6 +18,11 @@ abstract class CartState with _$CartState {
     @Default('') String customerPhone,
     @Default('cash') String paymentMethod,
     @Default('') String referenceNote,
+    // Cash only - what the cashier enters as the amount tendered, purely
+    // to display change due. Zero means "not entered", not a real 0
+    // tendered (see CartScreen: the change row only shows once this is
+    // above zero).
+    @Default(Money.zero()) Money cashReceived,
   }) = _CartState;
 
   const CartState._();

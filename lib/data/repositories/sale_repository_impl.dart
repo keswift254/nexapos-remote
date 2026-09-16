@@ -47,6 +47,7 @@ class SaleRepositoryImpl implements SaleRepository {
         total: Money(row.totalCents),
         status: row.status,
         createdAt: DateTime.parse(row.createdAt),
+        cashReceived: row.cashReceivedCents == null ? null : Money(row.cashReceivedCents!),
       );
 
   @override
@@ -74,6 +75,7 @@ class SaleRepositoryImpl implements SaleRepository {
         discountCents: Value(sale.discount.cents),
         totalCents: sale.total.cents,
         status: sale.status,
+        cashReceivedCents: Value(sale.cashReceived?.cents),
         createdAt: now,
         updatedAt: now,
         localRev: rev,

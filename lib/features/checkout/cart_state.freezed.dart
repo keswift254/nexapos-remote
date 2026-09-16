@@ -15,7 +15,7 @@ T _$identity<T>(T value) => value;
 /// @nodoc
 mixin _$CartState {
 
- List<CartItem> get items; String get saleType; Money get discount; String get customerName; String get customerPhone; String get paymentMethod; String get referenceNote;
+ List<CartItem> get items; String get saleType; Money get discount; String get customerName; String get customerPhone; String get paymentMethod; String get referenceNote; Money get cashReceived;
 /// Create a copy of CartState
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -27,20 +27,20 @@ $CartStateCopyWith<CartState> get copyWith => _$CartStateCopyWithImpl<CartState>
 @override
 bool operator ==(Object other) {
   final _this = this as CartState;
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is CartState&&const DeepCollectionEquality().equals(other.items, _this.items)&&(identical(other.saleType, _this.saleType) || other.saleType == _this.saleType)&&(identical(other.discount, _this.discount) || other.discount == _this.discount)&&(identical(other.customerName, _this.customerName) || other.customerName == _this.customerName)&&(identical(other.customerPhone, _this.customerPhone) || other.customerPhone == _this.customerPhone)&&(identical(other.paymentMethod, _this.paymentMethod) || other.paymentMethod == _this.paymentMethod)&&(identical(other.referenceNote, _this.referenceNote) || other.referenceNote == _this.referenceNote));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is CartState&&const DeepCollectionEquality().equals(other.items, _this.items)&&(identical(other.saleType, _this.saleType) || other.saleType == _this.saleType)&&(identical(other.discount, _this.discount) || other.discount == _this.discount)&&(identical(other.customerName, _this.customerName) || other.customerName == _this.customerName)&&(identical(other.customerPhone, _this.customerPhone) || other.customerPhone == _this.customerPhone)&&(identical(other.paymentMethod, _this.paymentMethod) || other.paymentMethod == _this.paymentMethod)&&(identical(other.referenceNote, _this.referenceNote) || other.referenceNote == _this.referenceNote)&&(identical(other.cashReceived, _this.cashReceived) || other.cashReceived == _this.cashReceived));
 }
 
 
 @override
 int get hashCode {
   final _this = this as CartState;
-  return Object.hash(runtimeType,const DeepCollectionEquality().hash(_this.items),_this.saleType,_this.discount,_this.customerName,_this.customerPhone,_this.paymentMethod,_this.referenceNote);
+  return Object.hash(runtimeType,const DeepCollectionEquality().hash(_this.items),_this.saleType,_this.discount,_this.customerName,_this.customerPhone,_this.paymentMethod,_this.referenceNote,_this.cashReceived);
 }
 
 @override
 String toString() {
   final _this = this as CartState;
-  return 'CartState(items: ${_this.items}, saleType: ${_this.saleType}, discount: ${_this.discount}, customerName: ${_this.customerName}, customerPhone: ${_this.customerPhone}, paymentMethod: ${_this.paymentMethod}, referenceNote: ${_this.referenceNote})';
+  return 'CartState(items: ${_this.items}, saleType: ${_this.saleType}, discount: ${_this.discount}, customerName: ${_this.customerName}, customerPhone: ${_this.customerPhone}, paymentMethod: ${_this.paymentMethod}, referenceNote: ${_this.referenceNote}, cashReceived: ${_this.cashReceived})';
 }
 
 
@@ -51,7 +51,7 @@ abstract mixin class $CartStateCopyWith<$Res>  {
   factory $CartStateCopyWith(CartState value, $Res Function(CartState) _then) = _$CartStateCopyWithImpl;
 @useResult
 $Res call({
- List<CartItem> items, String saleType, Money discount, String customerName, String customerPhone, String paymentMethod, String referenceNote
+ List<CartItem> items, String saleType, Money discount, String customerName, String customerPhone, String paymentMethod, String referenceNote, Money cashReceived
 });
 
 
@@ -68,7 +68,7 @@ class _$CartStateCopyWithImpl<$Res>
 
 /// Create a copy of CartState
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? items = null,Object? saleType = null,Object? discount = null,Object? customerName = null,Object? customerPhone = null,Object? paymentMethod = null,Object? referenceNote = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? items = null,Object? saleType = null,Object? discount = null,Object? customerName = null,Object? customerPhone = null,Object? paymentMethod = null,Object? referenceNote = null,Object? cashReceived = null,}) {
   return _then(CartState(
 items: null == items ? _self.items : items // ignore: cast_nullable_to_non_nullable
 as List<CartItem>,saleType: null == saleType ? _self.saleType : saleType // ignore: cast_nullable_to_non_nullable
@@ -77,7 +77,8 @@ as Money,customerName: null == customerName ? _self.customerName : customerName 
 as String,customerPhone: null == customerPhone ? _self.customerPhone : customerPhone // ignore: cast_nullable_to_non_nullable
 as String,paymentMethod: null == paymentMethod ? _self.paymentMethod : paymentMethod // ignore: cast_nullable_to_non_nullable
 as String,referenceNote: null == referenceNote ? _self.referenceNote : referenceNote // ignore: cast_nullable_to_non_nullable
-as String,
+as String,cashReceived: null == cashReceived ? _self.cashReceived : cashReceived // ignore: cast_nullable_to_non_nullable
+as Money,
   ));
 }
 
@@ -162,10 +163,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( List<CartItem> items,  String saleType,  Money discount,  String customerName,  String customerPhone,  String paymentMethod,  String referenceNote)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( List<CartItem> items,  String saleType,  Money discount,  String customerName,  String customerPhone,  String paymentMethod,  String referenceNote,  Money cashReceived)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _CartState() when $default != null:
-return $default(_that.items,_that.saleType,_that.discount,_that.customerName,_that.customerPhone,_that.paymentMethod,_that.referenceNote);case _:
+return $default(_that.items,_that.saleType,_that.discount,_that.customerName,_that.customerPhone,_that.paymentMethod,_that.referenceNote,_that.cashReceived);case _:
   return orElse();
 
 }
@@ -183,10 +184,10 @@ return $default(_that.items,_that.saleType,_that.discount,_that.customerName,_th
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( List<CartItem> items,  String saleType,  Money discount,  String customerName,  String customerPhone,  String paymentMethod,  String referenceNote)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( List<CartItem> items,  String saleType,  Money discount,  String customerName,  String customerPhone,  String paymentMethod,  String referenceNote,  Money cashReceived)  $default,) {final _that = this;
 switch (_that) {
 case _CartState():
-return $default(_that.items,_that.saleType,_that.discount,_that.customerName,_that.customerPhone,_that.paymentMethod,_that.referenceNote);case _:
+return $default(_that.items,_that.saleType,_that.discount,_that.customerName,_that.customerPhone,_that.paymentMethod,_that.referenceNote,_that.cashReceived);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -203,10 +204,10 @@ return $default(_that.items,_that.saleType,_that.discount,_that.customerName,_th
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( List<CartItem> items,  String saleType,  Money discount,  String customerName,  String customerPhone,  String paymentMethod,  String referenceNote)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( List<CartItem> items,  String saleType,  Money discount,  String customerName,  String customerPhone,  String paymentMethod,  String referenceNote,  Money cashReceived)?  $default,) {final _that = this;
 switch (_that) {
 case _CartState() when $default != null:
-return $default(_that.items,_that.saleType,_that.discount,_that.customerName,_that.customerPhone,_that.paymentMethod,_that.referenceNote);case _:
+return $default(_that.items,_that.saleType,_that.discount,_that.customerName,_that.customerPhone,_that.paymentMethod,_that.referenceNote,_that.cashReceived);case _:
   return null;
 
 }
@@ -218,7 +219,7 @@ return $default(_that.items,_that.saleType,_that.discount,_that.customerName,_th
 
 
 class _CartState extends CartState {
-  const _CartState({ List<CartItem> items = const [], this.saleType = 'retail', this.discount = const Money.zero(), this.customerName = '', this.customerPhone = '', this.paymentMethod = 'cash', this.referenceNote = ''}): _items = items,super._();
+  const _CartState({ List<CartItem> items = const [], this.saleType = 'retail', this.discount = const Money.zero(), this.customerName = '', this.customerPhone = '', this.paymentMethod = 'cash', this.referenceNote = '', this.cashReceived = const Money.zero()}): _items = items,super._();
   
 
  final  List<CartItem> _items;
@@ -234,6 +235,7 @@ class _CartState extends CartState {
 @override@JsonKey() final  String customerPhone;
 @override@JsonKey() final  String paymentMethod;
 @override@JsonKey() final  String referenceNote;
+@override@JsonKey() final  Money cashReceived;
 
 /// Create a copy of CartState
 /// with the given fields replaced by the non-null parameter values.
@@ -245,18 +247,18 @@ _$CartStateCopyWith<_CartState> get copyWith => __$CartStateCopyWithImpl<_CartSt
 
 @override
 bool operator ==(Object other) {
-    return identical(this, other) || (other.runtimeType == runtimeType&&other is _CartState&&const DeepCollectionEquality().equals(other.items, _items)&&(identical(other.saleType, saleType) || other.saleType == saleType)&&(identical(other.discount, discount) || other.discount == discount)&&(identical(other.customerName, customerName) || other.customerName == customerName)&&(identical(other.customerPhone, customerPhone) || other.customerPhone == customerPhone)&&(identical(other.paymentMethod, paymentMethod) || other.paymentMethod == paymentMethod)&&(identical(other.referenceNote, referenceNote) || other.referenceNote == referenceNote));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is _CartState&&const DeepCollectionEquality().equals(other.items, _items)&&(identical(other.saleType, saleType) || other.saleType == saleType)&&(identical(other.discount, discount) || other.discount == discount)&&(identical(other.customerName, customerName) || other.customerName == customerName)&&(identical(other.customerPhone, customerPhone) || other.customerPhone == customerPhone)&&(identical(other.paymentMethod, paymentMethod) || other.paymentMethod == paymentMethod)&&(identical(other.referenceNote, referenceNote) || other.referenceNote == referenceNote)&&(identical(other.cashReceived, cashReceived) || other.cashReceived == cashReceived));
 }
 
 
 @override
 int get hashCode {
-    return Object.hash(runtimeType,const DeepCollectionEquality().hash(_items),saleType,discount,customerName,customerPhone,paymentMethod,referenceNote);
+    return Object.hash(runtimeType,const DeepCollectionEquality().hash(_items),saleType,discount,customerName,customerPhone,paymentMethod,referenceNote,cashReceived);
 }
 
 @override
 String toString() {
-    return 'CartState(items: $items, saleType: $saleType, discount: $discount, customerName: $customerName, customerPhone: $customerPhone, paymentMethod: $paymentMethod, referenceNote: $referenceNote)';
+    return 'CartState(items: $items, saleType: $saleType, discount: $discount, customerName: $customerName, customerPhone: $customerPhone, paymentMethod: $paymentMethod, referenceNote: $referenceNote, cashReceived: $cashReceived)';
 }
 
 
@@ -267,7 +269,7 @@ abstract mixin class _$CartStateCopyWith<$Res> implements $CartStateCopyWith<$Re
   factory _$CartStateCopyWith(_CartState value, $Res Function(_CartState) _then) = __$CartStateCopyWithImpl;
 @override @useResult
 $Res call({
- List<CartItem> items, String saleType, Money discount, String customerName, String customerPhone, String paymentMethod, String referenceNote
+ List<CartItem> items, String saleType, Money discount, String customerName, String customerPhone, String paymentMethod, String referenceNote, Money cashReceived
 });
 
 
@@ -284,7 +286,7 @@ class __$CartStateCopyWithImpl<$Res>
 
 /// Create a copy of CartState
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? items = null,Object? saleType = null,Object? discount = null,Object? customerName = null,Object? customerPhone = null,Object? paymentMethod = null,Object? referenceNote = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? items = null,Object? saleType = null,Object? discount = null,Object? customerName = null,Object? customerPhone = null,Object? paymentMethod = null,Object? referenceNote = null,Object? cashReceived = null,}) {
   return _then(_CartState(
 items: null == items ? _self._items : items // ignore: cast_nullable_to_non_nullable
 as List<CartItem>,saleType: null == saleType ? _self.saleType : saleType // ignore: cast_nullable_to_non_nullable
@@ -293,7 +295,8 @@ as Money,customerName: null == customerName ? _self.customerName : customerName 
 as String,customerPhone: null == customerPhone ? _self.customerPhone : customerPhone // ignore: cast_nullable_to_non_nullable
 as String,paymentMethod: null == paymentMethod ? _self.paymentMethod : paymentMethod // ignore: cast_nullable_to_non_nullable
 as String,referenceNote: null == referenceNote ? _self.referenceNote : referenceNote // ignore: cast_nullable_to_non_nullable
-as String,
+as String,cashReceived: null == cashReceived ? _self.cashReceived : cashReceived // ignore: cast_nullable_to_non_nullable
+as Money,
   ));
 }
 

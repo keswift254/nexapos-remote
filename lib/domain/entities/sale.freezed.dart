@@ -15,7 +15,7 @@ T _$identity<T>(T value) => value;
 /// @nodoc
 mixin _$Sale {
 
- String get id; String get saleNumber; String get userId; String get customerName; String? get customerPhone; String get saleType; String get paymentMethod; Money get subtotal; Money get discount; Money get total; String get status; DateTime get createdAt;
+ String get id; String get saleNumber; String get userId; String get customerName; String? get customerPhone; String get saleType; String get paymentMethod; Money get subtotal; Money get discount; Money get total; String get status; DateTime get createdAt; Money? get cashReceived;
 /// Create a copy of Sale
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -27,20 +27,20 @@ $SaleCopyWith<Sale> get copyWith => _$SaleCopyWithImpl<Sale>(this as Sale, _$ide
 @override
 bool operator ==(Object other) {
   final _this = this as Sale;
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is Sale&&(identical(other.id, _this.id) || other.id == _this.id)&&(identical(other.saleNumber, _this.saleNumber) || other.saleNumber == _this.saleNumber)&&(identical(other.userId, _this.userId) || other.userId == _this.userId)&&(identical(other.customerName, _this.customerName) || other.customerName == _this.customerName)&&(identical(other.customerPhone, _this.customerPhone) || other.customerPhone == _this.customerPhone)&&(identical(other.saleType, _this.saleType) || other.saleType == _this.saleType)&&(identical(other.paymentMethod, _this.paymentMethod) || other.paymentMethod == _this.paymentMethod)&&(identical(other.subtotal, _this.subtotal) || other.subtotal == _this.subtotal)&&(identical(other.discount, _this.discount) || other.discount == _this.discount)&&(identical(other.total, _this.total) || other.total == _this.total)&&(identical(other.status, _this.status) || other.status == _this.status)&&(identical(other.createdAt, _this.createdAt) || other.createdAt == _this.createdAt));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is Sale&&(identical(other.id, _this.id) || other.id == _this.id)&&(identical(other.saleNumber, _this.saleNumber) || other.saleNumber == _this.saleNumber)&&(identical(other.userId, _this.userId) || other.userId == _this.userId)&&(identical(other.customerName, _this.customerName) || other.customerName == _this.customerName)&&(identical(other.customerPhone, _this.customerPhone) || other.customerPhone == _this.customerPhone)&&(identical(other.saleType, _this.saleType) || other.saleType == _this.saleType)&&(identical(other.paymentMethod, _this.paymentMethod) || other.paymentMethod == _this.paymentMethod)&&(identical(other.subtotal, _this.subtotal) || other.subtotal == _this.subtotal)&&(identical(other.discount, _this.discount) || other.discount == _this.discount)&&(identical(other.total, _this.total) || other.total == _this.total)&&(identical(other.status, _this.status) || other.status == _this.status)&&(identical(other.createdAt, _this.createdAt) || other.createdAt == _this.createdAt)&&(identical(other.cashReceived, _this.cashReceived) || other.cashReceived == _this.cashReceived));
 }
 
 
 @override
 int get hashCode {
   final _this = this as Sale;
-  return Object.hash(runtimeType,_this.id,_this.saleNumber,_this.userId,_this.customerName,_this.customerPhone,_this.saleType,_this.paymentMethod,_this.subtotal,_this.discount,_this.total,_this.status,_this.createdAt);
+  return Object.hash(runtimeType,_this.id,_this.saleNumber,_this.userId,_this.customerName,_this.customerPhone,_this.saleType,_this.paymentMethod,_this.subtotal,_this.discount,_this.total,_this.status,_this.createdAt,_this.cashReceived);
 }
 
 @override
 String toString() {
   final _this = this as Sale;
-  return 'Sale(id: ${_this.id}, saleNumber: ${_this.saleNumber}, userId: ${_this.userId}, customerName: ${_this.customerName}, customerPhone: ${_this.customerPhone}, saleType: ${_this.saleType}, paymentMethod: ${_this.paymentMethod}, subtotal: ${_this.subtotal}, discount: ${_this.discount}, total: ${_this.total}, status: ${_this.status}, createdAt: ${_this.createdAt})';
+  return 'Sale(id: ${_this.id}, saleNumber: ${_this.saleNumber}, userId: ${_this.userId}, customerName: ${_this.customerName}, customerPhone: ${_this.customerPhone}, saleType: ${_this.saleType}, paymentMethod: ${_this.paymentMethod}, subtotal: ${_this.subtotal}, discount: ${_this.discount}, total: ${_this.total}, status: ${_this.status}, createdAt: ${_this.createdAt}, cashReceived: ${_this.cashReceived})';
 }
 
 
@@ -51,7 +51,7 @@ abstract mixin class $SaleCopyWith<$Res>  {
   factory $SaleCopyWith(Sale value, $Res Function(Sale) _then) = _$SaleCopyWithImpl;
 @useResult
 $Res call({
- String id, String saleNumber, String userId, String customerName, String? customerPhone, String saleType, String paymentMethod, Money subtotal, Money discount, Money total, String status, DateTime createdAt
+ String id, String saleNumber, String userId, String customerName, String? customerPhone, String saleType, String paymentMethod, Money subtotal, Money discount, Money total, String status, DateTime createdAt, Money? cashReceived
 });
 
 
@@ -68,7 +68,7 @@ class _$SaleCopyWithImpl<$Res>
 
 /// Create a copy of Sale
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? saleNumber = null,Object? userId = null,Object? customerName = null,Object? customerPhone = freezed,Object? saleType = null,Object? paymentMethod = null,Object? subtotal = null,Object? discount = null,Object? total = null,Object? status = null,Object? createdAt = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? saleNumber = null,Object? userId = null,Object? customerName = null,Object? customerPhone = freezed,Object? saleType = null,Object? paymentMethod = null,Object? subtotal = null,Object? discount = null,Object? total = null,Object? status = null,Object? createdAt = null,Object? cashReceived = freezed,}) {
   return _then(Sale(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,saleNumber: null == saleNumber ? _self.saleNumber : saleNumber // ignore: cast_nullable_to_non_nullable
@@ -82,7 +82,8 @@ as Money,discount: null == discount ? _self.discount : discount // ignore: cast_
 as Money,total: null == total ? _self.total : total // ignore: cast_nullable_to_non_nullable
 as Money,status: null == status ? _self.status : status // ignore: cast_nullable_to_non_nullable
 as String,createdAt: null == createdAt ? _self.createdAt : createdAt // ignore: cast_nullable_to_non_nullable
-as DateTime,
+as DateTime,cashReceived: freezed == cashReceived ? _self.cashReceived : cashReceived // ignore: cast_nullable_to_non_nullable
+as Money?,
   ));
 }
 
@@ -167,10 +168,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String saleNumber,  String userId,  String customerName,  String? customerPhone,  String saleType,  String paymentMethod,  Money subtotal,  Money discount,  Money total,  String status,  DateTime createdAt)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String saleNumber,  String userId,  String customerName,  String? customerPhone,  String saleType,  String paymentMethod,  Money subtotal,  Money discount,  Money total,  String status,  DateTime createdAt,  Money? cashReceived)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _Sale() when $default != null:
-return $default(_that.id,_that.saleNumber,_that.userId,_that.customerName,_that.customerPhone,_that.saleType,_that.paymentMethod,_that.subtotal,_that.discount,_that.total,_that.status,_that.createdAt);case _:
+return $default(_that.id,_that.saleNumber,_that.userId,_that.customerName,_that.customerPhone,_that.saleType,_that.paymentMethod,_that.subtotal,_that.discount,_that.total,_that.status,_that.createdAt,_that.cashReceived);case _:
   return orElse();
 
 }
@@ -188,10 +189,10 @@ return $default(_that.id,_that.saleNumber,_that.userId,_that.customerName,_that.
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String saleNumber,  String userId,  String customerName,  String? customerPhone,  String saleType,  String paymentMethod,  Money subtotal,  Money discount,  Money total,  String status,  DateTime createdAt)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String saleNumber,  String userId,  String customerName,  String? customerPhone,  String saleType,  String paymentMethod,  Money subtotal,  Money discount,  Money total,  String status,  DateTime createdAt,  Money? cashReceived)  $default,) {final _that = this;
 switch (_that) {
 case _Sale():
-return $default(_that.id,_that.saleNumber,_that.userId,_that.customerName,_that.customerPhone,_that.saleType,_that.paymentMethod,_that.subtotal,_that.discount,_that.total,_that.status,_that.createdAt);case _:
+return $default(_that.id,_that.saleNumber,_that.userId,_that.customerName,_that.customerPhone,_that.saleType,_that.paymentMethod,_that.subtotal,_that.discount,_that.total,_that.status,_that.createdAt,_that.cashReceived);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -208,10 +209,10 @@ return $default(_that.id,_that.saleNumber,_that.userId,_that.customerName,_that.
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String saleNumber,  String userId,  String customerName,  String? customerPhone,  String saleType,  String paymentMethod,  Money subtotal,  Money discount,  Money total,  String status,  DateTime createdAt)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String saleNumber,  String userId,  String customerName,  String? customerPhone,  String saleType,  String paymentMethod,  Money subtotal,  Money discount,  Money total,  String status,  DateTime createdAt,  Money? cashReceived)?  $default,) {final _that = this;
 switch (_that) {
 case _Sale() when $default != null:
-return $default(_that.id,_that.saleNumber,_that.userId,_that.customerName,_that.customerPhone,_that.saleType,_that.paymentMethod,_that.subtotal,_that.discount,_that.total,_that.status,_that.createdAt);case _:
+return $default(_that.id,_that.saleNumber,_that.userId,_that.customerName,_that.customerPhone,_that.saleType,_that.paymentMethod,_that.subtotal,_that.discount,_that.total,_that.status,_that.createdAt,_that.cashReceived);case _:
   return null;
 
 }
@@ -223,7 +224,7 @@ return $default(_that.id,_that.saleNumber,_that.userId,_that.customerName,_that.
 
 
 class _Sale extends Sale {
-  const _Sale({required this.id, required this.saleNumber, required this.userId, required this.customerName, this.customerPhone, required this.saleType, required this.paymentMethod, required this.subtotal, required this.discount, required this.total, required this.status, required this.createdAt}): super._();
+  const _Sale({required this.id, required this.saleNumber, required this.userId, required this.customerName, this.customerPhone, required this.saleType, required this.paymentMethod, required this.subtotal, required this.discount, required this.total, required this.status, required this.createdAt, this.cashReceived}): super._();
   
 
 @override final  String id;
@@ -238,6 +239,7 @@ class _Sale extends Sale {
 @override final  Money total;
 @override final  String status;
 @override final  DateTime createdAt;
+@override final  Money? cashReceived;
 
 /// Create a copy of Sale
 /// with the given fields replaced by the non-null parameter values.
@@ -249,18 +251,18 @@ _$SaleCopyWith<_Sale> get copyWith => __$SaleCopyWithImpl<_Sale>(this, _$identit
 
 @override
 bool operator ==(Object other) {
-    return identical(this, other) || (other.runtimeType == runtimeType&&other is _Sale&&(identical(other.id, id) || other.id == id)&&(identical(other.saleNumber, saleNumber) || other.saleNumber == saleNumber)&&(identical(other.userId, userId) || other.userId == userId)&&(identical(other.customerName, customerName) || other.customerName == customerName)&&(identical(other.customerPhone, customerPhone) || other.customerPhone == customerPhone)&&(identical(other.saleType, saleType) || other.saleType == saleType)&&(identical(other.paymentMethod, paymentMethod) || other.paymentMethod == paymentMethod)&&(identical(other.subtotal, subtotal) || other.subtotal == subtotal)&&(identical(other.discount, discount) || other.discount == discount)&&(identical(other.total, total) || other.total == total)&&(identical(other.status, status) || other.status == status)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is _Sale&&(identical(other.id, id) || other.id == id)&&(identical(other.saleNumber, saleNumber) || other.saleNumber == saleNumber)&&(identical(other.userId, userId) || other.userId == userId)&&(identical(other.customerName, customerName) || other.customerName == customerName)&&(identical(other.customerPhone, customerPhone) || other.customerPhone == customerPhone)&&(identical(other.saleType, saleType) || other.saleType == saleType)&&(identical(other.paymentMethod, paymentMethod) || other.paymentMethod == paymentMethod)&&(identical(other.subtotal, subtotal) || other.subtotal == subtotal)&&(identical(other.discount, discount) || other.discount == discount)&&(identical(other.total, total) || other.total == total)&&(identical(other.status, status) || other.status == status)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt)&&(identical(other.cashReceived, cashReceived) || other.cashReceived == cashReceived));
 }
 
 
 @override
 int get hashCode {
-    return Object.hash(runtimeType,id,saleNumber,userId,customerName,customerPhone,saleType,paymentMethod,subtotal,discount,total,status,createdAt);
+    return Object.hash(runtimeType,id,saleNumber,userId,customerName,customerPhone,saleType,paymentMethod,subtotal,discount,total,status,createdAt,cashReceived);
 }
 
 @override
 String toString() {
-    return 'Sale(id: $id, saleNumber: $saleNumber, userId: $userId, customerName: $customerName, customerPhone: $customerPhone, saleType: $saleType, paymentMethod: $paymentMethod, subtotal: $subtotal, discount: $discount, total: $total, status: $status, createdAt: $createdAt)';
+    return 'Sale(id: $id, saleNumber: $saleNumber, userId: $userId, customerName: $customerName, customerPhone: $customerPhone, saleType: $saleType, paymentMethod: $paymentMethod, subtotal: $subtotal, discount: $discount, total: $total, status: $status, createdAt: $createdAt, cashReceived: $cashReceived)';
 }
 
 
@@ -271,7 +273,7 @@ abstract mixin class _$SaleCopyWith<$Res> implements $SaleCopyWith<$Res> {
   factory _$SaleCopyWith(_Sale value, $Res Function(_Sale) _then) = __$SaleCopyWithImpl;
 @override @useResult
 $Res call({
- String id, String saleNumber, String userId, String customerName, String? customerPhone, String saleType, String paymentMethod, Money subtotal, Money discount, Money total, String status, DateTime createdAt
+ String id, String saleNumber, String userId, String customerName, String? customerPhone, String saleType, String paymentMethod, Money subtotal, Money discount, Money total, String status, DateTime createdAt, Money? cashReceived
 });
 
 
@@ -288,7 +290,7 @@ class __$SaleCopyWithImpl<$Res>
 
 /// Create a copy of Sale
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? saleNumber = null,Object? userId = null,Object? customerName = null,Object? customerPhone = freezed,Object? saleType = null,Object? paymentMethod = null,Object? subtotal = null,Object? discount = null,Object? total = null,Object? status = null,Object? createdAt = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? saleNumber = null,Object? userId = null,Object? customerName = null,Object? customerPhone = freezed,Object? saleType = null,Object? paymentMethod = null,Object? subtotal = null,Object? discount = null,Object? total = null,Object? status = null,Object? createdAt = null,Object? cashReceived = freezed,}) {
   return _then(_Sale(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,saleNumber: null == saleNumber ? _self.saleNumber : saleNumber // ignore: cast_nullable_to_non_nullable
@@ -302,7 +304,8 @@ as Money,discount: null == discount ? _self.discount : discount // ignore: cast_
 as Money,total: null == total ? _self.total : total // ignore: cast_nullable_to_non_nullable
 as Money,status: null == status ? _self.status : status // ignore: cast_nullable_to_non_nullable
 as String,createdAt: null == createdAt ? _self.createdAt : createdAt // ignore: cast_nullable_to_non_nullable
-as DateTime,
+as DateTime,cashReceived: freezed == cashReceived ? _self.cashReceived : cashReceived // ignore: cast_nullable_to_non_nullable
+as Money?,
   ));
 }
 

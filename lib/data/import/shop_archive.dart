@@ -133,7 +133,14 @@ class ShopArchive {
               throw FormatException('Invalid columns or duplicate IDs in $t.');
             }
             for (final entry in row.entries) {
-              if ((entry.key.endsWith('_cents') ||
+              // null is a legitimate value for a nullable int column
+              // (e.g. sales.cash_received_cents - "not recorded", never
+              // a real 0) - only a genuinely wrong type (a string, a
+              // double, ...) is invalid here. A null that lands on a
+              // NOT NULL column is still caught, just downstream at
+              // insertRow's own constraint instead of here.
+              if (entry.value != null &&
+                  (entry.key.endsWith('_cents') ||
                       [
                         'quantity',
                         'stock_qty',
