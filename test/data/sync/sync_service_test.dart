@@ -242,6 +242,165 @@ void main() {
       return query.getSingle();
     }
 
+    test('resumes staged pages and atomically applies out-of-order parents and stock', () async {
+      final data = await records();
+      await buildService(MockClient((_) async => throw StateError('unused'))).prepareJoinedShop();
+      var failSecond = true;
+      var starts = 0;
+      final cursors = <String>[];
+      final service = buildService(MockClient((request) async {
+        final action = request.url.queryParameters['action'];
+        const meta = {'success': true, 'snapshot_id': 'snapshot-test', 'high_water': 1000, 'total': 5};
+        if (action == 'start_sync_snapshot') { starts++; return http.Response(jsonEncode(meta), 200); }
+        if (action == 'discard_sync_snapshot') return http.Response('{"success":true}', 200);
+        final after = request.url.queryParameters['after']!;
+        cursors.add(after);
+        if (after == '2' && failSecond) throw http.ClientException('offline');
+        return http.Response(jsonEncode({...meta, 'changes': after == '0' ? data.take(2).toList() : data.skip(2).toList(),
+          'next_cursor': after == '0' ? 2 : 5, 'has_more': after == '0'}), 200);
+      }));
+      await expectLater(service.pullInitialSnapshot(configured.baseUrl, configured.apiKey), throwsA(isA<PaystackOfflineException>()));
+      expect(await db.select(db.products).get(), isEmpty);
+      expect(await syncMeta.lastPulledChangeId(), 0);
+      expect(await service.needsInitialPull, isTrue);
+      failSecond = false;
+      await service.pullInitialSnapshot(configured.baseUrl, configured.apiKey);
+      expect(starts, 1);
+      expect(cursors, ['0', '2', '2']);
+      expect((await db.select(db.products).getSingle()).stockQty, 7);
+      expect((await db.select(db.users).getSingle()).username, 'snapshot-user');
+      expect(await syncMeta.lastPulledChangeId(), 1000);
+      expect(await service.needsInitialPull, isFalse);
+      expect(service.progress.value.completed, 5);
+    });
+
+    test('a missing parent rolls back every applied record and the cursor', () async {
+      final data = await records();
+      data.removeAt(2);
+      final service = buildService(MockClient((request) async {
+        const meta = {'success': true, 'snapshot_id': 'bad-fk', 'high_water': 100, 'total': 4};
+        return http.Response(jsonEncode({...meta, if (request.url.queryParameters['action'] == 'pull_sync_snapshot')
+          ...{'changes': data, 'next_cursor': 5, 'has_more': false}}), 200);
+      }));
+      await service.prepareJoinedShop();
+      await expectLater(service.pullInitialSnapshot(configured.baseUrl, configured.apiKey), throwsA(anything));
+      expect(await db.select(db.products).get(), isEmpty);
+      expect(await db.select(db.users).get(), isEmpty);
+      expect(await syncMeta.lastPulledChangeId(), 0);
+      expect(await service.needsInitialPull, isTrue);
+    });
+
+    test('cannot snapshot an already-operating device', () async {
+      var requested = false;
+      final service = buildService(MockClient((_) async { requested = true; return http.Response('{}', 200); }));
+      await expectLater(service.pullInitialSnapshot(configured.baseUrl, configured.apiKey), throwsStateError);
+      expect(requested, isFalse);
+    });
+  });
+
+  group('pushLocalChanges', () {
+    test('does nothing when not configured, without touching the network', () async {
+      var called = false;
+      final service = SyncService(
+        db,
+        syncMeta,
+        PlatformSyncGateway(MockClient((request) async {
+          called = true;
+          throw StateError('should never be called');
+        })),
+        _FakeCredentialsService(const PaystackCredentials(baseUrl: '', apiKey: '', currency: 'KES', defaultEmail: 'x@y.com')),
+      );
+
+      await service.runSyncCycle();
+
+      expect(called, isFalse);
+    });
+
+    test('sends pending rows across tables in ascending local_rev order, not table-iteration order', () async {
+      final categoryRepository =
+          CategoryRepositoryImpl(db, db.categoriesDao, syncMeta, const SystemClock(), UuidIdGenerator());
+      final settingsRepository = BusinessSettingsRepositoryImpl(db, db.businessSettingsDao, syncMeta, const SystemClock());
+
+      // business_settings is seeded once at onCreate (an earlier rev
+      // than anything created here) - update it again so it gets a
+      // fresh, later rev than the category about to be created next.
+      final settings = await settingsRepository.get();
+      await settingsRepository.update(settings.copyWith(businessName: 'Updated Name'));
+      await categoryRepository.create(const Category(id: '', name: 'Drinks', status: 'active'));
+
+      // 'categories' iterates before 'business_settings' in
+      // syncTableAdapters (insertion order), but business_settings was
+      // updated FIRST here, so it has the lower local_rev - a naive
+      // per-table loop would emit categories first regardless, which is
+      // exactly the bug this test guards against.
+      List<Map<String, dynamic>>? pushedBatch;
+      final service = buildService(MockClient((request) async {
+        if (request.url.queryParameters['action'] == 'push_changes') {
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          pushedBatch = (body['changes'] as List).cast<Map<String, dynamic>>();
+          return http.Response(jsonEncode({'success': true, 'count': pushedBatch!.length}), 200);
+        }
+        throw StateError('unexpected request: ${request.url}');
+      }));
+
+      await service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+
+      expect(pushedBatch, isNotNull);
+      final revs = pushedBatch!.map((c) => c['local_rev'] as int).toList();
+      expect(revs, equals([...revs]..sort()), reason: 'push batch must be in ascending local_rev order');
+      final tableOrder = pushedBatch!.map((c) => c['table_name']).toList();
+      expect(tableOrder.indexOf('business_settings'), lessThan(tableOrder.indexOf('categories')),
+          reason: 'business_settings has the lower local_rev here and must be sent first despite iterating later');
+    });
+
+    test('advances the push cursor to the highest rev actually sent', () async {
+      final categoryRepository =
+          CategoryRepositoryImpl(db, db.categoriesDao, syncMeta, const SystemClock(), UuidIdGenerator());
+      await categoryRepository.create(const Category(id: '', name: 'Drinks', status: 'active'));
+      final expectedRev = await syncMeta.nextLocalRev() - 1;
+
+      final service = buildService(MockClient((request) async {
+        return http.Response(jsonEncode({'success': true, 'count': 1}), 200);
+      }));
+      await service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+
+      expect(await syncMeta.lastPushedLocalRev(), expectedRev);
+    });
+
+    test('splits large pushes into bounded batches and advances after each acknowledgement', () async {
+      final categoryRepository =
+          CategoryRepositoryImpl(db, db.categoriesDao, syncMeta, const SystemClock(), UuidIdGenerator());
+      for (var i = 0; i < 205; i++) {
+        await categoryRepository.create(Category(id: '', name: 'Category $i', status: 'active'));
+      }
+      final expectedRev = await syncMeta.nextLocalRev() - 1;
+      final batchSizes = <int>[];
+
+      final service = buildService(MockClient((request) async {
+        final body = jsonDecode(request.body) as Map<String, dynamic>;
+        final changes = body['changes'] as List;
+        batchSizes.add(changes.length);
+        return http.Response(jsonEncode({'success': true, 'count': changes.length}), 200);
+      }));
+
+      await service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+
+      expect(batchSizes.length, greaterThan(1));
+      expect(batchSizes.every((size) => size <= 200), isTrue);
+      expect(batchSizes.reduce((a, b) => a + b), greaterThanOrEqualTo(205));
+      expect(await syncMeta.lastPushedLocalRev(), expectedRev);
+    });
+  });
+
+  group('pullRemoteChanges - last-write-wins', () {
+    Future<drift_db.Category> seedLocalCategory() async {
+      final repo = CategoryRepositoryImpl(db, db.categoriesDao, syncMeta, const SystemClock(), UuidIdGenerator());
+      final id = UuidIdGenerator().newId();
+      await repo.create(Category(id: id, name: 'Original', status: 'active'));
+      final query = db.select(db.categories)..where((t) => t.id.equals(id));
+      return query.getSingle();
+    }
+
     PullResult onePage(Map<String, dynamic> payload, {int id = 1}) {
       return PullResult(
         changes: [PulledChange(id: id, tableName: 'categories', rowId: payload['id'] as String, payload: payload)],
