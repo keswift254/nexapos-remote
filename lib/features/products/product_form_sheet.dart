@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
@@ -234,6 +235,12 @@ class _ProductFormSheetState extends ConsumerState<ProductFormSheet> {
                   labelText: 'Barcode (optional)',
                   helperText: 'Scan it here, or type it in - lets this product be added to a sale by scanning.',
                 ),
+                keyboardType: TextInputType.number,
+                // Retail barcodes (EAN-8/13, UPC-A/E) are digits-only -
+                // restricting input to that both matches what a scanner
+                // actually sends and rules out a stray letter/symbol
+                // typo that would silently make this barcode unscannable.
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               ),
               if (!_isEdit) ...[
                 const SizedBox(height: 12),

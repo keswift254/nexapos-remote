@@ -127,4 +127,49 @@ void main() {
       expect(find.text('Still owed'), findsNothing);
     },
   );
+
+  testWidgets(
+    'entering exactly 0 is treated as "nothing entered", not a shortfall',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 2400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final db = AppDatabase(NativeDatabase.memory());
+      addTearDown(db.close);
+      final container = ProviderContainer(
+        overrides: [
+          sessionProvider.overrideWith(_Session.new),
+          appDatabaseProvider.overrideWithValue(db),
+        ],
+      );
+      addTearDown(container.dispose);
+      container.read(cartProvider.notifier).addManualItem(
+        name: 'Test item',
+        quantity: 1,
+        price: Money.fromMajor(15),
+      );
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: CartScreen()),
+        ),
+      );
+
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Cash received (optional)'),
+        '0',
+      );
+      await tester.pump();
+
+      expect(find.text('Still owed'), findsNothing);
+      expect(find.text('Change due'), findsNothing);
+      expect(find.textContaining('Send M-Pesa prompt'), findsNothing);
+      expect(
+        tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Complete Sale')).onPressed,
+        isNotNull,
+      );
+    },
+  );
 }

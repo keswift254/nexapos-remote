@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -7,6 +8,7 @@ import '../../domain/services/checkout_service.dart';
 import '../../domain/services/paystack_payment_service.dart';
 import '../../domain/services/session_service.dart';
 import '../dashboard/dashboard_screen.dart';
+import 'add_item_actions.dart';
 import 'cart_notifier.dart';
 import 'paystack_waiting_screen.dart';
 
@@ -39,13 +41,25 @@ class _CartScreenState extends ConsumerState<CartScreen> {
         ? ''
         : ref.read(cartProvider).cashReceived.toMajorDouble.toStringAsFixed(2),
   );
+  final _searchController = TextEditingController();
   bool _submitting = false;
 
   @override
   void dispose() {
     _discountController.dispose();
     _cashReceivedController.dispose();
+    _searchController.dispose();
     super.dispose();
+  }
+
+  /// Same shortcut NewSaleScreen offers, so a cashier mid-checkout who
+  /// realizes one more item is needed doesn't have to leave the cart to
+  /// go find it - findByBarcode is the only lookup available (unlike
+  /// NewSaleScreen, this screen has no product grid to filter by name).
+  Future<void> _handleSearchSubmitted(String value) async {
+    final added = await handleBarcodeSearchSubmitted(context, ref, value);
+    if (!added || !mounted) return;
+    _searchController.clear();
   }
 
   Future<void> _submit(
@@ -176,6 +190,36 @@ class _CartScreenState extends ConsumerState<CartScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _searchController,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    hintText: 'Scan a barcode to add an item...',
+                    prefixIcon: Icon(Icons.search),
+                    isDense: true,
+                  ),
+                  keyboardType: TextInputType.number,
+                  // Barcode-only here (unlike NewSaleScreen's search,
+                  // which also filters by product name) - retail
+                  // barcodes (EAN-8/13, UPC-A/E) are digits-only, so
+                  // this both matches what a scanner actually sends and
+                  // keeps a keyboard-wedge scan from racing a half-typed
+                  // name search into a lookup.
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  onSubmitted: _handleSearchSubmitted,
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.playlist_add),
+                tooltip: 'Add manual item',
+                onPressed: () => showAddManualItemDialog(context, ref),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
           if (cartState.isEmpty) const Text('Your cart is empty.'),
           for (var i = 0; i < cartState.items.length; i++)
             Card(
