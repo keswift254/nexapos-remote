@@ -115,6 +115,20 @@ class DashboardScreen extends ConsumerStatefulWidget {
 }
 
 class _DashboardScreenState extends ConsumerState<DashboardScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Landing on the dashboard - app cold start, or navigating back to
+    // it - is the moment an admin actually looks for "did my
+    // generator.html publish show up yet", so it gets its own check
+    // instead of waiting on app.dart's periodic timer (up to 2 minutes)
+    // or a background/resume cycle. Unawaited: this must never block
+    // first paint, and UpdateAvailabilityNotifier.check() already
+    // swallows its own errors, so a slow/cold platform host just means
+    // the banner updates a little later, not a stuck spinner anywhere.
+    unawaited(ref.read(updateAvailabilityProvider.notifier).check());
+  }
+
   void _handleSettingsAction(String action) {
     context.push(action);
   }
@@ -123,13 +137,18 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   /// button for the same thing Android's pull-to-refresh does below
   /// (`onRefresh: () async => ref.invalidate(dashboardDataProvider)`) -
   /// recompute the figures from the local database right now, on demand.
-  /// Deliberately local-only: pulling/pushing against the remote platform
-  /// is the periodic timer/app-resume sync's job (see app.dart), not
-  /// this button's - conflating the two made this feel broken whenever
-  /// the platform API's free-tier host happened to be cold, for a button
-  /// whose actual job never needed the network at all.
+  /// Deliberately local-only for the figures themselves: pulling/pushing
+  /// against the remote platform is the periodic timer/app-resume
+  /// sync's job (see app.dart), not this button's - conflating the two
+  /// made this feel broken whenever the platform API's free-tier host
+  /// happened to be cold, for a button whose actual job never needed
+  /// the network at all. The update check piggybacks here anyway
+  /// (unawaited, same reasoning as initState above) since a manual
+  /// refresh is also exactly when someone is checking "is this working
+  /// now" - it just doesn't get to slow this button down while it runs.
   void _refreshLocalFigures() {
     ref.invalidate(dashboardDataProvider);
+    unawaited(ref.read(updateAvailabilityProvider.notifier).check());
   }
 
   @override
@@ -236,7 +255,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       body: user == null
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
-              onRefresh: () async => ref.invalidate(dashboardDataProvider),
+              onRefresh: () async => _refreshLocalFigures(),
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
