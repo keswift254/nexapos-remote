@@ -1,6 +1,9 @@
+import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nexapos_mobile/core/providers.dart';
+import 'package:nexapos_mobile/data/local/database.dart' hide User;
 import 'package:nexapos_mobile/domain/entities/user.dart';
 import 'package:nexapos_mobile/domain/services/session_service.dart';
 import 'package:nexapos_mobile/features/checkout/cart_notifier.dart';
@@ -15,8 +18,19 @@ void main() {
   testWidgets(
     'checkout offers only Cash and M-Pesa Prompt, and ignores retired methods',
     (tester) async {
+      // CartNotifier now persists every change (see cart_notifier.dart) -
+      // an in-memory database keeps this test's several rapid-fire
+      // setPaymentMethod() calls (with no pump() between them) from ever
+      // touching the real default database, whose connection setup can
+      // still be mid-flight (and its Timer still pending) when the test
+      // ends and disposes the widget tree.
+      final db = AppDatabase(NativeDatabase.memory());
+      addTearDown(db.close);
       final container = ProviderContainer(
-        overrides: [sessionProvider.overrideWith(_Session.new)],
+        overrides: [
+          sessionProvider.overrideWith(_Session.new),
+          appDatabaseProvider.overrideWithValue(db),
+        ],
       );
       addTearDown(container.dispose);
       await tester.pumpWidget(

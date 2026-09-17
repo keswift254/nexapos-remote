@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/utils/money.dart';
+import '../../data/repositories/product_repository_impl.dart' show productRepositoryProvider;
 import '../products/products_screen.dart' show allProductsProvider;
 import 'cart_notifier.dart';
 
@@ -18,6 +19,37 @@ class NewSaleScreen extends ConsumerStatefulWidget {
 
 class _NewSaleScreenState extends ConsumerState<NewSaleScreen> {
   String _query = '';
+  final _searchController = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  /// Fires on Enter, which is exactly how a keyboard-wedge barcode
+  /// scanner (the standard, driver-free kind that types the decoded
+  /// digits then a return keystroke, on both Windows and Android) hands
+  /// off a scan - no separate "scan mode" toggle needed, the same
+  /// search box a cashier can also just type a product name into.
+  Future<void> _handleSearchSubmitted(String value) async {
+    final code = value.trim();
+    if (code.isEmpty) return;
+    final product = await ref.read(productRepositoryProvider).findByBarcode(code);
+    if (!mounted) return;
+    if (product == null || !product.isActive) {
+      // Not a recognized barcode - leave it as an ordinary (now
+      // committed) name search; _query is already updated live via
+      // onChanged, so there's nothing further to do here.
+      return;
+    }
+    ref.read(cartProvider.notifier).addProduct(product);
+    _searchController.clear();
+    setState(() => _query = '');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Added "${product.name}" from barcode scan.'), duration: const Duration(seconds: 1)),
+    );
+  }
 
   Future<void> _addManualItem(BuildContext context, WidgetRef ref) async {
     final nameController = TextEditingController();
@@ -101,13 +133,15 @@ class _NewSaleScreenState extends ConsumerState<NewSaleScreen> {
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             child: TextField(
+              controller: _searchController,
               decoration: const InputDecoration(
-                hintText: 'Search products...',
+                hintText: 'Search products, or scan a barcode...',
                 prefixIcon: Icon(Icons.search),
                 filled: true,
                 isDense: true,
               ),
               onChanged: (value) => setState(() => _query = value.trim().toLowerCase()),
+              onSubmitted: _handleSearchSubmitted,
             ),
           ),
         ),

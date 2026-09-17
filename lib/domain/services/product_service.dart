@@ -43,6 +43,7 @@ class ProductService {
     int reorderLevel = 0,
     int initialStockQty = 0,
     String? imagePath,
+    String? barcode,
     String? userId,
   }) async {
     if (name.trim().isEmpty) return const Result.failure('Enter a product name.');
@@ -55,6 +56,13 @@ class ProductService {
     if (existing != null) {
       return const Result.failure('A product with that name already exists in this category.');
     }
+    final trimmedBarcode = barcode?.trim();
+    if (trimmedBarcode != null && trimmedBarcode.isNotEmpty) {
+      final barcodeOwner = await _repository.findByBarcode(trimmedBarcode);
+      if (barcodeOwner != null) {
+        return Result.failure('"${barcodeOwner.name}" already uses that barcode.');
+      }
+    }
 
     final sku = await SkuGenerator.generate(name, _repository, _idGenerator);
     final product = Product(
@@ -63,6 +71,7 @@ class ProductService {
       name: name.trim(),
       categoryId: categoryId,
       imagePath: imagePath,
+      barcode: (trimmedBarcode == null || trimmedBarcode.isEmpty) ? null : trimmedBarcode,
       retailPrice: retailPrice,
       wholesalePrice: wholesalePrice,
       costPrice: costPrice,
@@ -101,6 +110,7 @@ class ProductService {
     required Money costPrice,
     required int reorderLevel,
     String? imagePath,
+    String? barcode,
   }) async {
     if (name.trim().isEmpty) return const Result.failure('Enter a product name.');
     final existing = await _repository.findById(id);
@@ -109,6 +119,14 @@ class ProductService {
     final nameOwner = await _repository.findByNameAndCategory(name.trim(), categoryId);
     if (nameOwner != null && nameOwner.id != id) {
       return const Result.failure('A product with that name already exists in this category.');
+    }
+    final trimmedBarcode = barcode?.trim();
+    final normalizedBarcode = (trimmedBarcode == null || trimmedBarcode.isEmpty) ? null : trimmedBarcode;
+    if (normalizedBarcode != null) {
+      final barcodeOwner = await _repository.findByBarcode(normalizedBarcode);
+      if (barcodeOwner != null && barcodeOwner.id != id) {
+        return Result.failure('"${barcodeOwner.name}" already uses that barcode.');
+      }
     }
 
     final updated = existing.copyWith(
@@ -119,6 +137,7 @@ class ProductService {
       costPrice: costPrice,
       reorderLevel: reorderLevel,
       imagePath: imagePath,
+      barcode: normalizedBarcode,
     );
     await _repository.update(updated);
     return Result.ok(updated);

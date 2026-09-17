@@ -29,6 +29,13 @@ class ReportSaleRow {
   /// falls back to the sale number for.
   final String? itemNames;
 
+  /// Only ever set for paymentMethod=='cash' (the cashier's own tendered
+  /// amount) or a split paymentMethod=='paystack' sale (the cash portion
+  /// collected before the M-Pesa gateway charge covered the rest) - see
+  /// Sale.isSplitPayment/gatewayPortion, which this mirrors for the
+  /// report's cash-vs-M-Pesa split totals.
+  final int? cashReceivedCents;
+
   const ReportSaleRow({
     required this.id,
     required this.saleNumber,
@@ -39,7 +46,28 @@ class ReportSaleRow {
     required this.totalCents,
     required this.createdAt,
     required this.itemNames,
+    required this.cashReceivedCents,
   });
+
+  static const _mpesaFamily = {'paystack', 'mpesa', 'mpesa_manual', 'intasend'};
+
+  /// The portion of this sale actually paid in cash - the whole total
+  /// for a plain cash sale, or just the recorded cash-received amount
+  /// for a split cash+M-Pesa sale, or zero for anything else.
+  int get cashPortionCents {
+    if (paymentMethod == 'cash') return totalCents;
+    if (_mpesaFamily.contains(paymentMethod)) return cashReceivedCents ?? 0;
+    return 0;
+  }
+
+  /// The portion of this sale settled via an M-Pesa-family gateway -
+  /// the whole total for a plain paystack/mpesa/intasend sale, or just
+  /// the gateway portion (total minus cash already collected) for a
+  /// split sale.
+  int get mpesaPortionCents {
+    if (!_mpesaFamily.contains(paymentMethod)) return 0;
+    return totalCents - (cashReceivedCents ?? 0);
+  }
 }
 
 class ReportExpenseRow {
@@ -138,6 +166,7 @@ class ReportsDao extends DatabaseAccessor<AppDatabase> with _$ReportsDaoMixin {
         s.status AS status,
         s.total_cents AS total_cents,
         s.created_at AS created_at,
+        s.cash_received_cents AS cash_received_cents,
         GROUP_CONCAT(si.item_name || ' x' || si.quantity, ', ') AS item_names
       FROM sales s
       JOIN users u ON u.id = s.user_id
@@ -160,6 +189,7 @@ class ReportsDao extends DatabaseAccessor<AppDatabase> with _$ReportsDaoMixin {
               totalCents: row.read<int>('total_cents'),
               createdAt: row.read<String>('created_at'),
               itemNames: row.readNullable<String>('item_names'),
+              cashReceivedCents: row.readNullable<int>('cash_received_cents'),
             ))
         .toList();
   }

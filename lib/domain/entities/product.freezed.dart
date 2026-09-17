@@ -15,7 +15,7 @@ T _$identity<T>(T value) => value;
 /// @nodoc
 mixin _$Product {
 
- String get id; String get sku; String get name; String get categoryId; String? get imagePath; Money get retailPrice; Money get wholesalePrice; Money get costPrice; int get stockQty; int get reorderLevel; String get status;
+ String get id; String get sku; String get name; String get categoryId; String? get imagePath; String? get barcode; Money get retailPrice; Money get wholesalePrice; Money get costPrice; int get stockQty; int get reorderLevel; String get status;
 /// Create a copy of Product
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -27,20 +27,20 @@ $ProductCopyWith<Product> get copyWith => _$ProductCopyWithImpl<Product>(this as
 @override
 bool operator ==(Object other) {
   final _this = this as Product;
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is Product&&(identical(other.id, _this.id) || other.id == _this.id)&&(identical(other.sku, _this.sku) || other.sku == _this.sku)&&(identical(other.name, _this.name) || other.name == _this.name)&&(identical(other.categoryId, _this.categoryId) || other.categoryId == _this.categoryId)&&(identical(other.imagePath, _this.imagePath) || other.imagePath == _this.imagePath)&&(identical(other.retailPrice, _this.retailPrice) || other.retailPrice == _this.retailPrice)&&(identical(other.wholesalePrice, _this.wholesalePrice) || other.wholesalePrice == _this.wholesalePrice)&&(identical(other.costPrice, _this.costPrice) || other.costPrice == _this.costPrice)&&(identical(other.stockQty, _this.stockQty) || other.stockQty == _this.stockQty)&&(identical(other.reorderLevel, _this.reorderLevel) || other.reorderLevel == _this.reorderLevel)&&(identical(other.status, _this.status) || other.status == _this.status));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is Product&&(identical(other.id, _this.id) || other.id == _this.id)&&(identical(other.sku, _this.sku) || other.sku == _this.sku)&&(identical(other.name, _this.name) || other.name == _this.name)&&(identical(other.categoryId, _this.categoryId) || other.categoryId == _this.categoryId)&&(identical(other.imagePath, _this.imagePath) || other.imagePath == _this.imagePath)&&(identical(other.barcode, _this.barcode) || other.barcode == _this.barcode)&&(identical(other.retailPrice, _this.retailPrice) || other.retailPrice == _this.retailPrice)&&(identical(other.wholesalePrice, _this.wholesalePrice) || other.wholesalePrice == _this.wholesalePrice)&&(identical(other.costPrice, _this.costPrice) || other.costPrice == _this.costPrice)&&(identical(other.stockQty, _this.stockQty) || other.stockQty == _this.stockQty)&&(identical(other.reorderLevel, _this.reorderLevel) || other.reorderLevel == _this.reorderLevel)&&(identical(other.status, _this.status) || other.status == _this.status));
 }
 
 
 @override
 int get hashCode {
   final _this = this as Product;
-  return Object.hash(runtimeType,_this.id,_this.sku,_this.name,_this.categoryId,_this.imagePath,_this.retailPrice,_this.wholesalePrice,_this.costPrice,_this.stockQty,_this.reorderLevel,_this.status);
+  return Object.hash(runtimeType,_this.id,_this.sku,_this.name,_this.categoryId,_this.imagePath,_this.barcode,_this.retailPrice,_this.wholesalePrice,_this.costPrice,_this.stockQty,_this.reorderLevel,_this.status);
 }
 
 @override
 String toString() {
   final _this = this as Product;
-  return 'Product(id: ${_this.id}, sku: ${_this.sku}, name: ${_this.name}, categoryId: ${_this.categoryId}, imagePath: ${_this.imagePath}, retailPrice: ${_this.retailPrice}, wholesalePrice: ${_this.wholesalePrice}, costPrice: ${_this.costPrice}, stockQty: ${_this.stockQty}, reorderLevel: ${_this.reorderLevel}, status: ${_this.status})';
+  return 'Product(id: ${_this.id}, sku: ${_this.sku}, name: ${_this.name}, categoryId: ${_this.categoryId}, imagePath: ${_this.imagePath}, barcode: ${_this.barcode}, retailPrice: ${_this.retailPrice}, wholesalePrice: ${_this.wholesalePrice}, costPrice: ${_this.costPrice}, stockQty: ${_this.stockQty}, reorderLevel: ${_this.reorderLevel}, status: ${_this.status})';
 }
 
 
@@ -51,7 +51,7 @@ abstract mixin class $ProductCopyWith<$Res>  {
   factory $ProductCopyWith(Product value, $Res Function(Product) _then) = _$ProductCopyWithImpl;
 @useResult
 $Res call({
- String id, String sku, String name, String categoryId, String? imagePath, Money retailPrice, Money wholesalePrice, Money costPrice, int stockQty, int reorderLevel, String status
+ String id, String sku, String name, String categoryId, String? imagePath, String? barcode, Money retailPrice, Money wholesalePrice, Money costPrice, int stockQty, int reorderLevel, String status
 });
 
 
@@ -68,13 +68,14 @@ class _$ProductCopyWithImpl<$Res>
 
 /// Create a copy of Product
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? sku = null,Object? name = null,Object? categoryId = null,Object? imagePath = freezed,Object? retailPrice = null,Object? wholesalePrice = null,Object? costPrice = null,Object? stockQty = null,Object? reorderLevel = null,Object? status = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? sku = null,Object? name = null,Object? categoryId = null,Object? imagePath = freezed,Object? barcode = freezed,Object? retailPrice = null,Object? wholesalePrice = null,Object? costPrice = null,Object? stockQty = null,Object? reorderLevel = null,Object? status = null,}) {
   return _then(Product(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,sku: null == sku ? _self.sku : sku // ignore: cast_nullable_to_non_nullable
 as String,name: null == name ? _self.name : name // ignore: cast_nullable_to_non_nullable
 as String,categoryId: null == categoryId ? _self.categoryId : categoryId // ignore: cast_nullable_to_non_nullable
 as String,imagePath: freezed == imagePath ? _self.imagePath : imagePath // ignore: cast_nullable_to_non_nullable
+as String?,barcode: freezed == barcode ? _self.barcode : barcode // ignore: cast_nullable_to_non_nullable
 as String?,retailPrice: null == retailPrice ? _self.retailPrice : retailPrice // ignore: cast_nullable_to_non_nullable
 as Money,wholesalePrice: null == wholesalePrice ? _self.wholesalePrice : wholesalePrice // ignore: cast_nullable_to_non_nullable
 as Money,costPrice: null == costPrice ? _self.costPrice : costPrice // ignore: cast_nullable_to_non_nullable
@@ -166,10 +167,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String sku,  String name,  String categoryId,  String? imagePath,  Money retailPrice,  Money wholesalePrice,  Money costPrice,  int stockQty,  int reorderLevel,  String status)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String sku,  String name,  String categoryId,  String? imagePath,  String? barcode,  Money retailPrice,  Money wholesalePrice,  Money costPrice,  int stockQty,  int reorderLevel,  String status)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _Product() when $default != null:
-return $default(_that.id,_that.sku,_that.name,_that.categoryId,_that.imagePath,_that.retailPrice,_that.wholesalePrice,_that.costPrice,_that.stockQty,_that.reorderLevel,_that.status);case _:
+return $default(_that.id,_that.sku,_that.name,_that.categoryId,_that.imagePath,_that.barcode,_that.retailPrice,_that.wholesalePrice,_that.costPrice,_that.stockQty,_that.reorderLevel,_that.status);case _:
   return orElse();
 
 }
@@ -187,10 +188,10 @@ return $default(_that.id,_that.sku,_that.name,_that.categoryId,_that.imagePath,_
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String sku,  String name,  String categoryId,  String? imagePath,  Money retailPrice,  Money wholesalePrice,  Money costPrice,  int stockQty,  int reorderLevel,  String status)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String sku,  String name,  String categoryId,  String? imagePath,  String? barcode,  Money retailPrice,  Money wholesalePrice,  Money costPrice,  int stockQty,  int reorderLevel,  String status)  $default,) {final _that = this;
 switch (_that) {
 case _Product():
-return $default(_that.id,_that.sku,_that.name,_that.categoryId,_that.imagePath,_that.retailPrice,_that.wholesalePrice,_that.costPrice,_that.stockQty,_that.reorderLevel,_that.status);case _:
+return $default(_that.id,_that.sku,_that.name,_that.categoryId,_that.imagePath,_that.barcode,_that.retailPrice,_that.wholesalePrice,_that.costPrice,_that.stockQty,_that.reorderLevel,_that.status);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -207,10 +208,10 @@ return $default(_that.id,_that.sku,_that.name,_that.categoryId,_that.imagePath,_
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String sku,  String name,  String categoryId,  String? imagePath,  Money retailPrice,  Money wholesalePrice,  Money costPrice,  int stockQty,  int reorderLevel,  String status)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String sku,  String name,  String categoryId,  String? imagePath,  String? barcode,  Money retailPrice,  Money wholesalePrice,  Money costPrice,  int stockQty,  int reorderLevel,  String status)?  $default,) {final _that = this;
 switch (_that) {
 case _Product() when $default != null:
-return $default(_that.id,_that.sku,_that.name,_that.categoryId,_that.imagePath,_that.retailPrice,_that.wholesalePrice,_that.costPrice,_that.stockQty,_that.reorderLevel,_that.status);case _:
+return $default(_that.id,_that.sku,_that.name,_that.categoryId,_that.imagePath,_that.barcode,_that.retailPrice,_that.wholesalePrice,_that.costPrice,_that.stockQty,_that.reorderLevel,_that.status);case _:
   return null;
 
 }
@@ -222,7 +223,7 @@ return $default(_that.id,_that.sku,_that.name,_that.categoryId,_that.imagePath,_
 
 
 class _Product extends Product {
-  const _Product({required this.id, required this.sku, required this.name, required this.categoryId, this.imagePath, required this.retailPrice, required this.wholesalePrice, required this.costPrice, required this.stockQty, required this.reorderLevel, required this.status}): super._();
+  const _Product({required this.id, required this.sku, required this.name, required this.categoryId, this.imagePath, this.barcode, required this.retailPrice, required this.wholesalePrice, required this.costPrice, required this.stockQty, required this.reorderLevel, required this.status}): super._();
   
 
 @override final  String id;
@@ -230,6 +231,7 @@ class _Product extends Product {
 @override final  String name;
 @override final  String categoryId;
 @override final  String? imagePath;
+@override final  String? barcode;
 @override final  Money retailPrice;
 @override final  Money wholesalePrice;
 @override final  Money costPrice;
@@ -247,18 +249,18 @@ _$ProductCopyWith<_Product> get copyWith => __$ProductCopyWithImpl<_Product>(thi
 
 @override
 bool operator ==(Object other) {
-    return identical(this, other) || (other.runtimeType == runtimeType&&other is _Product&&(identical(other.id, id) || other.id == id)&&(identical(other.sku, sku) || other.sku == sku)&&(identical(other.name, name) || other.name == name)&&(identical(other.categoryId, categoryId) || other.categoryId == categoryId)&&(identical(other.imagePath, imagePath) || other.imagePath == imagePath)&&(identical(other.retailPrice, retailPrice) || other.retailPrice == retailPrice)&&(identical(other.wholesalePrice, wholesalePrice) || other.wholesalePrice == wholesalePrice)&&(identical(other.costPrice, costPrice) || other.costPrice == costPrice)&&(identical(other.stockQty, stockQty) || other.stockQty == stockQty)&&(identical(other.reorderLevel, reorderLevel) || other.reorderLevel == reorderLevel)&&(identical(other.status, status) || other.status == status));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is _Product&&(identical(other.id, id) || other.id == id)&&(identical(other.sku, sku) || other.sku == sku)&&(identical(other.name, name) || other.name == name)&&(identical(other.categoryId, categoryId) || other.categoryId == categoryId)&&(identical(other.imagePath, imagePath) || other.imagePath == imagePath)&&(identical(other.barcode, barcode) || other.barcode == barcode)&&(identical(other.retailPrice, retailPrice) || other.retailPrice == retailPrice)&&(identical(other.wholesalePrice, wholesalePrice) || other.wholesalePrice == wholesalePrice)&&(identical(other.costPrice, costPrice) || other.costPrice == costPrice)&&(identical(other.stockQty, stockQty) || other.stockQty == stockQty)&&(identical(other.reorderLevel, reorderLevel) || other.reorderLevel == reorderLevel)&&(identical(other.status, status) || other.status == status));
 }
 
 
 @override
 int get hashCode {
-    return Object.hash(runtimeType,id,sku,name,categoryId,imagePath,retailPrice,wholesalePrice,costPrice,stockQty,reorderLevel,status);
+    return Object.hash(runtimeType,id,sku,name,categoryId,imagePath,barcode,retailPrice,wholesalePrice,costPrice,stockQty,reorderLevel,status);
 }
 
 @override
 String toString() {
-    return 'Product(id: $id, sku: $sku, name: $name, categoryId: $categoryId, imagePath: $imagePath, retailPrice: $retailPrice, wholesalePrice: $wholesalePrice, costPrice: $costPrice, stockQty: $stockQty, reorderLevel: $reorderLevel, status: $status)';
+    return 'Product(id: $id, sku: $sku, name: $name, categoryId: $categoryId, imagePath: $imagePath, barcode: $barcode, retailPrice: $retailPrice, wholesalePrice: $wholesalePrice, costPrice: $costPrice, stockQty: $stockQty, reorderLevel: $reorderLevel, status: $status)';
 }
 
 
@@ -269,7 +271,7 @@ abstract mixin class _$ProductCopyWith<$Res> implements $ProductCopyWith<$Res> {
   factory _$ProductCopyWith(_Product value, $Res Function(_Product) _then) = __$ProductCopyWithImpl;
 @override @useResult
 $Res call({
- String id, String sku, String name, String categoryId, String? imagePath, Money retailPrice, Money wholesalePrice, Money costPrice, int stockQty, int reorderLevel, String status
+ String id, String sku, String name, String categoryId, String? imagePath, String? barcode, Money retailPrice, Money wholesalePrice, Money costPrice, int stockQty, int reorderLevel, String status
 });
 
 
@@ -286,13 +288,14 @@ class __$ProductCopyWithImpl<$Res>
 
 /// Create a copy of Product
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? sku = null,Object? name = null,Object? categoryId = null,Object? imagePath = freezed,Object? retailPrice = null,Object? wholesalePrice = null,Object? costPrice = null,Object? stockQty = null,Object? reorderLevel = null,Object? status = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? sku = null,Object? name = null,Object? categoryId = null,Object? imagePath = freezed,Object? barcode = freezed,Object? retailPrice = null,Object? wholesalePrice = null,Object? costPrice = null,Object? stockQty = null,Object? reorderLevel = null,Object? status = null,}) {
   return _then(_Product(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,sku: null == sku ? _self.sku : sku // ignore: cast_nullable_to_non_nullable
 as String,name: null == name ? _self.name : name // ignore: cast_nullable_to_non_nullable
 as String,categoryId: null == categoryId ? _self.categoryId : categoryId // ignore: cast_nullable_to_non_nullable
 as String,imagePath: freezed == imagePath ? _self.imagePath : imagePath // ignore: cast_nullable_to_non_nullable
+as String?,barcode: freezed == barcode ? _self.barcode : barcode // ignore: cast_nullable_to_non_nullable
 as String?,retailPrice: null == retailPrice ? _self.retailPrice : retailPrice // ignore: cast_nullable_to_non_nullable
 as Money,wholesalePrice: null == wholesalePrice ? _self.wholesalePrice : wholesalePrice // ignore: cast_nullable_to_non_nullable
 as Money,costPrice: null == costPrice ? _self.costPrice : costPrice // ignore: cast_nullable_to_non_nullable

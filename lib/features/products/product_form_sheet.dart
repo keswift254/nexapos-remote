@@ -33,6 +33,7 @@ class _ProductFormSheetState extends ConsumerState<ProductFormSheet> {
       TextEditingController(text: widget.existing?.costPrice.toMajorDouble.toStringAsFixed(2));
   late final _reorderController =
       TextEditingController(text: (widget.existing?.reorderLevel ?? 0).toString());
+  late final _barcodeController = TextEditingController(text: widget.existing?.barcode);
   final _initialStockController = TextEditingController(text: '0');
   String? _categoryId;
   String? _imagePath;
@@ -55,6 +56,7 @@ class _ProductFormSheetState extends ConsumerState<ProductFormSheet> {
     _wholesaleController.dispose();
     _costController.dispose();
     _reorderController.dispose();
+    _barcodeController.dispose();
     _initialStockController.dispose();
     super.dispose();
   }
@@ -110,6 +112,7 @@ class _ProductFormSheetState extends ConsumerState<ProductFormSheet> {
             costPrice: cost,
             reorderLevel: int.tryParse(_reorderController.text) ?? 0,
             imagePath: _imagePath,
+            barcode: _barcodeController.text,
           )
         : await service.create(
             name: _nameController.text,
@@ -120,6 +123,7 @@ class _ProductFormSheetState extends ConsumerState<ProductFormSheet> {
             reorderLevel: int.tryParse(_reorderController.text) ?? 0,
             initialStockQty: int.tryParse(_initialStockController.text) ?? 0,
             imagePath: _imagePath,
+            barcode: _barcodeController.text,
           );
 
     result.when(
@@ -222,6 +226,14 @@ class _ProductFormSheetState extends ConsumerState<ProductFormSheet> {
                     ),
                   ),
                 ],
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _barcodeController,
+                decoration: const InputDecoration(
+                  labelText: 'Barcode (optional)',
+                  helperText: 'Scan it here, or type it in - lets this product be added to a sale by scanning.',
+                ),
               ),
               if (!_isEdit) ...[
                 const SizedBox(height: 12),

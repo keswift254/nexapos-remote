@@ -7,6 +7,11 @@ abstract class ProductRepository {
 
   Future<Product?> findBySku(String sku);
 
+  /// Looks up the product a barcode scan (or manual entry) resolved to
+  /// - the read side of the cart's "scan to add" flow. Null for a
+  /// barcode with no matching, not-deleted product.
+  Future<Product?> findByBarcode(String barcode);
+
   Future<Product?> findByNameAndCategory(String name, String categoryId);
 
   /// Inserts a new product row with stock_qty always 0, regardless of

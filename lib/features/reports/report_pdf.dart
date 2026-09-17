@@ -132,6 +132,8 @@ Future<Uint8List> buildReportPdf({
               money(data.salesTotal.cents),
               bold: true,
             ),
+            totalLine('Total Cash Received', money(data.cashReceivedTotal.cents)),
+            totalLine('Total Paid by M-Pesa', money(data.mpesaTotal.cents)),
             pw.SizedBox(height: 5),
             sectionHeader('Expenses'),
             if (data.expenses.isEmpty) line('', 'No expenses', money(0)),

@@ -68,7 +68,7 @@ class PaystackPaymentService {
   }) async {
     final credentials = await _credentials.load();
     if (!credentials.isConfigured) {
-      return const Result.failure('Paystack is not set up yet. Complete Payment Settings first.');
+      return const Result.failure('Payment collection is not set up yet. Complete Payment Settings first.');
     }
 
     final totalsResult = await _checkoutService.previewTotals(cart, discount);

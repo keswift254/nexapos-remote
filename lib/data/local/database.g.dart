@@ -2057,6 +2057,17 @@ class $ProductsTable extends Products with TableInfo<$ProductsTable, Product> {
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _barcodeMeta = const VerificationMeta(
+    'barcode',
+  );
+  @override
+  late final GeneratedColumn<String> barcode = GeneratedColumn<String>(
+    'barcode',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _retailPriceCentsMeta = const VerificationMeta(
     'retailPriceCents',
   );
@@ -2136,6 +2147,7 @@ class $ProductsTable extends Products with TableInfo<$ProductsTable, Product> {
     name,
     categoryId,
     imagePath,
+    barcode,
     retailPriceCents,
     wholesalePriceCents,
     costPriceCents,
@@ -2235,6 +2247,12 @@ class $ProductsTable extends Products with TableInfo<$ProductsTable, Product> {
       context.handle(
         _imagePathMeta,
         imagePath.isAcceptableOrUnknown(data['image_path']!, _imagePathMeta),
+      );
+    }
+    if (data.containsKey('barcode')) {
+      context.handle(
+        _barcodeMeta,
+        barcode.isAcceptableOrUnknown(data['barcode']!, _barcodeMeta),
       );
     }
     if (data.containsKey('retail_price_cents')) {
@@ -2344,6 +2362,10 @@ class $ProductsTable extends Products with TableInfo<$ProductsTable, Product> {
         DriftSqlType.string,
         data['${effectivePrefix}image_path'],
       ),
+      barcode: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}barcode'],
+      ),
       retailPriceCents: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
         data['${effectivePrefix}retail_price_cents'],
@@ -2389,6 +2411,7 @@ class Product extends DataClass implements Insertable<Product> {
   final String name;
   final String categoryId;
   final String? imagePath;
+  final String? barcode;
   final int retailPriceCents;
   final int wholesalePriceCents;
   final int costPriceCents;
@@ -2407,6 +2430,7 @@ class Product extends DataClass implements Insertable<Product> {
     required this.name,
     required this.categoryId,
     this.imagePath,
+    this.barcode,
     required this.retailPriceCents,
     required this.wholesalePriceCents,
     required this.costPriceCents,
@@ -2431,6 +2455,9 @@ class Product extends DataClass implements Insertable<Product> {
     map['category_id'] = Variable<String>(categoryId);
     if (!nullToAbsent || imagePath != null) {
       map['image_path'] = Variable<String>(imagePath);
+    }
+    if (!nullToAbsent || barcode != null) {
+      map['barcode'] = Variable<String>(barcode);
     }
     map['retail_price_cents'] = Variable<int>(retailPriceCents);
     map['wholesale_price_cents'] = Variable<int>(wholesalePriceCents);
@@ -2458,6 +2485,9 @@ class Product extends DataClass implements Insertable<Product> {
       imagePath: imagePath == null && nullToAbsent
           ? const Value.absent()
           : Value(imagePath),
+      barcode: barcode == null && nullToAbsent
+          ? const Value.absent()
+          : Value(barcode),
       retailPriceCents: Value(retailPriceCents),
       wholesalePriceCents: Value(wholesalePriceCents),
       costPriceCents: Value(costPriceCents),
@@ -2484,6 +2514,7 @@ class Product extends DataClass implements Insertable<Product> {
       name: serializer.fromJson<String>(json['name']),
       categoryId: serializer.fromJson<String>(json['categoryId']),
       imagePath: serializer.fromJson<String?>(json['imagePath']),
+      barcode: serializer.fromJson<String?>(json['barcode']),
       retailPriceCents: serializer.fromJson<int>(json['retailPriceCents']),
       wholesalePriceCents: serializer.fromJson<int>(
         json['wholesalePriceCents'],
@@ -2509,6 +2540,7 @@ class Product extends DataClass implements Insertable<Product> {
       'name': serializer.toJson<String>(name),
       'categoryId': serializer.toJson<String>(categoryId),
       'imagePath': serializer.toJson<String?>(imagePath),
+      'barcode': serializer.toJson<String?>(barcode),
       'retailPriceCents': serializer.toJson<int>(retailPriceCents),
       'wholesalePriceCents': serializer.toJson<int>(wholesalePriceCents),
       'costPriceCents': serializer.toJson<int>(costPriceCents),
@@ -2530,6 +2562,7 @@ class Product extends DataClass implements Insertable<Product> {
     String? name,
     String? categoryId,
     Value<String?> imagePath = const Value.absent(),
+    Value<String?> barcode = const Value.absent(),
     int? retailPriceCents,
     int? wholesalePriceCents,
     int? costPriceCents,
@@ -2548,6 +2581,7 @@ class Product extends DataClass implements Insertable<Product> {
     name: name ?? this.name,
     categoryId: categoryId ?? this.categoryId,
     imagePath: imagePath.present ? imagePath.value : this.imagePath,
+    barcode: barcode.present ? barcode.value : this.barcode,
     retailPriceCents: retailPriceCents ?? this.retailPriceCents,
     wholesalePriceCents: wholesalePriceCents ?? this.wholesalePriceCents,
     costPriceCents: costPriceCents ?? this.costPriceCents,
@@ -2572,6 +2606,7 @@ class Product extends DataClass implements Insertable<Product> {
           ? data.categoryId.value
           : this.categoryId,
       imagePath: data.imagePath.present ? data.imagePath.value : this.imagePath,
+      barcode: data.barcode.present ? data.barcode.value : this.barcode,
       retailPriceCents: data.retailPriceCents.present
           ? data.retailPriceCents.value
           : this.retailPriceCents,
@@ -2603,6 +2638,7 @@ class Product extends DataClass implements Insertable<Product> {
           ..write('name: $name, ')
           ..write('categoryId: $categoryId, ')
           ..write('imagePath: $imagePath, ')
+          ..write('barcode: $barcode, ')
           ..write('retailPriceCents: $retailPriceCents, ')
           ..write('wholesalePriceCents: $wholesalePriceCents, ')
           ..write('costPriceCents: $costPriceCents, ')
@@ -2626,6 +2662,7 @@ class Product extends DataClass implements Insertable<Product> {
     name,
     categoryId,
     imagePath,
+    barcode,
     retailPriceCents,
     wholesalePriceCents,
     costPriceCents,
@@ -2648,6 +2685,7 @@ class Product extends DataClass implements Insertable<Product> {
           other.name == this.name &&
           other.categoryId == this.categoryId &&
           other.imagePath == this.imagePath &&
+          other.barcode == this.barcode &&
           other.retailPriceCents == this.retailPriceCents &&
           other.wholesalePriceCents == this.wholesalePriceCents &&
           other.costPriceCents == this.costPriceCents &&
@@ -2668,6 +2706,7 @@ class ProductsCompanion extends UpdateCompanion<Product> {
   final Value<String> name;
   final Value<String> categoryId;
   final Value<String?> imagePath;
+  final Value<String?> barcode;
   final Value<int> retailPriceCents;
   final Value<int> wholesalePriceCents;
   final Value<int> costPriceCents;
@@ -2687,6 +2726,7 @@ class ProductsCompanion extends UpdateCompanion<Product> {
     this.name = const Value.absent(),
     this.categoryId = const Value.absent(),
     this.imagePath = const Value.absent(),
+    this.barcode = const Value.absent(),
     this.retailPriceCents = const Value.absent(),
     this.wholesalePriceCents = const Value.absent(),
     this.costPriceCents = const Value.absent(),
@@ -2707,6 +2747,7 @@ class ProductsCompanion extends UpdateCompanion<Product> {
     required String name,
     required String categoryId,
     this.imagePath = const Value.absent(),
+    this.barcode = const Value.absent(),
     required int retailPriceCents,
     required int wholesalePriceCents,
     required int costPriceCents,
@@ -2737,6 +2778,7 @@ class ProductsCompanion extends UpdateCompanion<Product> {
     Expression<String>? name,
     Expression<String>? categoryId,
     Expression<String>? imagePath,
+    Expression<String>? barcode,
     Expression<int>? retailPriceCents,
     Expression<int>? wholesalePriceCents,
     Expression<int>? costPriceCents,
@@ -2757,6 +2799,7 @@ class ProductsCompanion extends UpdateCompanion<Product> {
       if (name != null) 'name': name,
       if (categoryId != null) 'category_id': categoryId,
       if (imagePath != null) 'image_path': imagePath,
+      if (barcode != null) 'barcode': barcode,
       if (retailPriceCents != null) 'retail_price_cents': retailPriceCents,
       if (wholesalePriceCents != null)
         'wholesale_price_cents': wholesalePriceCents,
@@ -2780,6 +2823,7 @@ class ProductsCompanion extends UpdateCompanion<Product> {
     Value<String>? name,
     Value<String>? categoryId,
     Value<String?>? imagePath,
+    Value<String?>? barcode,
     Value<int>? retailPriceCents,
     Value<int>? wholesalePriceCents,
     Value<int>? costPriceCents,
@@ -2800,6 +2844,7 @@ class ProductsCompanion extends UpdateCompanion<Product> {
       name: name ?? this.name,
       categoryId: categoryId ?? this.categoryId,
       imagePath: imagePath ?? this.imagePath,
+      barcode: barcode ?? this.barcode,
       retailPriceCents: retailPriceCents ?? this.retailPriceCents,
       wholesalePriceCents: wholesalePriceCents ?? this.wholesalePriceCents,
       costPriceCents: costPriceCents ?? this.costPriceCents,
@@ -2846,6 +2891,9 @@ class ProductsCompanion extends UpdateCompanion<Product> {
     if (imagePath.present) {
       map['image_path'] = Variable<String>(imagePath.value);
     }
+    if (barcode.present) {
+      map['barcode'] = Variable<String>(barcode.value);
+    }
     if (retailPriceCents.present) {
       map['retail_price_cents'] = Variable<int>(retailPriceCents.value);
     }
@@ -2884,6 +2932,7 @@ class ProductsCompanion extends UpdateCompanion<Product> {
           ..write('name: $name, ')
           ..write('categoryId: $categoryId, ')
           ..write('imagePath: $imagePath, ')
+          ..write('barcode: $barcode, ')
           ..write('retailPriceCents: $retailPriceCents, ')
           ..write('wholesalePriceCents: $wholesalePriceCents, ')
           ..write('costPriceCents: $costPriceCents, ')
@@ -9752,6 +9801,7 @@ typedef $$ProductsTableCreateCompanionBuilder = ProductsCompanion Function({
   required String name,
   required String categoryId,
   Value<String?> imagePath,
+  Value<String?> barcode,
   required int retailPriceCents,
   required int wholesalePriceCents,
   required int costPriceCents,
@@ -9772,6 +9822,7 @@ typedef $$ProductsTableUpdateCompanionBuilder = ProductsCompanion Function({
   Value<String> name,
   Value<String> categoryId,
   Value<String?> imagePath,
+  Value<String?> barcode,
   Value<int> retailPriceCents,
   Value<int> wholesalePriceCents,
   Value<int> costPriceCents,
@@ -9895,6 +9946,11 @@ class $$ProductsTableFilterComposer
 
   ColumnFilters<String> get imagePath => $composableBuilder(
     column: $table.imagePath,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get barcode => $composableBuilder(
+    column: $table.barcode,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -10061,6 +10117,11 @@ class $$ProductsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get barcode => $composableBuilder(
+    column: $table.barcode,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<int> get retailPriceCents => $composableBuilder(
     column: $table.retailPriceCents,
     builder: (column) => ColumnOrderings(column),
@@ -10155,6 +10216,9 @@ class $$ProductsTableAnnotationComposer
 
   GeneratedColumn<String> get imagePath =>
       $composableBuilder(column: $table.imagePath, builder: (column) => column);
+
+  GeneratedColumn<String> get barcode =>
+      $composableBuilder(column: $table.barcode, builder: (column) => column);
 
   GeneratedColumn<int> get retailPriceCents => $composableBuilder(
     column: $table.retailPriceCents,
@@ -10299,6 +10363,7 @@ class $$ProductsTableTableManager
                 Value<String> name = const Value.absent(),
                 Value<String> categoryId = const Value.absent(),
                 Value<String?> imagePath = const Value.absent(),
+                Value<String?> barcode = const Value.absent(),
                 Value<int> retailPriceCents = const Value.absent(),
                 Value<int> wholesalePriceCents = const Value.absent(),
                 Value<int> costPriceCents = const Value.absent(),
@@ -10318,6 +10383,7 @@ class $$ProductsTableTableManager
                 name: name,
                 categoryId: categoryId,
                 imagePath: imagePath,
+                barcode: barcode,
                 retailPriceCents: retailPriceCents,
                 wholesalePriceCents: wholesalePriceCents,
                 costPriceCents: costPriceCents,
@@ -10339,6 +10405,7 @@ class $$ProductsTableTableManager
                 required String name,
                 required String categoryId,
                 Value<String?> imagePath = const Value.absent(),
+                Value<String?> barcode = const Value.absent(),
                 required int retailPriceCents,
                 required int wholesalePriceCents,
                 required int costPriceCents,
@@ -10358,6 +10425,7 @@ class $$ProductsTableTableManager
                 name: name,
                 categoryId: categoryId,
                 imagePath: imagePath,
+                barcode: barcode,
                 retailPriceCents: retailPriceCents,
                 wholesalePriceCents: wholesalePriceCents,
                 costPriceCents: costPriceCents,

@@ -31,5 +31,7 @@ abstract class CartState with _$CartState {
 
   bool get isEmpty => items.isEmpty;
 
+  bool get isNotEmpty => !isEmpty;
+
   int get itemCount => items.fold(0, (sum, item) => sum + item.quantity);
 }

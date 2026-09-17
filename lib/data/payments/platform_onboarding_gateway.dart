@@ -74,10 +74,28 @@ class DeviceInfo {
   final String deviceLabel;
   final bool isOwner;
   final String status;
+  // Null only for a device that registered but has never made a second
+  // authenticated call yet (the one that actually stamps last_seen_at
+  // server-side) - see clients.last_seen_at's own schema comment.
+  final DateTime? lastSeenAt;
 
-  const DeviceInfo({required this.id, required this.deviceLabel, required this.isOwner, required this.status});
+  const DeviceInfo({
+    required this.id,
+    required this.deviceLabel,
+    required this.isOwner,
+    required this.status,
+    required this.lastSeenAt,
+  });
 
   bool get isDisabled => status == 'disabled';
+
+  // Mirrors dashboard.html's ONLINE_WINDOW_MS - a device counts as
+  // online if it authenticated within the last 5 minutes, since every
+  // authenticated call (sync included) stamps last_seen_at.
+  bool get isOnline =>
+      !isDisabled &&
+      lastSeenAt != null &&
+      DateTime.now().toUtc().difference(lastSeenAt!) < const Duration(minutes: 5);
 }
 
 class BankOption {
@@ -289,6 +307,15 @@ class PlatformOnboardingGateway {
               deviceLabel: (device['device_label'] as String? ?? '').trim(),
               isOwner: device['is_owner'] == true,
               status: (device['status'] as String? ?? '').trim(),
+              // MySQL's TIMESTAMP comes back as a naive "YYYY-MM-DD
+              // HH:MM:SS" string with no zone suffix - it's UTC (the
+              // column has no app-level timezone handling), so DateTime
+              // must be told that explicitly or it parses as local time.
+              lastSeenAt: (device['last_seen_at'] as String?) == null
+                  ? null
+                  : DateTime.tryParse(
+                      '${(device['last_seen_at'] as String).replaceFirst(' ', 'T')}Z',
+                    ),
             ))
         .toList();
   }

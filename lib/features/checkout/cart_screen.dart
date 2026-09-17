@@ -29,12 +29,6 @@ class CartScreen extends ConsumerStatefulWidget {
 }
 
 class _CartScreenState extends ConsumerState<CartScreen> {
-  late final _nameController = TextEditingController(
-    text: ref.read(cartProvider).customerName,
-  );
-  late final _phoneController = TextEditingController(
-    text: ref.read(cartProvider).customerPhone,
-  );
   late final _discountController = TextEditingController(
     text: ref.read(cartProvider).discount.cents == 0
         ? ''
@@ -49,8 +43,6 @@ class _CartScreenState extends ConsumerState<CartScreen> {
 
   @override
   void dispose() {
-    _nameController.dispose();
-    _phoneController.dispose();
     _discountController.dispose();
     _cashReceivedController.dispose();
     super.dispose();
@@ -69,8 +61,6 @@ class _CartScreenState extends ConsumerState<CartScreen> {
       final result = await service.start(
         cart: state.items,
         discount: state.discount,
-        customerName: _nameController.text,
-        customerPhone: _phoneController.text,
         saleType: state.saleType,
         userId: userId,
       );
@@ -95,8 +85,6 @@ class _CartScreenState extends ConsumerState<CartScreen> {
     final result = await service.checkout(
       cart: state.items,
       discount: state.discount,
-      customerName: _nameController.text,
-      customerPhone: _phoneController.text,
       saleType: state.saleType,
       paymentMethod: paymentMethod,
       referenceNote: '',
@@ -137,18 +125,12 @@ class _CartScreenState extends ConsumerState<CartScreen> {
     String userId,
     Money cashReceived,
   ) async {
-    if (_phoneController.text.trim().isEmpty) {
-      _showError('Enter the customer\'s phone number to send the M-Pesa prompt.');
-      return;
-    }
     setState(() => _submitting = true);
     final service = ref.read(paystackPaymentServiceProvider);
     final state = ref.read(cartProvider);
     final result = await service.start(
       cart: state.items,
       discount: state.discount,
-      customerName: _nameController.text,
-      customerPhone: _phoneController.text,
       saleType: state.saleType,
       userId: userId,
       cashReceived: cashReceived,
@@ -241,23 +223,6 @@ class _CartScreenState extends ConsumerState<CartScreen> {
                 onSelected: (_) => cart.setSaleType('wholesale'),
               ),
             ],
-          ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _nameController,
-            decoration: const InputDecoration(
-              labelText: 'Customer name (optional)',
-            ),
-            onChanged: cart.setCustomerName,
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _phoneController,
-            decoration: const InputDecoration(
-              labelText: 'Customer phone (optional)',
-            ),
-            keyboardType: TextInputType.phone,
-            onChanged: cart.setCustomerPhone,
           ),
           const SizedBox(height: 16),
           Text('Payment method', style: Theme.of(context).textTheme.labelLarge),

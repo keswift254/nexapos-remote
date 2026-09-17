@@ -85,7 +85,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.defaults() : super(connection.openConnection());
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -118,6 +118,12 @@ class AppDatabase extends _$AppDatabase {
             // has no recorded cash-received amount, same as a new cash
             // sale where the cashier skips the field.
             await m.addColumn(sales, sales.cashReceivedCents);
+          }
+          if (from < 5) {
+            // Nullable, no backfill needed - an existing product simply
+            // has no barcode recorded until someone scans or types one
+            // in, same as a newly added product that skips the field.
+            await m.addColumn(products, products.barcode);
           }
         },
         beforeOpen: (details) async {

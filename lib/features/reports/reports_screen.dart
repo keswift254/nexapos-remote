@@ -531,6 +531,14 @@ class _ReportBody extends StatelessWidget {
               value: data.salesTotal.format(currency: currency),
             ),
             _MetricTile(
+              label: 'Total Cash Received',
+              value: data.cashReceivedTotal.format(currency: currency),
+            ),
+            _MetricTile(
+              label: 'Total Paid by M-Pesa',
+              value: data.mpesaTotal.format(currency: currency),
+            ),
+            _MetricTile(
               label: 'Total Expenses',
               value: data.expensesTotal.format(currency: currency),
             ),

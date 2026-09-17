@@ -20,6 +20,12 @@ class Products extends Table with SyncedColumns {
   TextColumn get name => text()();
   TextColumn get categoryId => text().references(Categories, #id)();
   TextColumn get imagePath => text().nullable()();
+  // The product's real, physical barcode (EAN-13/UPC/whatever's printed
+  // on it) - a distinct concept from sku above, which is an internally
+  // generated identifier, never something scanned off the packaging.
+  // Nullable: most existing products predate this field, and a shop
+  // that doesn't scan barcodes at all shouldn't be forced to fill it in.
+  TextColumn get barcode => text().nullable()();
   IntColumn get retailPriceCents => integer()();
   IntColumn get wholesalePriceCents => integer()();
   IntColumn get costPriceCents => integer()();

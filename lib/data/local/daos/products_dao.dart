@@ -22,6 +22,11 @@ class ProductsDao extends DatabaseAccessor<AppDatabase> with _$ProductsDaoMixin 
         .getSingleOrNull();
   }
 
+  Future<Product?> findByBarcode(String barcode) {
+    return (select(products)..where((p) => p.barcode.equals(barcode) & p.deletedAt.isNull()))
+        .getSingleOrNull();
+  }
+
   /// Case-insensitive match on name+category, used by the xlsx importer
   /// to decide create-vs-merge exactly like PHP's InventoryExcelService.
   Future<Product?> findByNameAndCategory(String name, String categoryId) {

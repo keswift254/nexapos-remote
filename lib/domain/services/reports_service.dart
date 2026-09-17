@@ -147,6 +147,8 @@ class ReportsService {
 
     final salesTotal = Money(sales.fold<int>(0, (sum, s) => sum + s.totalCents));
     final expensesTotal = Money(expenses.fold<int>(0, (sum, e) => sum + e.amountCents));
+    final cashReceivedTotal = Money(sales.fold<int>(0, (sum, s) => sum + s.cashPortionCents));
+    final mpesaTotal = Money(sales.fold<int>(0, (sum, s) => sum + s.mpesaPortionCents));
 
     return ReportData(
       sales: sales,
@@ -157,6 +159,8 @@ class ReportsService {
       netProfit: grossProfitTotal - expensesTotal,
       grandTotal: salesTotal - expensesTotal,
       transactionCount: sales.length,
+      cashReceivedTotal: cashReceivedTotal,
+      mpesaTotal: mpesaTotal,
     );
   }
 }
@@ -170,6 +174,8 @@ class ReportData {
   final Money netProfit;
   final Money grandTotal;
   final int transactionCount;
+  final Money cashReceivedTotal;
+  final Money mpesaTotal;
 
   const ReportData({
     required this.sales,
@@ -180,5 +186,7 @@ class ReportData {
     required this.netProfit,
     required this.grandTotal,
     required this.transactionCount,
+    required this.cashReceivedTotal,
+    required this.mpesaTotal,
   });
 }

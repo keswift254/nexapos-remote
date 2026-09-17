@@ -293,7 +293,7 @@ class _PaymentSettingsScreenState extends ConsumerState<PaymentSettingsScreen> {
         padding: const EdgeInsets.all(16),
         children: [
           Text(
-            'Register this device so it can accept Paystack payments without needing its own Paystack account.',
+            'Register this device so it can accept card and mobile money payments without needing its own payment processor account.',
             style: Theme.of(context).textTheme.bodySmall,
           ),
           const SizedBox(height: 16),
@@ -477,7 +477,7 @@ class _PaymentSettingsScreenState extends ConsumerState<PaymentSettingsScreen> {
               MaterialPageRoute(builder: (_) => DeviceManagementScreen(credentials: credentials)),
             ),
             icon: const Icon(Icons.devices_outlined),
-            label: const Text('Manage devices'),
+            label: const Text('Connected devices'),
           ),
         ),
         const SizedBox(height: 8),

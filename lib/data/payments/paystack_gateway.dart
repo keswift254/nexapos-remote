@@ -81,7 +81,7 @@ class PaystackGateway {
     final data = (response['data'] as Map?)?.cast<String, dynamic>() ?? const {};
     final url = (data['authorization_url'] as String? ?? '').trim();
     final ref = (data['reference'] as String? ?? reference).trim();
-    if (url.isEmpty) throw const PaystackException('Paystack did not return a checkout URL.');
+    if (url.isEmpty) throw const PaystackException('The payment processor did not return a checkout URL.');
     return PaystackInitResult(authorizationUrl: url, reference: ref);
   }
 
@@ -110,7 +110,7 @@ class PaystackGateway {
         responseCurrency == currency.toUpperCase();
     return PaystackVerifyResult(
       success: success,
-      message: success ? 'Paystack payment received.' : platformResponseMessage(response, 'Paystack payment was not successful.'),
+      message: success ? 'Payment received.' : platformResponseMessage(response, 'Payment was not successful.'),
       reference: (data['reference'] as String? ?? reference).trim(),
     );
   }

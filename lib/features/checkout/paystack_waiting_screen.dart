@@ -130,7 +130,7 @@ class _PaystackWaitingScreenState extends ConsumerState<PaystackWaitingScreen>
         title: const Text('Cancel this sale?'),
         content: const Text(
           'The reserved stock will be returned and this sale will be marked cancelled. '
-          'Only do this if the customer did not complete the Paystack payment.',
+          'Only do this if the customer did not complete the payment.',
         ),
         actions: [
           TextButton(

@@ -153,4 +153,91 @@ void main() {
       expect(items.single.unitPriceCents, 10000);
     },
   );
+
+  group('barcode', () {
+    Future<String> createWithBarcode(String name, String? barcode) async {
+      final result = await productService.create(
+        name: name,
+        categoryId: categoryId,
+        retailPrice: const Money(10000),
+        wholesalePrice: const Money(8000),
+        costPrice: const Money(5000),
+        barcode: barcode,
+      );
+      expect(result.isOk, isTrue, reason: result.when(ok: (_) => '', failure: (m) => m));
+      return result.when(ok: (p) => p.id, failure: (_) => '');
+    }
+
+    test('a product created with a barcode is findable by it', () async {
+      final id = await createWithBarcode('Soda 500ml', '6009123456789');
+
+      final found = await productRepository.findByBarcode('6009123456789');
+
+      expect(found?.id, id);
+    });
+
+    test('an empty or omitted barcode is stored as null, not an empty string', () async {
+      final id = await createWithBarcode('No Barcode Item', '');
+
+      expect((await productRepository.findById(id))!.barcode, isNull);
+    });
+
+    test('creating a second product with an already-used barcode fails clearly', () async {
+      await createWithBarcode('Soda 500ml', '6009123456789');
+
+      final result = await productService.create(
+        name: 'Different Product',
+        categoryId: categoryId,
+        retailPrice: const Money(5000),
+        wholesalePrice: const Money(4000),
+        costPrice: const Money(2000),
+        barcode: '6009123456789',
+      );
+
+      expect(result.isFailure, isTrue);
+      result.when(
+        ok: (_) => fail('expected failure'),
+        failure: (m) => expect(m, contains('Soda 500ml')),
+      );
+    });
+
+    test('updating a product to a barcode already used by a different product fails clearly', () async {
+      await createWithBarcode('Soda 500ml', '6009123456789');
+      final otherId = await createWithBarcode('Juice 1L', '1111111111111');
+
+      final result = await productService.update(
+        id: otherId,
+        name: 'Juice 1L',
+        categoryId: categoryId,
+        retailPrice: const Money(5000),
+        wholesalePrice: const Money(4000),
+        costPrice: const Money(2000),
+        reorderLevel: 0,
+        barcode: '6009123456789',
+      );
+
+      expect(result.isFailure, isTrue);
+      result.when(
+        ok: (_) => fail('expected failure'),
+        failure: (m) => expect(m, contains('Soda 500ml')),
+      );
+    });
+
+    test('re-saving a product with its own unchanged barcode does not trip the duplicate check', () async {
+      final id = await createWithBarcode('Soda 500ml', '6009123456789');
+
+      final result = await productService.update(
+        id: id,
+        name: 'Soda 500ml',
+        categoryId: categoryId,
+        retailPrice: const Money(12000),
+        wholesalePrice: const Money(8000),
+        costPrice: const Money(5000),
+        reorderLevel: 0,
+        barcode: '6009123456789',
+      );
+
+      expect(result.isOk, isTrue, reason: result.when(ok: (_) => '', failure: (m) => m));
+    });
+  });
 }

@@ -171,6 +171,38 @@ void main() {
       expect(devices, hasLength(3));
       expect(devices.where((d) => d.isOwner).single.deviceLabel, 'Counter PC');
       expect(devices.where((d) => d.isDisabled).single.deviceLabel, 'Old Phone');
+      expect(devices.every((d) => d.lastSeenAt == null), isTrue);
+    });
+
+    test('last_seen_at within 5 minutes counts as online, older or disabled does not', () async {
+      final now = DateTime.now().toUtc();
+      String stamp(Duration ago) =>
+          now.subtract(ago).toIso8601String().substring(0, 19).replaceFirst('T', ' ');
+      final gateway = PlatformOnboardingGateway(MockClient((request) async {
+        return http.Response(
+          jsonEncode({
+            'success': true,
+            'devices': [
+              {'id': 1, 'device_label': 'Just now', 'is_owner': true, 'status': 'active', 'last_seen_at': stamp(const Duration(seconds: 30))},
+              {'id': 2, 'device_label': 'Long ago', 'is_owner': false, 'status': 'active', 'last_seen_at': stamp(const Duration(hours: 2))},
+              {'id': 3, 'device_label': 'Never seen', 'is_owner': false, 'status': 'pending_settlement', 'last_seen_at': null},
+              {'id': 4, 'device_label': 'Recently disabled', 'is_owner': false, 'status': 'disabled', 'last_seen_at': stamp(const Duration(seconds: 10))},
+            ],
+          }),
+          200,
+        );
+      }));
+
+      final devices = await gateway.listDevices(baseUrl: _baseUrl, apiKey: 'owner_key');
+
+      expect(devices.firstWhere((d) => d.deviceLabel == 'Just now').isOnline, isTrue);
+      expect(devices.firstWhere((d) => d.deviceLabel == 'Long ago').isOnline, isFalse);
+      expect(devices.firstWhere((d) => d.deviceLabel == 'Never seen').isOnline, isFalse);
+      expect(devices.firstWhere((d) => d.deviceLabel == 'Never seen').lastSeenAt, isNull);
+      // A disabled device never counts as online even with a fresh
+      // last_seen_at - a revoked device stops making authenticated
+      // calls, so a stale-but-recent stamp shouldn't read as "here now".
+      expect(devices.firstWhere((d) => d.deviceLabel == 'Recently disabled').isOnline, isFalse);
     });
 
     test('a non-owner device calling this surfaces the backend rejection', () async {

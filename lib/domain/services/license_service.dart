@@ -153,13 +153,28 @@ class LicenseService {
     _ref.read(licenseChangeSignalProvider.notifier).bump();
   }
 
+  /// A confirmed revocation (the shop owner used Connected Devices, this
+  /// device switched shops, or the server otherwise genuinely ended its
+  /// membership - never just a network hiccup, see verifyJoinedMembership's
+  /// PaystackOfflineException branch, which calls _notifyAccessChanged
+  /// instead of this) wipes this device back to a fresh-install state:
+  /// every business table, the platform registration, and the
+  /// membership record itself. That's a deliberate change from the
+  /// previous "mark blocked, keep the data, tell them to contact
+  /// support" design - a device that's been cut off from a shop has no
+  /// legitimate further use for that shop's data, and the whole point
+  /// of "Connected Devices" revoke is that the device is gone for good,
+  /// not parked in a locked half-state. Fully deleting the membership
+  /// key (not just flagging it) also means a device that separately
+  /// holds its own genuinely-activated license - a real, independent
+  /// grant of access, not the joined-shop membership being revoked
+  /// here - still works normally afterward via hasValidCachedLicense,
+  /// exactly as clearJoinedMembership already preserves for a voluntary
+  /// leave; only the joined-shop membership and its data are cleared.
   Future<void> _blockMembership(Map<String, dynamic> membership) async {
-    await _ref
-        .read(secureStorageProvider)
-        .write(
-          key: _membershipKey,
-          value: jsonEncode({...membership, 'blocked': true}),
-        );
+    await _ref.read(appDatabaseProvider).resetForFreshStart();
+    await _ref.read(paystackCredentialsServiceProvider).clearRegistration();
+    await _ref.read(secureStorageProvider).delete(key: _membershipKey);
     await _ref.read(sessionProvider.notifier).logout();
     _notifyAccessChanged();
   }

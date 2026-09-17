@@ -21,6 +21,7 @@ import 'features/users/users_screen.dart';
 import 'features/categories/categories_screen.dart';
 import 'features/products/products_screen.dart';
 import 'features/checkout/new_sale_screen.dart';
+import 'features/checkout/cart_notifier.dart';
 import 'features/checkout/cart_screen.dart';
 import 'features/checkout/receipt_screen.dart';
 import 'features/checkout/pending_sales_screen.dart';
@@ -28,6 +29,8 @@ import 'domain/services/pending_sales_notifier.dart';
 import 'features/settings/payment_settings_screen.dart'
     show currentPaymentCredentialsProvider, PaymentSettingsScreen;
 import 'features/settings/business_settings_screen.dart';
+import 'features/settings/device_management_screen.dart'
+    show ConnectedDevicesEntryScreen;
 import 'features/settings/device_sync_screen.dart';
 import 'features/settings/update_screen.dart';
 import 'features/expenses/expenses_screen.dart';
@@ -135,6 +138,7 @@ Future<String?> _redirectOrThrow(Ref ref, String location) async {
   if ((location == '/payment-settings' ||
           location == '/business-settings' ||
           location == '/device-sync' ||
+          location == '/connected-devices' ||
           location == '/backup') &&
       user.role != UserRole.admin) {
     return '/';
@@ -199,6 +203,10 @@ GoRouter router(Ref ref) {
       GoRoute(
         path: '/device-sync',
         builder: (context, state) => const DeviceSyncScreen(),
+      ),
+      GoRoute(
+        path: '/connected-devices',
+        builder: (context, state) => const ConnectedDevicesEntryScreen(),
       ),
       GoRoute(
         path: '/update',
@@ -274,6 +282,7 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
     _recordActivity();
     _runSync();
     ref.read(pendingPaystackSalesProvider.notifier).reconcile();
+    ref.read(cartProvider.notifier).restore();
     _scheduleNextSync();
     _inactivityTimer = Timer.periodic(
       _inactivityCheckInterval,

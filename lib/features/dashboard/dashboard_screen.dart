@@ -17,6 +17,7 @@ import '../../domain/services/product_service.dart';
 import '../../domain/services/reports_service.dart';
 import '../../domain/services/session_service.dart';
 import '../../domain/services/update_service.dart';
+import '../checkout/cart_notifier.dart';
 import 'product_search_dialog.dart';
 
 part 'dashboard_screen.g.dart';
@@ -139,6 +140,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final dataAsync = ref.watch(dashboardDataProvider);
     final pendingPaystackSales = ref.watch(pendingPaystackSalesProvider);
     final availableUpdate = ref.watch(updateAvailabilityProvider);
+    final cartState = ref.watch(cartProvider);
     final isWindows = defaultTargetPlatform == TargetPlatform.windows;
 
     return Scaffold(
@@ -204,6 +206,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   ),
                 if (user.role == UserRole.admin)
                   const PopupMenuItem(
+                    value: '/connected-devices',
+                    child: Text('Connected Devices'),
+                  ),
+                if (user.role == UserRole.admin)
+                  const PopupMenuItem(
                     value: '/backup',
                     child: Text('Backup'),
                   ),
@@ -254,6 +261,22 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                       ),
                     ],
                   ),
+                  if (cartState.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Card(
+                      color: Theme.of(context).colorScheme.tertiaryContainer,
+                      child: ListTile(
+                        leading: const Icon(Icons.shopping_cart_outlined),
+                        title: Text(
+                          cartState.itemCount == 1
+                              ? '1 item waiting in cart'
+                              : '${cartState.itemCount} items waiting in cart',
+                        ),
+                        subtitle: const Text('Go to cart to complete sale.'),
+                        onTap: () => context.push('/checkout/cart'),
+                      ),
+                    ),
+                  ],
                   if (pendingPaystackSales.isNotEmpty) ...[
                     const SizedBox(height: 12),
                     Card(

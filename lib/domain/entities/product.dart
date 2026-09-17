@@ -11,6 +11,7 @@ abstract class Product with _$Product {
     required String name,
     required String categoryId,
     String? imagePath,
+    String? barcode,
     required Money retailPrice,
     required Money wholesalePrice,
     required Money costPrice,

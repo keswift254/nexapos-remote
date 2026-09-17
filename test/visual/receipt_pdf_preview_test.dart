@@ -73,6 +73,7 @@ void main() {
             totalCents: 100,
             createdAt: '2026-09-07T18:04:00.000',
             itemNames: 'test9 x1',
+            cashReceivedCents: null,
           ),
           ReportSaleRow(
             id: 'sale-2',
@@ -84,6 +85,7 @@ void main() {
             totalCents: 2000,
             createdAt: '2026-09-07T18:29:00.000',
             itemNames: 'Music x1',
+            cashReceivedCents: null,
           ),
         ],
         expenses: const [],
@@ -93,6 +95,8 @@ void main() {
         netProfit: Money(2100),
         grandTotal: Money(2100),
         transactionCount: 2,
+        cashReceivedTotal: Money(2100),
+        mpesaTotal: Money(0),
       );
       await File('${outDir.path}/daily-sales-report.pdf').writeAsBytes(
         await buildReportPdf(

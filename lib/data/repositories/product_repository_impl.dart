@@ -40,6 +40,7 @@ class ProductRepositoryImpl implements ProductRepository {
         name: row.name,
         categoryId: row.categoryId,
         imagePath: row.imagePath,
+        barcode: row.barcode,
         retailPrice: Money(row.retailPriceCents),
         wholesalePrice: Money(row.wholesalePriceCents),
         costPrice: Money(row.costPriceCents),
@@ -67,6 +68,12 @@ class ProductRepositoryImpl implements ProductRepository {
   }
 
   @override
+  Future<Product?> findByBarcode(String barcode) async {
+    final row = await _dao.findByBarcode(barcode);
+    return row == null ? null : _toEntity(row);
+  }
+
+  @override
   Future<Product?> findByNameAndCategory(String name, String categoryId) async {
     final row = await _dao.findByNameAndCategory(name, categoryId);
     return row == null ? null : _toEntity(row);
@@ -85,6 +92,7 @@ class ProductRepositoryImpl implements ProductRepository {
         name: product.name,
         categoryId: product.categoryId,
         imagePath: Value(product.imagePath),
+        barcode: Value(product.barcode),
         retailPriceCents: product.retailPrice.cents,
         wholesalePriceCents: product.wholesalePrice.cents,
         costPriceCents: product.costPrice.cents,
@@ -112,6 +120,7 @@ class ProductRepositoryImpl implements ProductRepository {
           name: Value(product.name),
           categoryId: Value(product.categoryId),
           imagePath: Value(product.imagePath),
+          barcode: Value(product.barcode),
           retailPriceCents: Value(product.retailPrice.cents),
           wholesalePriceCents: Value(product.wholesalePrice.cents),
           costPriceCents: Value(product.costPrice.cents),

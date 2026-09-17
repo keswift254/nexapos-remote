@@ -91,7 +91,36 @@ void main() {
   });
   for (final code in [401, 403]) {
     test(
-      'confirmed $code removal blocks access without erasing records or own license',
+      'confirmed $code removal (e.g. Connected Devices revoke) wipes local data and returns the device to activation',
+      () async {
+        await service.confirmJoinedMembership();
+        await db.into(db.categories).insert(
+          CategoriesCompanion.insert(
+            id: 'c1',
+            name: 'Groceries',
+            createdAt: '2026-09-08T00:00:00.000Z',
+            updatedAt: '2026-09-08T00:00:00.000Z',
+            localRev: 1,
+            createdByDeviceId: 'device-under-test',
+          ),
+        );
+        statusCode = code;
+        await service.verifyJoinedMembership();
+        expect(await service.hasAppAccess(), false);
+        expect(
+          await db.select(db.categories).get(),
+          isEmpty,
+          reason: 'a revoked device has no legitimate further use for the shop data it had',
+        );
+        // Membership itself is fully cleared (not just flagged) - a
+        // fresh confirmJoinedMembership() (a new invite to a shop) is
+        // allowed again, exactly as after a voluntary leave.
+        expect(await service.membershipBlocked, false);
+      },
+    );
+
+    test(
+      'confirmed $code removal still leaves a separately, genuinely activated license usable',
       () async {
         await service.confirmJoinedMembership();
         final storage = container.read(secureStorageProvider);
@@ -99,17 +128,10 @@ void main() {
           key: 'nexapos.license.activationToken',
           value: 'own-license',
         );
-        final before = await db.select(db.businessSettings).get();
         statusCode = code;
         await service.verifyJoinedMembership();
-        expect(await service.hasAppAccess(), false);
-        expect(await service.membershipBlocked, true);
         expect(await service.hasValidCachedLicense(), true);
-        expect(
-          (await db.select(db.businessSettings).get()).length,
-          before.length,
-        );
-        await expectLater(service.confirmJoinedMembership(), throwsStateError);
+        expect(await service.hasAppAccess(), true);
       },
     );
   }

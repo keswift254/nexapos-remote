@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
@@ -31,18 +33,31 @@ class _BusinessSettingsScreenState extends ConsumerState<BusinessSettingsScreen>
   final _footerController = TextEditingController();
   final _currencyController = TextEditingController();
   final _printerIpController = TextEditingController();
+  final _windowsPrinterNameController = TextEditingController();
   int _paperWidthMm = 58;
   bool _submitting = false;
   bool _prefilled = false;
   bool _savingPrinterIp = false;
   bool _testPrinting = false;
+  PrinterConnectionType _connectionType = PrinterConnectionType.network;
+  List<String> _availableWindowsPrinters = const [];
 
   @override
   void initState() {
     super.initState();
-    ref.read(thermalPrinterServiceProvider).loadIpAddress().then((ip) {
+    final printerService = ref.read(thermalPrinterServiceProvider);
+    printerService.loadIpAddress().then((ip) {
       if (mounted) setState(() => _printerIpController.text = ip);
     });
+    printerService.loadWindowsPrinterName().then((name) {
+      if (mounted) setState(() => _windowsPrinterNameController.text = name);
+    });
+    printerService.loadConnectionType().then((type) {
+      if (mounted) setState(() => _connectionType = type);
+    });
+    if (Platform.isWindows) {
+      _availableWindowsPrinters = printerService.listWindowsPrinters();
+    }
   }
 
   @override
@@ -53,6 +68,7 @@ class _BusinessSettingsScreenState extends ConsumerState<BusinessSettingsScreen>
     _footerController.dispose();
     _currencyController.dispose();
     _printerIpController.dispose();
+    _windowsPrinterNameController.dispose();
     super.dispose();
   }
 
@@ -64,8 +80,24 @@ class _BusinessSettingsScreenState extends ConsumerState<BusinessSettingsScreen>
   Future<void> _savePrinterIp() async {
     setState(() => _savingPrinterIp = true);
     try {
-      await ref.read(thermalPrinterServiceProvider).saveIpAddress(_printerIpController.text);
+      final service = ref.read(thermalPrinterServiceProvider);
+      await service.saveConnectionType(PrinterConnectionType.network);
+      await service.saveIpAddress(_printerIpController.text);
+      if (mounted) setState(() => _connectionType = PrinterConnectionType.network);
       _showMessage('Printer address saved.');
+    } finally {
+      if (mounted) setState(() => _savingPrinterIp = false);
+    }
+  }
+
+  Future<void> _saveWindowsPrinter() async {
+    setState(() => _savingPrinterIp = true);
+    try {
+      final service = ref.read(thermalPrinterServiceProvider);
+      await service.saveConnectionType(PrinterConnectionType.windowsUsb);
+      await service.saveWindowsPrinterName(_windowsPrinterNameController.text);
+      if (mounted) setState(() => _connectionType = PrinterConnectionType.windowsUsb);
+      _showMessage('Printer saved.');
     } finally {
       if (mounted) setState(() => _savingPrinterIp = false);
     }
@@ -202,36 +234,107 @@ class _BusinessSettingsScreenState extends ConsumerState<BusinessSettingsScreen>
                         Text('Thermal printer', style: Theme.of(context).textTheme.titleMedium),
                         const SizedBox(height: 4),
                         Text(
-                          'This device only - a shop with several counters sets this separately on each one. '
-                          'Needs a network/WiFi thermal printer (the kind that takes a plain IP address, not USB-only).',
+                          'This device only - a shop with several counters sets this separately on each one.',
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                         const SizedBox(height: 12),
-                        TextField(
-                          controller: _printerIpController,
-                          decoration: const InputDecoration(labelText: 'Printer IP address'),
-                          keyboardType: TextInputType.number,
-                        ),
-                        const SizedBox(height: 12),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            OutlinedButton(
-                              onPressed: _savingPrinterIp ? null : _savePrinterIp,
-                              child: _savingPrinterIp
-                                  ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                                  : const Text('Save address'),
+                        if (Platform.isWindows) ...[
+                          Wrap(
+                            spacing: 8,
+                            children: [
+                              ChoiceChip(
+                                label: const Text('Network (IP address)'),
+                                selected: _connectionType == PrinterConnectionType.network,
+                                onSelected: (_) => setState(
+                                  () => _connectionType = PrinterConnectionType.network,
+                                ),
+                              ),
+                              ChoiceChip(
+                                label: const Text('USB (Windows printer)'),
+                                selected: _connectionType == PrinterConnectionType.windowsUsb,
+                                onSelected: (_) => setState(
+                                  () => _connectionType = PrinterConnectionType.windowsUsb,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                        ],
+                        if (_connectionType == PrinterConnectionType.windowsUsb) ...[
+                          Text(
+                            'Install the printer in Windows first (it\'ll show up here once it has a driver, USB or '
+                            'otherwise), then pick it below.',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                          const SizedBox(height: 12),
+                          if (_availableWindowsPrinters.isNotEmpty)
+                            DropdownButtonFormField<String>(
+                              initialValue: _availableWindowsPrinters.contains(_windowsPrinterNameController.text)
+                                  ? _windowsPrinterNameController.text
+                                  : null,
+                              decoration: const InputDecoration(labelText: 'Printer'),
+                              items: [
+                                for (final name in _availableWindowsPrinters)
+                                  DropdownMenuItem(value: name, child: Text(name)),
+                              ],
+                              onChanged: (value) =>
+                                  setState(() => _windowsPrinterNameController.text = value ?? ''),
+                            )
+                          else
+                            TextField(
+                              controller: _windowsPrinterNameController,
+                              decoration: const InputDecoration(
+                                labelText: 'Printer name',
+                                helperText: 'No installed printers were found automatically - type the exact name from Windows\' printer list.',
+                              ),
                             ),
-                            OutlinedButton.icon(
-                              onPressed: _testPrinting ? null : _testPrint,
-                              icon: _testPrinting
-                                  ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                                  : const Icon(Icons.print_outlined),
-                              label: const Text('Test print'),
-                            ),
-                          ],
-                        ),
+                          const SizedBox(height: 12),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              OutlinedButton(
+                                onPressed: _savingPrinterIp ? null : _saveWindowsPrinter,
+                                child: _savingPrinterIp
+                                    ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                                    : const Text('Save printer'),
+                              ),
+                              OutlinedButton.icon(
+                                onPressed: _testPrinting ? null : _testPrint,
+                                icon: _testPrinting
+                                    ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                                    : const Icon(Icons.print_outlined),
+                                label: const Text('Test print'),
+                              ),
+                            ],
+                          ),
+                        ] else ...[
+                          TextField(
+                            controller: _printerIpController,
+                            decoration: const InputDecoration(labelText: 'Printer IP address'),
+                            keyboardType: TextInputType.number,
+                          ),
+                          const SizedBox(height: 12),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              OutlinedButton(
+                                onPressed: _savingPrinterIp ? null : _savePrinterIp,
+                                child: _savingPrinterIp
+                                    ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                                    : const Text('Save address'),
+                              ),
+                              OutlinedButton.icon(
+                                onPressed: _testPrinting ? null : _testPrint,
+                                icon: _testPrinting
+                                    ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                                    : const Icon(Icons.print_outlined),
+                                label: const Text('Test print'),
+                              ),
+                            ],
+                          ),
+                        ],
                       ],
                     ),
                   ),
