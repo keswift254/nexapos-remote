@@ -3,13 +3,25 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nexapos_mobile/core/utils/money.dart';
 import 'package:nexapos_mobile/domain/entities/user.dart';
+import 'package:nexapos_mobile/domain/entities/user_role.dart';
 import 'package:nexapos_mobile/domain/services/session_service.dart';
 import 'package:nexapos_mobile/features/checkout/cart_notifier.dart';
 import 'package:nexapos_mobile/features/checkout/cart_screen.dart';
 
+// A real logged-in user, unlike checkout_options_test.dart's null-user
+// stand-in - "Complete Sale" is disabled by both userId == null and a
+// cash shortfall, so testing the shortfall-specific gating in isolation
+// needs a session where userId is never the reason it's disabled.
 class _Session extends SessionNotifier {
   @override
-  User? build() => null;
+  User? build() => const User(
+        id: 'cashier-1',
+        role: UserRole.cashier,
+        name: 'Cashier',
+        username: 'cashier',
+        passwordHash: 'irrelevant-for-this-test',
+        status: 'active',
+      );
 }
 
 void main() {
@@ -64,6 +76,35 @@ void main() {
       expect(find.text('Still owed'), findsOneWidget);
       expect(find.text('Change due'), findsNothing);
       expect(find.text('KES 150.00'), findsOneWidget);
+
+      // A genuine shortfall blocks "Complete Sale" outright and offers
+      // sending an M-Pesa prompt for exactly the remaining balance.
+      expect(
+        tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Complete Sale')).onPressed,
+        isNull,
+      );
+      expect(find.text('Send M-Pesa prompt for KES 150.00'), findsOneWidget);
+
+      // Entering enough cash clears the block and the prompt offer.
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Cash received (optional)'),
+        '300',
+      );
+      await tester.pump();
+      expect(find.text('Still owed'), findsNothing);
+      expect(find.textContaining('Send M-Pesa prompt'), findsNothing);
+      expect(
+        tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Complete Sale')).onPressed,
+        isNotNull,
+      );
+
+      // Back to a shortfall for the next assertion (M-Pesa hides the
+      // whole cash section, including any shortfall state).
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Cash received (optional)'),
+        '150',
+      );
+      await tester.pump();
 
       // Switching to M-Pesa hides the whole cash section entirely -
       // this calculator is cash-only.

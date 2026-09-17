@@ -99,7 +99,14 @@ Future<Uint8List> buildThermalReceipt(ReceiptData data) async {
   bytes.addAll(generator.hr());
 
   bytes.addAll(generator.text('Payment: ${sale.paymentMethodLabel}'));
-  if (sale.cashReceived != null) {
+  if (sale.isSplitPayment) {
+    bytes.addAll(
+      _amountRow(generator, 'Cash received', sale.cashReceived!.format(currency: currency)),
+    );
+    bytes.addAll(
+      _amountRow(generator, 'Paid via M-Pesa', sale.gatewayPortion.format(currency: currency)),
+    );
+  } else if (sale.cashReceived != null) {
     bytes.addAll(
       _amountRow(
         generator,

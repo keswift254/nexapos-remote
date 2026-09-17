@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:archive/archive_io.dart';
 import 'package:crypto/crypto.dart';
 import 'package:open_file/open_file.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -156,10 +155,12 @@ class UpdateService {
     LatestVersionInfo info,
     void Function(double)? onProgress,
   ) async {
-    if (info.windowsInstallerUrl.isNotEmpty) {
-      return _installWindowsSetup(info, onProgress);
+    if (info.windowsInstallerUrl.isEmpty) {
+      return const Result.failure(
+        'No Windows download is available for this update.',
+      );
     }
-    return _installWindowsZip(info, onProgress);
+    return _installWindowsSetup(info, onProgress);
   }
 
   Future<Result<void>> _installWindowsSetup(
@@ -196,96 +197,6 @@ class UpdateService {
       return Result.failure(e.message);
     } catch (e) {
       return Result.failure('Could not start the Windows installer: $e');
-    }
-  }
-
-  Future<Result<void>> _installWindowsZip(
-    LatestVersionInfo info,
-    void Function(double)? onProgress,
-  ) async {
-    if (info.windowsUrl.isEmpty) {
-      return const Result.failure(
-        'No Windows download is available for this update.',
-      );
-    }
-    try {
-      final tempDir = await getTemporaryDirectory();
-      final stagingDir = Directory(path.join(tempDir.path, 'nexapos_update'));
-      if (await stagingDir.exists()) await stagingDir.delete(recursive: true);
-      await stagingDir.create(recursive: true);
-
-      final zipFile = File(path.join(stagingDir.path, 'update.zip'));
-      await _ref
-          .read(updateGatewayProvider)
-          .downloadTo(
-            info.windowsUrl,
-            zipFile,
-            onProgress: (received, total) {
-              // Reserve the last 10% of the bar for extract+handoff, which
-              // have no byte-level progress of their own to report.
-              if (total != null && total > 0) {
-                onProgress?.call(received / total * 0.9);
-              }
-            },
-          );
-
-      final checksumError = await _verifyChecksum(zipFile, info.windowsSha256);
-      if (checksumError != null) return Result.failure(checksumError);
-
-      final extractDir = Directory(path.join(stagingDir.path, 'extracted'));
-      await extractFileToDisk(zipFile.path, extractDir.path);
-      onProgress?.call(0.95);
-
-      final exeName = path.basename(Platform.resolvedExecutable);
-      // The zip's own internal layout (flat vs. wrapped in a top-level
-      // folder) is whatever the vendor's build machine happened to
-      // produce, not something this code controls - so locate the real
-      // exe wherever it landed instead of assuming a fixed depth.
-      final exeFile = await _findFile(extractDir, exeName);
-      if (exeFile == null) {
-        return Result.failure(
-          'The downloaded update looks corrupted ($exeName not found inside it).',
-        );
-      }
-
-      final installDir = File(Platform.resolvedExecutable).parent;
-      final stagingBatFile = File(
-        path.join(stagingDir.path, 'apply_update.bat'),
-      );
-      await stagingBatFile.writeAsString(
-        _windowsUpdaterScript(
-          sourceDir: exeFile.parent.path,
-          installDir: installDir.path,
-          exeName: exeName,
-          stagingDir: stagingDir.path,
-        ),
-      );
-
-      onProgress?.call(1.0);
-      // /min so the brief handoff console window doesn't flash full-size;
-      // detached so it survives this process exiting immediately after.
-      await Process.start('cmd.exe', [
-        '/c',
-        'start',
-        '',
-        '/min',
-        stagingBatFile.path,
-      ], mode: ProcessStartMode.detached);
-      // The .bat's first step is a short wait before it touches anything
-      // in installDir - but this process still has to have actually
-      // exited by then, since Windows won't let the copy overwrite an
-      // exe/dll this process itself is still holding open. There's no
-      // safe way to keep running past this point, so this call really
-      // does end the function (and the process).
-      exit(0);
-    } on UpdateOfflineException {
-      return const Result.failure(
-        'Could not reach the download server. Check your internet connection and try again.',
-      );
-    } on UpdateException catch (e) {
-      return Result.failure(e.message);
-    } catch (e) {
-      return Result.failure('Could not install the update: $e');
     }
   }
 
@@ -368,82 +279,4 @@ class UpdateService {
     return null;
   }
 
-  Future<File?> _findFile(Directory dir, String name) async {
-    await for (final entity in dir.list(recursive: true)) {
-      if (entity is File &&
-          path.basename(entity.path).toLowerCase() == name.toLowerCase()) {
-        return entity;
-      }
-    }
-    return null;
-  }
-
-  /// installDir is the live app - the one this very process is running
-  /// out of - so nothing in this script can touch it until this process
-  /// has actually released its file locks, which isn't instant just
-  /// because the process has called exit() (confirmed for real: a
-  /// deliberately-held exclusive lock on the exe reliably produces
-  /// xcopy's "Sharing violation" / exit code 4 for as long as the lock
-  /// is held). A single fixed wait then one xcopy attempt - the original
-  /// design - meant that if the OS hadn't released the exe's lock by
-  /// then, xcopy would still copy every OTHER file (the DLLs, data\)
-  /// but skip the exe, relaunching a stale exe next to brand-new
-  /// libraries. PackageInfo reads its version straight from the running
-  /// exe's own resource block, so the app would then look permanently
-  /// out of date to itself even though it had genuinely updated - this
-  /// is the exact "old version still there on reopen" failure mode the
-  /// logging below was originally added to help diagnose, but the
-  /// underlying race was never actually closed until now. Retries the
-  /// whole xcopy (not just the exe) up to 10 times, 1s apart, so a
-  /// still-copied DLL isn't left half-newer-half-older either.
-  ///
-  /// Uses `ping -n N 127.0.0.1` instead of `timeout` for the delays -
-  /// confirmed for real that `timeout` errors out immediately
-  /// ("Input redirection is not supported") when its stdin isn't a real
-  /// interactive console, which isn't guaranteed for a detached child
-  /// process; ping's delay doesn't depend on console/stdin at all.
-  ///
-  /// `%ERRORLEVEL%` deliberately isn't read directly inside the `for`
-  /// loop body - batch expands `%...%` once when a parenthesized block
-  /// is parsed, not fresh on each iteration, so it would silently freeze
-  /// at whatever ERRORLEVEL was before the loop even started (confirmed
-  /// for real - it read 1 unchanged through all 10 attempts against a
-  /// fix that was, per xcopy's own output, actually succeeding every
-  /// time). `setlocal enabledelayedexpansion` plus `!EC!` reads the
-  /// true per-iteration value instead.
-  ///
-  /// Logs each step to last_update_log.txt right next to the exe
-  /// (survives stagingDir's own cleanup, since it's written to
-  /// installDir instead) - this whole script runs invisibly in a
-  /// detached process with no console the user or a debugger can watch,
-  /// so without this log a real failure here would be a total black box.
-  String _windowsUpdaterScript({
-    required String sourceDir,
-    required String installDir,
-    required String exeName,
-    required String stagingDir,
-  }) {
-    final log = '$installDir\\last_update_log.txt';
-    return '@echo off\r\n'
-        'setlocal enabledelayedexpansion\r\n'
-        'echo [%DATE% %TIME%] Update starting > "$log"\r\n'
-        'ping -n 3 127.0.0.1 > nul\r\n'
-        'for /L %%i in (1,1,10) do (\r\n'
-        '    echo [%DATE% %TIME%] Copy attempt %%i - "$sourceDir" to "$installDir" >> "$log"\r\n'
-        '    xcopy "$sourceDir" "$installDir" /E /I /Y /Q >> "$log" 2>&1\r\n'
-        '    set EC=!ERRORLEVEL!\r\n'
-        '    echo [%DATE% %TIME%] xcopy exit code: !EC! >> "$log"\r\n'
-        '    if "!EC!"=="0" goto copydone\r\n'
-        '    ping -n 2 127.0.0.1 > nul\r\n'
-        ')\r\n'
-        'goto copyfailed\r\n'
-        ':copydone\r\n'
-        'start "" "$installDir\\$exeName"\r\n'
-        'echo [%DATE% %TIME%] Relaunched $exeName, cleaning up staging >> "$log"\r\n'
-        'rmdir /S /Q "$stagingDir"\r\n'
-        'exit /B 0\r\n'
-        ':copyfailed\r\n'
-        'echo [%DATE% %TIME%] Update failed after all copy attempts; app was not relaunched >> "$log"\r\n'
-        'exit /B 1\r\n';
-  }
 }

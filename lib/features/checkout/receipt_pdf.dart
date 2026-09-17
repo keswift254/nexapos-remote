@@ -99,7 +99,18 @@ Future<Uint8List> buildReceiptPdf(ReceiptData data, PdfPageFormat _) async {
             ),
             solidDivider(),
             pw.Text('Payment: ${sale.paymentMethodLabel}'),
-            if (sale.cashReceived != null) ...[
+            if (sale.isSplitPayment) ...[
+              _amountRow(
+                'Cash received',
+                sale.cashReceived!.format(currency: data.settings.currency),
+                font,
+              ),
+              _amountRow(
+                'Paid via M-Pesa',
+                sale.gatewayPortion.format(currency: data.settings.currency),
+                font,
+              ),
+            ] else if (sale.cashReceived != null) ...[
               _amountRow(
                 'Cash received',
                 sale.cashReceived!.format(currency: data.settings.currency),

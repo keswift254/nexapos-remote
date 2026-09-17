@@ -61,7 +61,7 @@ void main() {
       final router = container.read(routerProvider);
       container.read(updateAvailabilityProvider.notifier).applyResult(const UpdateCheckResult(
         currentVersion: '1.0.11', updateAvailable: true,
-        latest: LatestVersionInfo(version: '1.0.12', windowsUrl: '', androidUrl: ''),
+        latest: LatestVersionInfo(version: '1.0.12', androidUrl: ''),
       ));
       await tester.pumpWidget(UncontrolledProviderScope(
         container: container, child: MaterialApp.router(routerConfig: router),
@@ -76,7 +76,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Privacy'), findsOneWidget);
       if (role != UserRole.admin) {
-        expect(find.text('Business Settings'), findsNothing);
+        expect(find.text('General Settings'), findsNothing);
         expect(find.text('Payment Settings'), findsNothing);
         expect(find.text('Device Sync'), findsNothing);
         expect(find.text('Backup'), findsNothing);

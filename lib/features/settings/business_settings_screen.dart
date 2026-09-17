@@ -125,7 +125,7 @@ class _BusinessSettingsScreenState extends ConsumerState<BusinessSettingsScreen>
     final settingsAsync = ref.watch(currentBusinessSettingsProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Business Settings')),
+      appBar: AppBar(title: const Text('General Settings')),
       body: settingsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (error, _) => Center(child: Text('Failed to load: $error')),

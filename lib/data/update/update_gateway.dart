@@ -25,27 +25,23 @@ class UpdateOfflineException implements Exception {
 
 class LatestVersionInfo {
   final String version;
-  final String windowsUrl;
   final String windowsInstallerUrl;
   final String androidUrl;
   final String? releaseNotes;
-  // Hex-encoded SHA-256 of the exact file at windowsUrl/androidUrl,
+  // Hex-encoded SHA-256 of the exact file at windowsInstallerUrl/androidUrl,
   // computed by whoever cuts the release (see generator.html's publish
   // card) and checked against the downloaded bytes before anything is
-  // extracted or installed - see UpdateService.install(). Nullable only
-  // so old server rows can still be parsed and shown; install refuses a
-  // release whose checksum is absent or malformed.
-  final String? windowsSha256;
+  // installed - see UpdateService.install(). Nullable only so old server
+  // rows can still be parsed and shown; install refuses a release whose
+  // checksum is absent or malformed.
   final String? windowsInstallerSha256;
   final String? androidSha256;
 
   const LatestVersionInfo({
     required this.version,
-    required this.windowsUrl,
     this.windowsInstallerUrl = '',
     required this.androidUrl,
     this.releaseNotes,
-    this.windowsSha256,
     this.windowsInstallerSha256,
     this.androidSha256,
   });
@@ -85,20 +81,15 @@ class UpdateGateway {
     if (response['success'] != true) return null;
     final version = (response['version'] as String? ?? '').trim();
     if (version.isEmpty) return null;
-    final windowsSha256 = (response['windows_sha256'] as String?)?.trim();
     final windowsInstallerSha256 =
         (response['windows_installer_sha256'] as String?)?.trim();
     final androidSha256 = (response['android_sha256'] as String?)?.trim();
     return LatestVersionInfo(
       version: version,
-      windowsUrl: (response['windows_url'] as String? ?? '').trim(),
       windowsInstallerUrl: (response['windows_installer_url'] as String? ?? '')
           .trim(),
       androidUrl: (response['android_url'] as String? ?? '').trim(),
       releaseNotes: (response['release_notes'] as String?)?.trim(),
-      windowsSha256: (windowsSha256 == null || windowsSha256.isEmpty)
-          ? null
-          : windowsSha256,
       windowsInstallerSha256:
           (windowsInstallerSha256 == null || windowsInstallerSha256.isEmpty)
           ? null
@@ -110,7 +101,7 @@ class UpdateGateway {
   }
 
   /// Streams [url] straight to [destination] rather than buffering the
-  /// whole file in memory first - a Windows build zip is tens of MB, and
+  /// whole file in memory first - a Windows setup exe is tens of MB, and
   /// this runs on the same phones/low-end Windows machines the rest of
   /// the app targets. [onProgress] reports (bytesReceived, totalBytes);
   /// totalBytes is null if the server didn't send Content-Length.

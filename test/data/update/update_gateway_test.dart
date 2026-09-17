@@ -17,7 +17,7 @@ void main() {
           jsonEncode({
             'success': true,
             'version': '1.0.1',
-            'windows_url': 'https://example.com/NexaPOS-Windows.zip',
+            'windows_installer_url': 'https://example.com/NexaPOS-Setup.exe',
             'android_url': 'https://example.com/NexaPOS.apk',
             'release_notes': 'Bug fixes',
           }),
@@ -29,7 +29,7 @@ void main() {
 
       expect(result, isNotNull);
       expect(result!.version, '1.0.1');
-      expect(result.windowsUrl, 'https://example.com/NexaPOS-Windows.zip');
+      expect(result.windowsInstallerUrl, 'https://example.com/NexaPOS-Setup.exe');
       expect(result.androidUrl, 'https://example.com/NexaPOS.apk');
       expect(result.releaseNotes, 'Bug fixes');
     });
@@ -40,9 +40,9 @@ void main() {
           jsonEncode({
             'success': true,
             'version': '1.0.1',
-            'windows_url': 'https://example.com/NexaPOS-Windows.zip',
+            'windows_installer_url': 'https://example.com/NexaPOS-Setup.exe',
             'android_url': 'https://example.com/NexaPOS.apk',
-            'windows_sha256': 'abc123',
+            'windows_installer_sha256': 'abc123',
             'android_sha256': 'def456',
           }),
           200,
@@ -51,7 +51,7 @@ void main() {
 
       final result = await gateway.fetchLatestVersion();
 
-      expect(result!.windowsSha256, 'abc123');
+      expect(result!.windowsInstallerSha256, 'abc123');
       expect(result.androidSha256, 'def456');
     });
 
@@ -61,7 +61,7 @@ void main() {
           jsonEncode({
             'success': true,
             'version': '1.0.1',
-            'windows_url': 'https://example.com/NexaPOS-Windows.zip',
+            'windows_installer_url': 'https://example.com/NexaPOS-Setup.exe',
             'android_url': 'https://example.com/NexaPOS.apk',
           }),
           200,
@@ -70,7 +70,7 @@ void main() {
 
       final result = await gateway.fetchLatestVersion();
 
-      expect(result!.windowsSha256, isNull);
+      expect(result!.windowsInstallerSha256, isNull);
       expect(result.androidSha256, isNull);
     });
 

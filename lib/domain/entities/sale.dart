@@ -35,7 +35,14 @@ abstract class Sale with _$Sale {
 
   bool get isPending => status == 'pending';
 
-  Money? get changeDue => cashReceived == null ? null : cashReceived! - total;
+  /// Cash-only - null for any other payment method even if cashReceived
+  /// happens to be set (a split cash+M-Pesa sale uses cashReceived
+  /// differently, see [isSplitPayment]/[gatewayPortion]). A completed
+  /// pure-cash sale can no longer actually be short (cart_screen.dart
+  /// blocks completion until cashReceived >= total), but this stays
+  /// defensive rather than assuming that guard can never be bypassed.
+  Money? get changeDue =>
+      (paymentMethod == 'cash' && cashReceived != null) ? cashReceived! - total : null;
 
   /// True once cashReceived is recorded and fell short of total - the
   /// receipt labels this case "Still owed" rather than "Change due".
@@ -46,6 +53,19 @@ abstract class Sale with _$Sale {
   /// negative number either way.
   Money? get changeDueAbs =>
       changeDue == null ? null : Money(changeDue!.cents.abs());
+
+  /// True when part of this sale was pre-collected in cash and the rest
+  /// was charged through Paystack - cart_screen.dart's "Send M-Pesa
+  /// prompt for remaining balance" path, the only way to reach this
+  /// state. A plain Paystack sale never has cashReceived set.
+  bool get isSplitPayment => paymentMethod == 'paystack' && cashReceived != null;
+
+  /// The amount actually charged to/verified with Paystack - the full
+  /// total normally, or just the shortfall for a split sale. Used both
+  /// to ask Paystack for the right amount up front and to verify the
+  /// right amount was actually confirmed, so a split sale is never
+  /// double-charged the full total on top of cash already collected.
+  Money get gatewayPortion => isSplitPayment ? total - cashReceived! : total;
 
   /// Customer-facing label for the receipt/on-screen totals - never the
   /// raw gateway name. 'paystack' shows as "M-Pesa" since that's what

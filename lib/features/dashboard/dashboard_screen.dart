@@ -190,7 +190,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 if (user.role == UserRole.admin)
                   const PopupMenuItem(
                     value: '/business-settings',
-                    child: Text('Business Settings'),
+                    child: Text('General Settings'),
                   ),
                 if (user.role == UserRole.admin)
                   const PopupMenuItem(

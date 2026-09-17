@@ -252,7 +252,16 @@ class _ReceiptBody extends StatelessWidget {
           ),
           const _SolidDivider(),
           Text('Payment: ${sale.paymentMethodLabel}'),
-          if (sale.cashReceived != null) ...[
+          if (sale.isSplitPayment) ...[
+            _AmountRow(
+              'Cash received',
+              sale.cashReceived!.format(currency: data.settings.currency),
+            ),
+            _AmountRow(
+              'Paid via M-Pesa',
+              sale.gatewayPortion.format(currency: data.settings.currency),
+            ),
+          ] else if (sale.cashReceived != null) ...[
             _AmountRow(
               'Cash received',
               sale.cashReceived!.format(currency: data.settings.currency),

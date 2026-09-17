@@ -218,6 +218,11 @@ class CheckoutService {
     required String userId,
     required String saleNumber,
     required String paystackReference,
+    // Set only for a split cash+M-Pesa sale (cart_screen.dart's "Send
+    // M-Pesa prompt for remaining balance") - the cash portion already
+    // collected before this gateway call was ever made. Null for a
+    // plain Paystack sale.
+    Money? cashReceived,
   }) async {
     if (!saleTypes.contains(saleType)) return const Result.failure('Select a valid sale type.');
 
@@ -231,6 +236,7 @@ class CheckoutService {
     final totals = _computeTotals(validated.subtotal, discount);
     final saleId = _idGenerator.newId();
     final trimmedPhone = customerPhone.trim();
+    final gatewayPortion = cashReceived == null ? totals.total : totals.total - cashReceived;
 
     final sale = Sale(
       id: saleId,
@@ -245,6 +251,7 @@ class CheckoutService {
       total: totals.total,
       status: 'pending',
       createdAt: _clock.now(),
+      cashReceived: cashReceived,
     );
 
     try {
@@ -255,7 +262,7 @@ class CheckoutService {
           id: '',
           saleId: saleId,
           method: 'paystack',
-          amount: totals.total,
+          amount: gatewayPortion,
           referenceNote: paystackReference,
           status: 'initiated',
         ));

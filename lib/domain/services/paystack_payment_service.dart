@@ -59,6 +59,12 @@ class PaystackPaymentService {
     String customerPhone = '',
     required String saleType,
     required String userId,
+    // Set only for a split cash+M-Pesa sale (cart_screen.dart's "Send
+    // M-Pesa prompt for remaining balance") - Paystack is asked to
+    // charge just the shortfall (total - cashReceived), never the full
+    // total on top of cash already collected. Null for a plain
+    // Paystack sale, which charges the full total exactly as before.
+    Money? cashReceived,
   }) async {
     final credentials = await _credentials.load();
     if (!credentials.isConfigured) {
@@ -76,6 +82,13 @@ class PaystackPaymentService {
     if (totals.total.isZero) {
       return const Result.failure('Add at least one product to the sale.');
     }
+    final chargeAmount = cashReceived == null ? totals.total : totals.total - cashReceived;
+    if (cashReceived != null && !chargeAmount.isNegative && chargeAmount.isZero) {
+      return const Result.failure('Cash received already covers the full total - complete the sale as cash instead.');
+    }
+    if (chargeAmount.isNegative) {
+      return const Result.failure('Cash received is more than the total - complete the sale as cash instead.');
+    }
 
     final saleNumber = await _checkoutService.generateSaleNumber();
 
@@ -84,7 +97,7 @@ class PaystackPaymentService {
       init = await _gateway.initialize(
         baseUrl: credentials.baseUrl,
         apiKey: credentials.apiKey,
-        amount: totals.total,
+        amount: chargeAmount,
         reference: saleNumber,
         email: credentials.defaultEmail,
         currency: credentials.currency,
@@ -104,6 +117,7 @@ class PaystackPaymentService {
       userId: userId,
       saleNumber: saleNumber,
       paystackReference: init.reference,
+      cashReceived: cashReceived,
     );
 
     return saleResult.when(
@@ -155,7 +169,7 @@ class PaystackPaymentService {
   Future<PaystackPollOutcome> checkPending(Sale sale) async {
     final reference = await _checkoutService.paystackReferenceFor(sale.id);
     if (reference == null) return const PaystackPollWaiting();
-    return poll(sale.id, reference, sale.total);
+    return poll(sale.id, reference, sale.gatewayPortion);
   }
 
   /// Called once at app startup: a pending paystack sale can only be
@@ -185,7 +199,7 @@ class PaystackPaymentService {
       pending.map((sale) async {
         final reference = await _checkoutService.paystackReferenceFor(sale.id);
         if (reference == null) return sale;
-        final outcome = await poll(sale.id, reference, sale.total);
+        final outcome = await poll(sale.id, reference, sale.gatewayPortion);
         return outcome is PaystackPollPaid ? null : sale;
       }),
     );

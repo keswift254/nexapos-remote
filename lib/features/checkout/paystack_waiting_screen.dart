@@ -80,7 +80,7 @@ class _PaystackWaitingScreenState extends ConsumerState<PaystackWaitingScreen>
         .poll(
           widget.session.sale.id,
           widget.session.reference,
-          widget.session.sale.total,
+          widget.session.sale.gatewayPortion,
         );
 
     if (!mounted) return;
@@ -184,7 +184,11 @@ class _PaystackWaitingScreenState extends ConsumerState<PaystackWaitingScreen>
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
                 const SizedBox(height: 8),
-                Text('Total: ${widget.session.sale.total.format()}'),
+                if (widget.session.sale.isSplitPayment) ...[
+                  Text('Cash already received: ${widget.session.sale.cashReceived!.format()}'),
+                  Text('M-Pesa amount: ${widget.session.sale.gatewayPortion.format()}'),
+                ] else
+                  Text('Total: ${widget.session.sale.total.format()}'),
                 const SizedBox(height: 24),
                 const CircularProgressIndicator(),
                 const SizedBox(height: 24),

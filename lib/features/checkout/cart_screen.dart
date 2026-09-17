@@ -126,6 +126,48 @@ class _CartScreenState extends ConsumerState<CartScreen> {
     );
   }
 
+  /// Cash fell short of the total, so "Complete Sale" is disabled (see
+  /// build()'s onPressed) - this sends an M-Pesa prompt for just the
+  /// shortfall instead of the full total, so the cash already collected
+  /// isn't charged again. On confirmation the sale completes as a
+  /// single paid sale recording both the cash portion and this M-Pesa
+  /// portion - see Sale.isSplitPayment/gatewayPortion.
+  Future<void> _submitSplitPaystack(
+    CartNotifier cart,
+    String userId,
+    Money cashReceived,
+  ) async {
+    if (_phoneController.text.trim().isEmpty) {
+      _showError('Enter the customer\'s phone number to send the M-Pesa prompt.');
+      return;
+    }
+    setState(() => _submitting = true);
+    final service = ref.read(paystackPaymentServiceProvider);
+    final state = ref.read(cartProvider);
+    final result = await service.start(
+      cart: state.items,
+      discount: state.discount,
+      customerName: _nameController.text,
+      customerPhone: _phoneController.text,
+      saleType: state.saleType,
+      userId: userId,
+      cashReceived: cashReceived,
+    );
+    if (!mounted) return;
+    setState(() => _submitting = false);
+    result.when(
+      ok: (session) {
+        cart.clear();
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => PaystackWaitingScreen(session: session),
+          ),
+        );
+      },
+      failure: (message) => _showError(message),
+    );
+  }
+
   void _showError(String message) {
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(message)));
@@ -140,6 +182,12 @@ class _CartScreenState extends ConsumerState<CartScreen> {
     final total = discount > cartState.subtotal
         ? const Money.zero()
         : cartState.subtotal - discount;
+    // A genuine, entered-but-insufficient cash amount - not simply
+    // "nothing typed in" (cents == 0), which is the existing "didn't
+    // bother recording it" case and completes as an ordinary cash sale.
+    final cashShortfall = cartState.paymentMethod == 'cash' &&
+        cartState.cashReceived.cents > 0 &&
+        cartState.cashReceived < total;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Cart & Checkout')),
@@ -255,6 +303,22 @@ class _CartScreenState extends ConsumerState<CartScreen> {
               const SizedBox(height: 4),
               _ChangeDueRow(cashReceived: cartState.cashReceived, total: total),
             ],
+            if (cashShortfall) ...[
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: _submitting || userId == null
+                    ? null
+                    : () => _submitSplitPaystack(
+                          cart,
+                          userId,
+                          cartState.cashReceived,
+                        ),
+                icon: const Icon(Icons.phone_android),
+                label: Text(
+                  'Send M-Pesa prompt for ${(total - cartState.cashReceived).format()}',
+                ),
+              ),
+            ],
           ],
         ],
       ),
@@ -262,7 +326,7 @@ class _CartScreenState extends ConsumerState<CartScreen> {
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: FilledButton(
-            onPressed: (_submitting || cartState.isEmpty || userId == null)
+            onPressed: (_submitting || cartState.isEmpty || userId == null || cashShortfall)
                 ? null
                 : () => _submit(cart, cartState.paymentMethod, userId),
             child: _submitting
@@ -279,11 +343,10 @@ class _CartScreenState extends ConsumerState<CartScreen> {
   }
 }
 
-/// Assistive only, never a checkout gate - a negative value (customer
-/// handed over less than the total) still displays, in the error color,
-/// rather than blocking "Complete Sale". A cashier legitimately
-/// recording a partial/rounded payment shouldn't be stopped by a
-/// calculator field.
+/// Live calculator, shown for any entered cash amount. A shortfall
+/// ("Still owed") does gate "Complete Sale" (see build()'s onPressed) -
+/// the cashier resolves it either by entering more cash or by sending
+/// an M-Pesa prompt for the remainder, both surfaced right below this.
 class _ChangeDueRow extends StatelessWidget {
   final Money cashReceived;
   final Money total;

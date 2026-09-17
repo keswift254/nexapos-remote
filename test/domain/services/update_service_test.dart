@@ -87,7 +87,7 @@ void main() {
             jsonEncode({
               'success': true,
               'version': '1.1.0',
-              'windows_url': 'https://example.com/win.zip',
+              'windows_installer_url': 'https://example.com/setup.exe',
               'android_url': 'https://example.com/app.apk',
             }),
             200,
@@ -120,7 +120,7 @@ void main() {
               jsonEncode({
                 'success': true,
                 'version': '1.0.13',
-                'windows_url': 'https://example.com/win.zip',
+                'windows_installer_url': 'https://example.com/setup.exe',
                 'android_url': 'https://example.com/app.apk',
               }),
               200,
@@ -147,7 +147,7 @@ void main() {
               jsonEncode({
                 'success': true,
                 'version': '1.0.0',
-                'windows_url': '',
+                'windows_installer_url': '',
                 'android_url': '',
               }),
               200,
@@ -212,7 +212,7 @@ void main() {
             jsonEncode({
               'success': true,
               'version': '2.0.0',
-              'windows_url': 'https://x/win.zip',
+              'windows_installer_url': 'https://x/setup.exe',
               'android_url': 'https://x/app.apk',
             }),
             200,
@@ -248,7 +248,7 @@ void main() {
         updateAvailable: true,
         latest: LatestVersionInfo(
           version: '1.2.0',
-          windowsUrl: 'https://x/win.zip',
+          windowsInstallerUrl: 'https://x/setup.exe',
           androidUrl: 'https://x/app.apk',
         ),
       );

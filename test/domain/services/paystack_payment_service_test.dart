@@ -302,6 +302,117 @@ void main() {
     expect(sale, isEmpty, reason: 'the finalized sale must no longer show up as pending');
   });
 
+  test('start() with cashReceived charges only the shortfall and records a split sale', () async {
+    final gateway = PaystackGateway(MockClient((request) async {
+      final body = jsonDecode(request.body) as Map<String, dynamic>;
+      expect(body['amount'], 7000, reason: 'Paystack must only be asked for the shortfall, not the full total');
+      return http.Response(
+        jsonEncode({
+          'status': true,
+          'data': {'authorization_url': 'https://paystack.test/pay/abc', 'reference': body['reference']},
+        }),
+        200,
+      );
+    }));
+    final service = PaystackPaymentService(gateway, _FakeCredentialsService(configured), checkoutService);
+
+    final result = await service.start(
+      cart: oneWidget(),
+      discount: const Money.zero(),
+      customerPhone: '0700000000',
+      saleType: 'retail',
+      userId: userId,
+      cashReceived: const Money(3000),
+    );
+
+    expect(result.isOk, isTrue);
+    result.when(
+      ok: (session) {
+        expect(session.sale.isSplitPayment, isTrue);
+        expect(session.sale.cashReceived, const Money(3000));
+        expect(session.sale.gatewayPortion, const Money(7000));
+        expect(session.sale.total, const Money(10000), reason: 'the recorded total is still the full sale price');
+      },
+      failure: (m) => fail(m),
+    );
+  });
+
+  test('start() rejects cashReceived that already covers or exceeds the total', () async {
+    var called = false;
+    final gateway = PaystackGateway(MockClient((request) async {
+      called = true;
+      throw StateError('should never be called');
+    }));
+    final service = PaystackPaymentService(gateway, _FakeCredentialsService(configured), checkoutService);
+
+    final coversFull = await service.start(
+      cart: oneWidget(),
+      discount: const Money.zero(),
+      saleType: 'retail',
+      userId: userId,
+      cashReceived: const Money(10000),
+    );
+    expect(coversFull.isFailure, isTrue);
+
+    final exceeds = await service.start(
+      cart: oneWidget(),
+      discount: const Money.zero(),
+      saleType: 'retail',
+      userId: userId,
+      cashReceived: const Money(15000),
+    );
+    expect(exceeds.isFailure, isTrue);
+    expect(called, isFalse);
+  });
+
+  test('poll() finalizes a split sale once Paystack confirms just the M-Pesa portion', () async {
+    final initGateway = PaystackGateway(MockClient((request) async {
+      final body = jsonDecode(request.body) as Map<String, dynamic>;
+      return http.Response(
+        jsonEncode({
+          'status': true,
+          'data': {'authorization_url': 'https://paystack.test/pay/abc', 'reference': body['reference']},
+        }),
+        200,
+      );
+    }));
+    final startService = PaystackPaymentService(initGateway, _FakeCredentialsService(configured), checkoutService);
+    final started = await startService.start(
+      cart: oneWidget(),
+      discount: const Money.zero(),
+      saleType: 'retail',
+      userId: userId,
+      cashReceived: const Money(3000),
+    );
+    late String saleId;
+    late String reference;
+    started.when(
+      ok: (session) {
+        saleId = session.sale.id;
+        reference = session.reference;
+      },
+      failure: (m) => fail(m),
+    );
+
+    final verifyGateway = PaystackGateway(MockClient((request) async {
+      return http.Response(
+        jsonEncode({
+          'status': true,
+          'data': {'status': 'success', 'amount': 7000, 'currency': 'KES', 'reference': reference},
+        }),
+        200,
+      );
+    }));
+    final pollService = PaystackPaymentService(verifyGateway, _FakeCredentialsService(configured), checkoutService);
+
+    final outcome = await pollService.poll(saleId, reference, const Money(7000));
+    expect(outcome, isA<PaystackPollPaid>());
+    final sale = (outcome as PaystackPollPaid).sale;
+    expect(sale.status, 'paid');
+    expect(sale.cashReceived, const Money(3000));
+    expect(sale.total, const Money(10000));
+  });
+
   test('reconcilePendingSales leaves a sale Paystack still does not confirm in the returned list', () async {
     final initGateway = PaystackGateway(MockClient((request) async {
       final body = jsonDecode(request.body) as Map<String, dynamic>;
