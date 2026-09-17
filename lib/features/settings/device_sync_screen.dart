@@ -252,7 +252,40 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
             ? 'Connected - your data will sync with the rest of that shop shortly.'
             : 'This device is now set up as its own shop.',
       );
-      await _safeSyncNow();
+      if (inviteCode != null) {
+        // Let this screen rebuild into _buildJoinOnlyView's live,
+        // per-record progress view (gated on needsInitialPull, which
+        // prepareInitialJoin above just set true) instead of sitting
+        // behind this button's own spinner icon for however long the
+        // initial hydration actually takes - previously this awaited a
+        // single _safeSyncNow() call, right here, before the UI ever
+        // showed anything beyond "Join" with a spinner on it, for the
+        // whole duration (confirmed for real: a slow first sync made
+        // this look completely frozen for a very long time).
+        if (mounted) setState(() => _submitting = false);
+        // _safeSyncNow() never throws (it catches its own errors into
+        // _syncError for the progress view to show) and one call only
+        // ever attempts one sync cycle, which is NOT guaranteed to
+        // finish the whole initial pull if a page request times out
+        // partway through - looping here until needsInitialPull
+        // actually clears is what the previous single-await version
+        // was missing: it unconditionally moved on to context.go('/')
+        // after just one attempt, whether or not that attempt actually
+        // finished, which is what let a still-unsynced device reach the
+        // dashboard only to have app.dart's own redirect guard bounce it
+        // straight back out to activation/login once it noticed access
+        // couldn't actually be verified yet.
+        while (mounted && await ref.read(syncServiceProvider).needsInitialPull) {
+          await _safeSyncNow();
+          if (!mounted) return;
+          if (await ref.read(syncServiceProvider).needsInitialPull) {
+            await Future<void>.delayed(hydratingSyncRetryInterval);
+          }
+        }
+        if (!mounted) return;
+      } else {
+        await _safeSyncNow();
+      }
       ref.invalidate(hasAnyUsersProvider);
       // _register only ever runs from _buildRegisterView, i.e. while
       // this device wasn't configured yet - that's also exactly the

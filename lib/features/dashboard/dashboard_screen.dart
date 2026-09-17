@@ -12,6 +12,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../core/providers.dart';
 import '../../core/utils/money.dart';
 import '../../domain/entities/user_role.dart';
+import '../../domain/services/home_screen_install_service.dart';
 import '../../domain/services/pending_sales_notifier.dart';
 import '../../domain/services/product_service.dart';
 import '../../domain/services/reports_service.dart';
@@ -160,6 +161,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final pendingPaystackSales = ref.watch(pendingPaystackSalesProvider);
     final availableUpdate = ref.watch(updateAvailabilityProvider);
     final cartState = ref.watch(cartProvider);
+    final homeScreenInstall = ref.watch(homeScreenInstallProvider);
     final isWindows = defaultTargetPlatform == TargetPlatform.windows;
 
     return Scaffold(
@@ -328,6 +330,31 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                       ),
                     ),
                   ],
+                  if (homeScreenInstall.shouldOffer) ...[
+                    const SizedBox(height: 12),
+                    Card(
+                      color: Theme.of(context).colorScheme.secondaryContainer,
+                      child: ListTile(
+                        leading: const Icon(Icons.add_to_home_screen),
+                        title: const Text('Add NexaPOS to your home screen'),
+                        subtitle: const Text(
+                          'Get one-tap access without opening a browser.',
+                        ),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.close),
+                          tooltip: 'Dismiss',
+                          onPressed: () => ref
+                              .read(homeScreenInstallProvider.notifier)
+                              .dismiss(),
+                        ),
+                        onTap: () => _handleAddToHomeScreen(
+                          context,
+                          ref,
+                          homeScreenInstall,
+                        ),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 20),
                   dataAsync.when(
                     loading: () => const Padding(
@@ -382,6 +409,38 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             ),
     );
   }
+}
+
+/// Android Chrome/Edge can show a real native install dialog via the
+/// stashed beforeinstallprompt event; iOS Safari has never shipped that
+/// event at all, so the only thing to offer there is the manual
+/// Share > Add to Home Screen steps.
+Future<void> _handleAddToHomeScreen(
+  BuildContext context,
+  WidgetRef ref,
+  HomeScreenInstallState state,
+) async {
+  if (state.canPromptInstall) {
+    await ref.read(homeScreenInstallProvider.notifier).promptInstall();
+    return;
+  }
+  if (!state.isIosSafari) return;
+  await showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Add NexaPOS to your home screen'),
+      content: const Text(
+        'Tap the Share icon in Safari\'s toolbar, then choose '
+        '"Add to Home Screen".',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Got it'),
+        ),
+      ],
+    ),
+  );
 }
 
 class _DashboardStats extends StatefulWidget {
