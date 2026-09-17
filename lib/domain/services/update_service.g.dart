@@ -170,3 +170,98 @@ abstract class _$UpdateAvailabilityNotifier
     return element.handleCreate(ref, build);
   }
 }
+
+/// Owns the in-flight download/install Future instead of UpdateScreen's
+/// own State - that used to live as plain widget state, so navigating
+/// away (e.g. back to the dashboard) and returning built a brand new
+/// UpdateScreen with no idea a download was already running: the
+/// button reappeared as "Download & Install" even though the actual
+/// download was never really cancelled (nothing about disposing a
+/// widget stops an in-flight Future), just orphaned from any UI. Worse,
+/// tapping the button again from that fresh screen started a second,
+/// concurrent download to the exact same temp file path. keepAlive so
+/// this survives exactly the navigation that used to lose it.
+
+@ProviderFor(UpdateInstallNotifier)
+final updateInstallProvider = UpdateInstallNotifierProvider._();
+
+/// Owns the in-flight download/install Future instead of UpdateScreen's
+/// own State - that used to live as plain widget state, so navigating
+/// away (e.g. back to the dashboard) and returning built a brand new
+/// UpdateScreen with no idea a download was already running: the
+/// button reappeared as "Download & Install" even though the actual
+/// download was never really cancelled (nothing about disposing a
+/// widget stops an in-flight Future), just orphaned from any UI. Worse,
+/// tapping the button again from that fresh screen started a second,
+/// concurrent download to the exact same temp file path. keepAlive so
+/// this survives exactly the navigation that used to lose it.
+final class UpdateInstallNotifierProvider
+    extends $NotifierProvider<UpdateInstallNotifier, UpdateInstallState> {
+  /// Owns the in-flight download/install Future instead of UpdateScreen's
+  /// own State - that used to live as plain widget state, so navigating
+  /// away (e.g. back to the dashboard) and returning built a brand new
+  /// UpdateScreen with no idea a download was already running: the
+  /// button reappeared as "Download & Install" even though the actual
+  /// download was never really cancelled (nothing about disposing a
+  /// widget stops an in-flight Future), just orphaned from any UI. Worse,
+  /// tapping the button again from that fresh screen started a second,
+  /// concurrent download to the exact same temp file path. keepAlive so
+  /// this survives exactly the navigation that used to lose it.
+  UpdateInstallNotifierProvider._()
+    : super(
+        from: null,
+        argument: null,
+        retry: null,
+        name: r'updateInstallProvider',
+        isAutoDispose: false,
+        dependencies: null,
+        $allTransitiveDependencies: null,
+      );
+
+  @override
+  String debugGetCreateSourceHash() => _$updateInstallNotifierHash();
+
+  @$internal
+  @override
+  UpdateInstallNotifier create() => UpdateInstallNotifier();
+
+  /// {@macro riverpod.override_with_value}
+  Override overrideWithValue(UpdateInstallState value) {
+    return $ProviderOverride(
+      origin: this,
+      providerOverride: $SyncValueProvider<UpdateInstallState>(value),
+    );
+  }
+}
+
+String _$updateInstallNotifierHash() =>
+    r'4ada53b5b5289e0b9013a32f2d0b6324a121b6ba';
+
+/// Owns the in-flight download/install Future instead of UpdateScreen's
+/// own State - that used to live as plain widget state, so navigating
+/// away (e.g. back to the dashboard) and returning built a brand new
+/// UpdateScreen with no idea a download was already running: the
+/// button reappeared as "Download & Install" even though the actual
+/// download was never really cancelled (nothing about disposing a
+/// widget stops an in-flight Future), just orphaned from any UI. Worse,
+/// tapping the button again from that fresh screen started a second,
+/// concurrent download to the exact same temp file path. keepAlive so
+/// this survives exactly the navigation that used to lose it.
+
+abstract class _$UpdateInstallNotifier extends $Notifier<UpdateInstallState> {
+  UpdateInstallState build();
+  @$mustCallSuper
+  @override
+  WhenComplete runBuild() {
+    final ref = this.ref as $Ref<UpdateInstallState, UpdateInstallState>;
+    final element =
+        ref.element
+            as $ClassProviderElement<
+              AnyNotifier<UpdateInstallState, UpdateInstallState>,
+              UpdateInstallState,
+              Object?,
+              Object?
+            >;
+    return element.handleCreate(ref, build);
+  }
+}

@@ -19,15 +19,22 @@ class UpdateScreen extends ConsumerStatefulWidget {
 
 class _UpdateScreenState extends ConsumerState<UpdateScreen> {
   bool _checking = true;
-  bool _installing = false;
-  double _progress = 0;
   String? _error;
   UpdateCheckResult? _result;
 
   @override
   void initState() {
     super.initState();
-    _check();
+    // Skip the redundant re-check if a download from before navigating
+    // away is already running - updateInstallProvider is
+    // keepAlive and already carries what's being installed (see its
+    // .info field), so re-checking here would just flash a loading
+    // spinner over progress that's already known.
+    if (ref.read(updateInstallProvider).installing) {
+      _checking = false;
+    } else {
+      _check();
+    }
   }
 
   Future<void> _check() async {
@@ -64,44 +71,35 @@ class _UpdateScreenState extends ConsumerState<UpdateScreen> {
     }
   }
 
-  Future<void> _install() async {
-    final latest = _result?.latest;
+  void _install() {
+    final latest = _result?.latest ?? ref.read(updateInstallProvider).info;
     if (latest == null) return;
-    setState(() {
-      _installing = true;
-      _progress = 0;
-      _error = null;
-    });
-    final result = await ref.read(updateServiceProvider).install(
-          latest,
-          onProgress: (p) {
-            if (mounted) setState(() => _progress = p);
-          },
-        );
-    // On a successful Windows install, the app has already called exit()
-    // inside install() - this line is unreached there. Android reaches
-    // here either way, since its installer runs as a separate activity
-    // on top of (not instead of) this one.
-    if (!mounted) return;
-    result.when(
-      ok: (_) {
-        setState(() => _installing = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Installer opened - finish the install there, then reopen NexaPOS.')),
-        );
-      },
-      failure: (message) {
-        setState(() {
-          _installing = false;
-          _error = message;
-        });
-      },
-    );
+    // Fire-and-forget: the notifier owns the Future from here, keeping it
+    // running (and its progress visible to whichever screen is watching
+    // it) no matter what this widget does next, including being disposed
+    // by navigating away.
+    ref.read(updateInstallProvider.notifier).start(latest);
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final installState = ref.watch(updateInstallProvider);
+    ref.listen<UpdateInstallState>(updateInstallProvider, (previous, next) {
+      final finishedOk = (previous?.installing ?? false) && !next.installing && next.error == null;
+      if (!finishedOk) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Installer opened - finish the install there, then reopen NexaPOS.')),
+      );
+      // Android reaches here (Windows already called exit(0) on success) -
+      // re-check so "You're on the latest version" reflects reality once
+      // the OS installer actually finishes, next time this screen opens.
+      _check();
+    });
+
+    final latest = _result?.latest ?? installState.info;
+    final updateAvailable = _result != null ? _result!.updateAvailable : installState.info != null;
+
     return Scaffold(
       appBar: AppBar(title: const Text('Software Update')),
       body: _checking
@@ -131,57 +129,63 @@ class _UpdateScreenState extends ConsumerState<UpdateScreen> {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  if (_result!.updateAvailable && _result!.latest != null) ...[
-                    Card(
-                      color: theme.colorScheme.primaryContainer,
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Update available: ${_result!.latest!.version}',
-                              style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-                            ),
-                            if ((_result!.latest!.releaseNotes ?? '').isNotEmpty) ...[
-                              const SizedBox(height: 8),
-                              Text(_result!.latest!.releaseNotes!),
-                            ],
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    if (_installing) ...[
-                      LinearProgressIndicator(value: _progress > 0 ? _progress : null),
-                      const SizedBox(height: 8),
-                      Text(
-                        _progress < 0.9 ? 'Downloading... ${(_progress * 100).round()}%' : 'Installing...',
-                        textAlign: TextAlign.center,
-                        style: theme.textTheme.bodySmall,
-                      ),
-                    ] else
-                      FilledButton.icon(
-                        onPressed: _install,
-                        icon: const Icon(Icons.system_update_alt),
-                        label: const Text('Download & Install'),
-                      ),
-                  ] else
-                    Row(
-                      children: [
-                        Icon(Icons.check_circle, color: Colors.green.shade700),
-                        const SizedBox(width: 8),
-                        const Text("You're on the latest version."),
-                      ],
-                    ),
                 ],
+                if (updateAvailable && latest != null) ...[
+                  Card(
+                    color: theme.colorScheme.primaryContainer,
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Update available: ${latest.version}',
+                            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                          ),
+                          if ((latest.releaseNotes ?? '').isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            Text(latest.releaseNotes!),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  if (installState.installing) ...[
+                    LinearProgressIndicator(value: installState.progress > 0 ? installState.progress : null),
+                    const SizedBox(height: 8),
+                    Text(
+                      installState.progress < 0.9
+                          ? 'Downloading... ${(installState.progress * 100).round()}%'
+                          : 'Installing...',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ] else
+                    FilledButton.icon(
+                      onPressed: _install,
+                      icon: const Icon(Icons.system_update_alt),
+                      label: const Text('Download & Install'),
+                    ),
+                ] else if (_result != null)
+                  Row(
+                    children: [
+                      Icon(Icons.check_circle, color: Colors.green.shade700),
+                      const SizedBox(width: 8),
+                      const Text("You're on the latest version."),
+                    ],
+                  ),
                 if (_error != null) ...[
                   const SizedBox(height: 16),
                   Text(_error!, style: TextStyle(color: theme.colorScheme.error)),
                 ],
+                if (installState.error != null) ...[
+                  const SizedBox(height: 16),
+                  Text(installState.error!, style: TextStyle(color: theme.colorScheme.error)),
+                ],
                 const SizedBox(height: 20),
                 OutlinedButton.icon(
-                  onPressed: _installing ? null : _check,
+                  onPressed: installState.installing ? null : _check,
                   icon: const Icon(Icons.refresh),
                   label: const Text('Check for Updates'),
                 ),

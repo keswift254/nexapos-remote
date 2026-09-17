@@ -278,5 +278,70 @@ class UpdateService {
     }
     return null;
   }
+}
 
+class UpdateInstallState {
+  const UpdateInstallState({
+    this.installing = false,
+    this.progress = 0,
+    this.error,
+    this.info,
+  });
+
+  final bool installing;
+  final double progress;
+  final String? error;
+  // Carried here (not just left for UpdateScreen's own checkForUpdate()
+  // result) so a screen re-created after navigating away and back can
+  // show what's actually being installed without needing to re-check -
+  // the point of keeping this state alive in the first place.
+  final LatestVersionInfo? info;
+
+  UpdateInstallState copyWith({double? progress}) {
+    return UpdateInstallState(
+      installing: installing,
+      progress: progress ?? this.progress,
+      error: error,
+      info: info,
+    );
+  }
+}
+
+/// Owns the in-flight download/install Future instead of UpdateScreen's
+/// own State - that used to live as plain widget state, so navigating
+/// away (e.g. back to the dashboard) and returning built a brand new
+/// UpdateScreen with no idea a download was already running: the
+/// button reappeared as "Download & Install" even though the actual
+/// download was never really cancelled (nothing about disposing a
+/// widget stops an in-flight Future), just orphaned from any UI. Worse,
+/// tapping the button again from that fresh screen started a second,
+/// concurrent download to the exact same temp file path. keepAlive so
+/// this survives exactly the navigation that used to lose it.
+@Riverpod(keepAlive: true)
+class UpdateInstallNotifier extends _$UpdateInstallNotifier {
+  Future<void>? _inFlight;
+
+  @override
+  UpdateInstallState build() => const UpdateInstallState();
+
+  /// No-ops if a download is already running rather than erroring - the
+  /// button that calls this is only ever shown when state.installing is
+  /// false, but this stays safe even if something calls it twice anyway.
+  void start(LatestVersionInfo info) {
+    if (_inFlight != null) return;
+    state = UpdateInstallState(installing: true, info: info);
+    _inFlight = _run(info).whenComplete(() => _inFlight = null);
+  }
+
+  Future<void> _run(LatestVersionInfo info) async {
+    final result = await ref
+        .read(updateServiceProvider)
+        .install(info, onProgress: (p) => state = state.copyWith(progress: p));
+    // On Windows, a successful install() has already called exit(0) -
+    // this line is unreached there. Android reaches here either way.
+    result.when(
+      ok: (_) => state = const UpdateInstallState(),
+      failure: (message) => state = UpdateInstallState(error: message, info: info),
+    );
+  }
 }
