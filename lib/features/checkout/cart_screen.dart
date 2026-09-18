@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/utils/money.dart';
+import '../../domain/entities/product.dart';
 import '../../domain/services/checkout_service.dart';
 import '../../domain/services/paystack_payment_service.dart';
 import '../../domain/services/session_service.dart';
 import '../dashboard/dashboard_screen.dart';
+import '../products/products_screen.dart' show allProductsProvider;
 import 'add_item_actions.dart';
 import 'cart_notifier.dart';
 import 'paystack_waiting_screen.dart';
@@ -42,6 +43,7 @@ class _CartScreenState extends ConsumerState<CartScreen> {
         : ref.read(cartProvider).cashReceived.toMajorDouble.toStringAsFixed(2),
   );
   final _searchController = TextEditingController();
+  String _query = '';
   bool _submitting = false;
 
   @override
@@ -52,27 +54,46 @@ class _CartScreenState extends ConsumerState<CartScreen> {
     super.dispose();
   }
 
+  List<Product> _matchesFor(List<Product> products, String query) {
+    final needle = query.trim().toLowerCase();
+    if (needle.isEmpty) return const [];
+    return products
+        .where((p) => p.isActive && p.name.toLowerCase().contains(needle))
+        .toList();
+  }
+
+  void _addFromSearch(CartNotifier cart, Product product) {
+    cart.addProduct(product);
+    _searchController.clear();
+    setState(() => _query = '');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Added "${product.name}".'), duration: const Duration(seconds: 1)),
+    );
+  }
+
   /// Same shortcut NewSaleScreen offers, so a cashier mid-checkout who
   /// realizes one more item is needed doesn't have to leave the cart to
-  /// go find it - findByBarcode is the only lookup available (unlike
-  /// NewSaleScreen, this screen has no product grid to filter by name).
-  /// Unlike NewSaleScreen, a non-match here needs its own message: that
-  /// screen falls through to filtering its product grid by the same
-  /// text, which is itself visible feedback - this screen has no such
-  /// grid, so silently doing nothing would look identical to the field
-  /// simply not working at all.
+  /// go find it. Enter first tries an exact barcode match (what a
+  /// keyboard-wedge scanner actually sends); failing that, if typing has
+  /// already turned up name matches below the field, those are left
+  /// showing rather than second-guessed with an error - only truly
+  /// nothing (no barcode, no name matches either) gets its own message,
+  /// since this screen has no product grid to fall back to for feedback
+  /// the way NewSaleScreen's does.
   Future<void> _handleSearchSubmitted(String value) async {
     final added = await handleBarcodeSearchSubmitted(context, ref, value);
     if (!mounted) return;
-    if (!added) {
-      if (value.trim().isNotEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('No product found for barcode "${value.trim()}".')),
-        );
-      }
+    if (added) {
+      _searchController.clear();
+      setState(() => _query = '');
       return;
     }
-    _searchController.clear();
+    final products = ref.read(allProductsProvider).value ?? const [];
+    if (value.trim().isNotEmpty && _matchesFor(products, value).isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No product found for "${value.trim()}".')),
+      );
+    }
   }
 
   Future<void> _submit(
@@ -197,6 +218,10 @@ class _CartScreenState extends ConsumerState<CartScreen> {
     final cashShortfall = cartState.paymentMethod == 'cash' &&
         cartState.cashReceived.cents > 0 &&
         cartState.cashReceived < total;
+    final searchMatches = _matchesFor(
+      ref.watch(allProductsProvider).value ?? const [],
+      _query,
+    );
 
     return Scaffold(
       appBar: AppBar(title: const Text('Cart & Checkout')),
@@ -210,25 +235,17 @@ class _CartScreenState extends ConsumerState<CartScreen> {
                   controller: _searchController,
                   autofocus: true,
                   decoration: const InputDecoration(
-                    hintText: 'Scan a barcode to add an item...',
+                    hintText: 'Search by name, or scan a barcode...',
                     prefixIcon: Icon(Icons.search),
                     isDense: true,
                   ),
-                  keyboardType: TextInputType.number,
-                  // A numeric keypad doesn't reliably show a Done/Enter
-                  // key on every platform/IME on its own - forcing the
-                  // search action explicitly is what actually guarantees
-                  // onSubmitted has a way to fire from the on-screen
-                  // keyboard (a physical keyboard-wedge scanner's own
-                  // Enter keystroke always worked regardless).
+                  // Not digits-only (unlike a plain barcode field) -
+                  // this doubles as a live name search, which needs
+                  // letters. A real barcode scan still works the same
+                  // way regardless: it types digits then Enter, handled
+                  // below by onSubmitted's exact-match lookup.
                   textInputAction: TextInputAction.search,
-                  // Barcode-only here (unlike NewSaleScreen's search,
-                  // which also filters by product name) - retail
-                  // barcodes (EAN-8/13, UPC-A/E) are digits-only, so
-                  // this both matches what a scanner actually sends and
-                  // keeps a keyboard-wedge scan from racing a half-typed
-                  // name search into a lookup.
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  onChanged: (value) => setState(() => _query = value),
                   onSubmitted: _handleSearchSubmitted,
                 ),
               ),
@@ -239,6 +256,25 @@ class _CartScreenState extends ConsumerState<CartScreen> {
               ),
             ],
           ),
+          if (_query.trim().isNotEmpty) ...[
+            const SizedBox(height: 4),
+            if (searchMatches.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: Text('No products found.'),
+              )
+            else
+              for (final product in searchMatches)
+                Card(
+                  margin: const EdgeInsets.only(bottom: 4),
+                  child: ListTile(
+                    dense: true,
+                    title: Text(product.name),
+                    subtitle: Text(product.retailPrice.format()),
+                    onTap: () => _addFromSearch(cart, product),
+                  ),
+                ),
+          ],
           const SizedBox(height: 12),
           if (cartState.isEmpty) const Text('Your cart is empty.'),
           for (var i = 0; i < cartState.items.length; i++)

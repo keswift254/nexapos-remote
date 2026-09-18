@@ -13,6 +13,7 @@ import 'package:nexapos_mobile/domain/repositories/product_repository.dart';
 import 'package:nexapos_mobile/domain/services/session_service.dart';
 import 'package:nexapos_mobile/features/checkout/cart_notifier.dart';
 import 'package:nexapos_mobile/features/checkout/cart_screen.dart';
+import 'package:nexapos_mobile/features/products/products_screen.dart';
 
 class _Session extends SessionNotifier {
   @override
@@ -40,16 +41,23 @@ const _soda = Product(
   status: 'active',
 );
 
-/// A minimal stand-in, same shape as new_sale_barcode_test.dart's -
-/// only findByBarcode is ever expected to be called from CartScreen's
-/// own search shortcut.
-class _FakeProductRepository implements ProductRepository {
-  final Map<String, Product> byBarcode;
-  const _FakeProductRepository(this.byBarcode);
+const _bread = Product(
+  id: 'p2',
+  sku: 'SKU-2',
+  name: 'Brown Bread',
+  categoryId: 'c1',
+  retailPrice: Money(6000),
+  wholesalePrice: Money(5000),
+  costPrice: Money(4000),
+  stockQty: 10,
+  reorderLevel: 2,
+  status: 'active',
+);
 
+class _NoopProductRepository implements ProductRepository {
+  const _NoopProductRepository();
   @override
-  Future<Product?> findByBarcode(String barcode) async => byBarcode[barcode];
-
+  Future<Product?> findByBarcode(String barcode) async => null;
   @override
   Never noSuchMethod(Invocation invocation) => throw UnimplementedError(
         '${invocation.memberName} was not expected to be called in this test',
@@ -57,21 +65,20 @@ class _FakeProductRepository implements ProductRepository {
 }
 
 void main() {
-  ProviderContainer buildContainer() {
+  testWidgets('typing a product name in the cart search shows matches, tapping one adds it', (tester) async {
+    tester.view.physicalSize = const Size(1200, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
     final db = AppDatabase(NativeDatabase.memory());
     addTearDown(db.close);
     final container = ProviderContainer(overrides: [
       sessionProvider.overrideWith(_Session.new),
       appDatabaseProvider.overrideWithValue(db),
-      productRepositoryProvider.overrideWithValue(
-        const _FakeProductRepository({'6009123456789': _soda}),
-      ),
+      allProductsProvider.overrideWith((ref) async => [_soda, _bread]),
+      productRepositoryProvider.overrideWithValue(const _NoopProductRepository()),
     ]);
-    return container;
-  }
-
-  testWidgets('scanning a recognized barcode from the cart screen adds it and clears the field', (tester) async {
-    final container = buildContainer();
     addTearDown(container.dispose);
     await tester.pumpWidget(UncontrolledProviderScope(
       container: container,
@@ -79,22 +86,38 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    await tester.enterText(find.byType(TextField).first, '6009123456789');
-    await tester.testTextInput.receiveAction(TextInputAction.search);
+    expect(find.text('Soda 500ml'), findsNothing);
+
+    await tester.enterText(find.byType(TextField).first, 'sod');
+    await tester.pump();
+
+    expect(find.text('Soda 500ml'), findsOneWidget);
+    expect(find.text('Brown Bread'), findsNothing);
+    expect(find.text('No products found.'), findsNothing);
+
+    await tester.tap(find.text('Soda 500ml'));
     await tester.pumpAndSettle();
 
     expect(container.read(cartProvider).items, hasLength(1));
-    expect(find.text('Added "Soda 500ml" from barcode scan.'), findsOneWidget);
+    expect(container.read(cartProvider).items.single.name, 'Soda 500ml');
+    // The search box clears once an item is added from the results.
     expect(tester.widget<TextField>(find.byType(TextField).first).controller?.text, isEmpty);
   });
 
-  // The cart screen (unlike NewSaleScreen) has no product grid to fall
-  // back to filtering, so a non-matching scan needs its own explicit
-  // message - silently doing nothing here is indistinguishable from the
-  // search box simply not working at all, which is exactly what got
-  // reported for real.
-  testWidgets('scanning an unrecognized barcode from the cart screen shows a clear "not found" message', (tester) async {
-    final container = buildContainer();
+  testWidgets('a name that matches nothing shows "No products found."', (tester) async {
+    tester.view.physicalSize = const Size(1200, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final db = AppDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    final container = ProviderContainer(overrides: [
+      sessionProvider.overrideWith(_Session.new),
+      appDatabaseProvider.overrideWithValue(db),
+      allProductsProvider.overrideWith((ref) async => [_soda, _bread]),
+      productRepositoryProvider.overrideWithValue(const _NoopProductRepository()),
+    ]);
     addTearDown(container.dispose);
     await tester.pumpWidget(UncontrolledProviderScope(
       container: container,
@@ -102,11 +125,10 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    await tester.enterText(find.byType(TextField).first, '000000000000');
-    await tester.testTextInput.receiveAction(TextInputAction.search);
-    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, 'xyz-nope');
+    await tester.pump();
 
+    expect(find.text('No products found.'), findsOneWidget);
     expect(container.read(cartProvider).items, isEmpty);
-    expect(find.text('No product found for "000000000000".'), findsOneWidget);
   });
 }
