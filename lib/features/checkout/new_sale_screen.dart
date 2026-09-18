@@ -69,6 +69,7 @@ class _NewSaleScreenState extends ConsumerState<NewSaleScreen> {
                 filled: true,
                 isDense: true,
               ),
+              textInputAction: TextInputAction.search,
               onChanged: (value) => setState(() => _query = value.trim().toLowerCase()),
               onSubmitted: _handleSearchSubmitted,
             ),

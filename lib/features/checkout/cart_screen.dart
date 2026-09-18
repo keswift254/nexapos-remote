@@ -56,9 +56,22 @@ class _CartScreenState extends ConsumerState<CartScreen> {
   /// realizes one more item is needed doesn't have to leave the cart to
   /// go find it - findByBarcode is the only lookup available (unlike
   /// NewSaleScreen, this screen has no product grid to filter by name).
+  /// Unlike NewSaleScreen, a non-match here needs its own message: that
+  /// screen falls through to filtering its product grid by the same
+  /// text, which is itself visible feedback - this screen has no such
+  /// grid, so silently doing nothing would look identical to the field
+  /// simply not working at all.
   Future<void> _handleSearchSubmitted(String value) async {
     final added = await handleBarcodeSearchSubmitted(context, ref, value);
-    if (!added || !mounted) return;
+    if (!mounted) return;
+    if (!added) {
+      if (value.trim().isNotEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No product found for barcode "${value.trim()}".')),
+        );
+      }
+      return;
+    }
     _searchController.clear();
   }
 
@@ -202,6 +215,13 @@ class _CartScreenState extends ConsumerState<CartScreen> {
                     isDense: true,
                   ),
                   keyboardType: TextInputType.number,
+                  // A numeric keypad doesn't reliably show a Done/Enter
+                  // key on every platform/IME on its own - forcing the
+                  // search action explicitly is what actually guarantees
+                  // onSubmitted has a way to fire from the on-screen
+                  // keyboard (a physical keyboard-wedge scanner's own
+                  // Enter keystroke always worked regardless).
+                  textInputAction: TextInputAction.search,
                   // Barcode-only here (unlike NewSaleScreen's search,
                   // which also filters by product name) - retail
                   // barcodes (EAN-8/13, UPC-A/E) are digits-only, so
