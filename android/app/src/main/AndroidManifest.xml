@@ -14,9 +14,19 @@
          if they haven't yet. Irrelevant for Play Store distribution rules
          since this app isn't distributed through Play. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+    <!-- allowBackup off: left unset, Android defaults it ON, so Auto Backup
+         would copy this app's SQLite file - including its device_meta
+         device id and sync cursors - into the owner's Google account and
+         restore it onto their next phone. Two phones then claim the same
+         device id, which silently corrupts sync attribution (who created
+         which row) and the push/pull cursors. A replacement phone should
+         re-join the shop with an invite code and sync down instead, which
+         the app already supports; Drive backup inside the app is the
+         supported way to move data. -->
     <application
         android:label="NexaPOS"
         android:name="${applicationName}"
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"

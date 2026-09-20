@@ -7,12 +7,17 @@ import '../../data/repositories/user_repository_impl.dart';
 import '../entities/user.dart';
 import '../entities/user_role.dart';
 import '../repositories/user_repository.dart';
+import 'login_throttle.dart';
 
 part 'auth_service.g.dart';
 
 @Riverpod(keepAlive: true)
 AuthService authService(Ref ref) {
-  return AuthService(ref.watch(userRepositoryProvider), ref.watch(idGeneratorProvider));
+  return AuthService(
+    ref.watch(userRepositoryProvider),
+    ref.watch(idGeneratorProvider),
+    throttle: LoginThrottle(ref.watch(appDatabaseProvider), ref.watch(clockProvider)),
+  );
 }
 
 /// Local bcrypt login and first-run admin creation. There is no server
@@ -22,14 +27,33 @@ AuthService authService(Ref ref) {
 class AuthService {
   final UserRepository _userRepository;
   final IdGenerator _idGenerator;
+  // Optional so a caller that only needs createUser/etc. (and older tests)
+  // can build one without a database behind it; the real provider always
+  // supplies it, so the app itself always throttles.
+  final LoginThrottle? _throttle;
 
-  AuthService(this._userRepository, this._idGenerator);
+  AuthService(this._userRepository, this._idGenerator, {LoginThrottle? throttle})
+      // A named parameter can't be a private initializing formal, so the
+      // lint's suggestion doesn't apply here.
+      // ignore: prefer_initializing_formals
+      : _throttle = throttle;
 
   Future<bool> hasAnyUsers() => _userRepository.hasAnyUsers();
 
   Future<Result<User>> login(String username, String password) async {
-    final user = await _userRepository.findByUsername(username.trim());
+    final typed = username.trim();
+    // Checked before the (deliberately slow) bcrypt compare, so a locked
+    // username costs nothing to refuse and even the right password is
+    // turned away until the wait is over.
+    final locked = await _throttle?.remainingLock(typed);
+    if (locked != null) {
+      return Result.failure(
+        'Too many failed attempts. Try again in ${LoginThrottle.describe(locked)}.',
+      );
+    }
+    final user = await _userRepository.findByUsername(typed);
     if (user == null) {
+      await _throttle?.recordFailure(typed);
       return const Result.failure('Incorrect username or password.');
     }
     if (!user.isActive) {
@@ -37,8 +61,10 @@ class AuthService {
     }
     final matches = BCrypt.checkpw(password, user.passwordHash);
     if (!matches) {
+      await _throttle?.recordFailure(typed);
       return const Result.failure('Incorrect username or password.');
     }
+    await _throttle?.reset(typed);
     return Result.ok(user);
   }
 

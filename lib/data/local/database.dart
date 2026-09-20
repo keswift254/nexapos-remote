@@ -104,26 +104,26 @@ class AppDatabase extends _$AppDatabase {
             // pushed/pulled anything yet", correct for an existing
             // installation that predates sync exactly as much as for a
             // brand-new one.
-            await m.addColumn(deviceMeta, deviceMeta.lastPushedLocalRev);
-            await m.addColumn(deviceMeta, deviceMeta.lastPulledChangeId);
+            await _addColumnIfMissing(m, deviceMeta, deviceMeta.lastPushedLocalRev);
+            await _addColumnIfMissing(m, deviceMeta, deviceMeta.lastPulledChangeId);
           }
           if (from < 3) {
             // Left as the column default (empty string), not backfilled -
             // see registrationSecret's own doc comment for why that's
             // correct for an existing installation.
-            await m.addColumn(deviceMeta, deviceMeta.registrationSecret);
+            await _addColumnIfMissing(m, deviceMeta, deviceMeta.registrationSecret);
           }
           if (from < 4) {
             // Nullable, no backfill needed - every existing sale simply
             // has no recorded cash-received amount, same as a new cash
             // sale where the cashier skips the field.
-            await m.addColumn(sales, sales.cashReceivedCents);
+            await _addColumnIfMissing(m, sales, sales.cashReceivedCents);
           }
           if (from < 5) {
             // Nullable, no backfill needed - an existing product simply
             // has no barcode recorded until someone scans or types one
             // in, same as a newly added product that skips the field.
-            await m.addColumn(products, products.barcode);
+            await _addColumnIfMissing(m, products, products.barcode);
           }
         },
         beforeOpen: (details) async {
@@ -155,6 +155,30 @@ class AppDatabase extends _$AppDatabase {
           await customStatement('PRAGMA foreign_keys=ON');
         },
       );
+
+  /// A bare Migrator.addColumn throws "duplicate column name" if the
+  /// column is already there, and that is a real state, not a
+  /// hypothetical: SQLite records the schema version only after the whole
+  /// upgrade finishes, so an upgrade interrupted after the ALTER TABLE
+  /// but before that bookkeeping (a browser tab closed or reloaded
+  /// during a slow first load, a crash, a killed process) leaves the
+  /// column present with the old version number still stored. Every later
+  /// open would then re-run the same ALTER and fail forever - reported
+  /// for real on the web build as "duplicate column name: barcode",
+  /// which locked the device out of the whole app. Checking first makes
+  /// each step safe to run again, so an interrupted upgrade just
+  /// finishes on the next open.
+  Future<void> _addColumnIfMissing(
+    Migrator m,
+    TableInfo table,
+    GeneratedColumn column,
+  ) async {
+    final columns = await customSelect(
+      'PRAGMA table_info("${table.actualTableName}")',
+    ).get();
+    final exists = columns.any((row) => row.read<String>('name') == column.name);
+    if (!exists) await m.addColumn(table, column);
+  }
 
   /// Belt-and-suspenders backstop: every repository method that issues an
   /// UPDATE is required to pass updatedAt explicitly (the real
