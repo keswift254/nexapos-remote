@@ -186,15 +186,12 @@ class _ApprovalDialogState extends ConsumerState<_ApprovalDialog> {
                 ),
                 const SizedBox(height: 8),
               ],
-              TextField(
+              const Text('Authenticator code'),
+              const SizedBox(height: 8),
+              _OtpCodeField(
                 controller: code,
-                keyboardType: TextInputType.number,
-                maxLength: 6,
                 enabled: !busy,
-                decoration: const InputDecoration(
-                  labelText: 'Authenticator code',
-                ),
-                onSubmitted: (_) => busy ? null : verify(),
+                onSubmitted: () => busy ? null : verify(),
               ),
             ],
             if (verifiedPassword)
@@ -288,5 +285,144 @@ class _ApprovalDialogState extends ConsumerState<_ApprovalDialog> {
         ),
       ],
     ),
+  );
+}
+
+/// Six single-digit boxes that keep [controller]'s text as the joined
+/// 6-digit string, so callers (verify()'s `code.text`) don't change.
+/// Typing a digit auto-advances to the next box; backspace on an already
+/// empty box steps back to the previous one; pasting/typing several
+/// digits at once (e.g. from an authenticator app's copy button) fills
+/// forward from the box it landed in instead of being rejected.
+class _OtpCodeField extends StatefulWidget {
+  final TextEditingController controller;
+  final bool enabled;
+  final VoidCallback? onSubmitted;
+  const _OtpCodeField({
+    required this.controller,
+    required this.enabled,
+    this.onSubmitted,
+  });
+
+  @override
+  State<_OtpCodeField> createState() => _OtpCodeFieldState();
+}
+
+class _OtpCodeFieldState extends State<_OtpCodeField> {
+  static const _length = 6;
+  late final List<TextEditingController> _boxes;
+  late final List<FocusNode> _focusNodes;
+
+  @override
+  void initState() {
+    super.initState();
+    _boxes = List.generate(_length, (_) => TextEditingController());
+    _focusNodes = List.generate(
+      _length,
+      (i) => FocusNode(
+        onKeyEvent: (node, event) {
+          if (event is KeyDownEvent &&
+              event.logicalKey == LogicalKeyboardKey.backspace &&
+              _boxes[i].text.isEmpty &&
+              i > 0) {
+            _boxes[i - 1].clear();
+            _updateParent();
+            _focusNodes[i - 1].requestFocus();
+            return KeyEventResult.handled;
+          }
+          return KeyEventResult.ignored;
+        },
+      ),
+    );
+    _syncFromController();
+    widget.controller.addListener(_syncFromController);
+  }
+
+  void _syncFromController() {
+    final text = widget.controller.text;
+    for (var i = 0; i < _length; i++) {
+      final ch = i < text.length ? text[i] : '';
+      if (_boxes[i].text != ch) _boxes[i].text = ch;
+    }
+  }
+
+  void _updateParent() {
+    widget.controller.text = _boxes.map((c) => c.text).join();
+  }
+
+  void _handleChanged(int index, String rawValue) {
+    final digits = rawValue.replaceAll(RegExp(r'\D'), '');
+    if (digits.length <= 1) {
+      if (_boxes[index].text != digits) {
+        _boxes[index].text = digits;
+        _boxes[index].selection = TextSelection.collapsed(
+          offset: digits.length,
+        );
+      }
+      _updateParent();
+      if (digits.isNotEmpty) {
+        if (index < _length - 1) {
+          _focusNodes[index + 1].requestFocus();
+        } else {
+          widget.onSubmitted?.call();
+        }
+      }
+      return;
+    }
+    // Several digits arrived at once (paste, or typed too fast to land in
+    // separate boxes) - fill forward starting at this box.
+    for (var i = 0; i < _length; i++) {
+      final srcIndex = i - index;
+      if (srcIndex >= 0 && srcIndex < digits.length) {
+        _boxes[i].text = digits[srcIndex];
+      }
+    }
+    _updateParent();
+    final nextEmpty = _boxes.indexWhere((c) => c.text.isEmpty);
+    final target = nextEmpty == -1 ? _length - 1 : nextEmpty;
+    _focusNodes[target].requestFocus();
+    if (nextEmpty == -1) widget.onSubmitted?.call();
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_syncFromController);
+    for (final c in _boxes) {
+      c.dispose();
+    }
+    for (final f in _focusNodes) {
+      f.dispose();
+    }
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    children: List.generate(_length, (index) {
+      return SizedBox(
+        width: 44,
+        height: 56,
+        child: TextField(
+          controller: _boxes[index],
+          focusNode: _focusNodes[index],
+          enabled: widget.enabled,
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.headlineSmall,
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          textInputAction: index == _length - 1
+              ? TextInputAction.done
+              : TextInputAction.next,
+          decoration: const InputDecoration(
+            counterText: '',
+            contentPadding: EdgeInsets.zero,
+            border: OutlineInputBorder(),
+          ),
+          onChanged: (value) => _handleChanged(index, value),
+          onSubmitted: (_) => widget.onSubmitted?.call(),
+        ),
+      );
+    }),
   );
 }
