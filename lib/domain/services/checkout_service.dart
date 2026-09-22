@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'dart:math';
+
 import 'package:intl/intl.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+
 import '../../core/providers.dart';
 import '../../core/result.dart';
 import '../../core/utils/clock.dart';
@@ -21,6 +24,8 @@ import '../repositories/product_repository.dart';
 import '../repositories/sale_item_repository.dart';
 import '../repositories/sale_repository.dart';
 import 'stock_service.dart';
+import 'sync_service.dart';
+import 'lan_sync_service.dart';
 
 part 'checkout_service.g.dart';
 
@@ -36,10 +41,22 @@ CheckoutService checkoutService(Ref ref) {
     ref.watch(syncMetadataProvider),
     ref.watch(clockProvider),
     ref.watch(idGeneratorProvider),
+    onSaleCommitted: () async {
+      await Future.wait([
+        ref.read(syncServiceProvider).runSyncCycle(),
+        ref.read(lanSyncServiceProvider).syncNow(),
+      ]);
+    },
   );
 }
 
-const paymentMethods = ['cash', 'mpesa', 'mpesa_manual', 'paystack', 'intasend'];
+const paymentMethods = [
+  'cash',
+  'mpesa',
+  'mpesa_manual',
+  'paystack',
+  'intasend',
+];
 const saleTypes = ['retail', 'wholesale'];
 
 class CheckoutTotals {
@@ -47,7 +64,11 @@ class CheckoutTotals {
   final Money discount;
   final Money total;
 
-  const CheckoutTotals({required this.subtotal, required this.discount, required this.total});
+  const CheckoutTotals({
+    required this.subtotal,
+    required this.discount,
+    required this.total,
+  });
 }
 
 class _ValidatedCart {
@@ -88,6 +109,7 @@ class CheckoutService {
   final SyncMetadataService _syncMeta;
   final Clock _clock;
   final IdGenerator _idGenerator;
+  final Future<void> Function()? onSaleCommitted;
 
   CheckoutService(
     this._db,
@@ -98,8 +120,16 @@ class CheckoutService {
     this._stockService,
     this._syncMeta,
     this._clock,
-    this._idGenerator,
-  );
+    this._idGenerator, {
+    this.onSaleCommitted,
+  });
+
+  void _triggerImmediateSync() {
+    final callback = onSaleCommitted;
+    if (callback != null) {
+      unawaited(callback().catchError((Object _) {}));
+    }
+  }
 
   /// `<device-short-code>-<yyyyMMddHHmmss>-<4-char-random>`, fixing the
   /// collision risk in PHP's `'S' . date('YmdHis')` (one-second
@@ -109,17 +139,26 @@ class CheckoutService {
   /// the sale row exists.
   Future<String> generateSaleNumber() async {
     final deviceId = await _syncMeta.deviceId();
-    final shortCode = deviceId.replaceAll('-', '').substring(0, 6).toUpperCase();
+    final shortCode = deviceId
+        .replaceAll('-', '')
+        .substring(0, 6)
+        .toUpperCase();
     final timestamp = DateFormat('yyyyMMddHHmmss').format(_clock.now());
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     final random = Random.secure();
-    final suffix = List.generate(4, (_) => chars[random.nextInt(chars.length)]).join();
+    final suffix = List.generate(
+      4,
+      (_) => chars[random.nextInt(chars.length)],
+    ).join();
     return '$shortCode-$timestamp-$suffix';
   }
 
   /// Read-only cart validation + totals, for the cart screen to show a
   /// live running total before the cashier taps checkout.
-  Future<Result<CheckoutTotals>> previewTotals(List<CartItem> cart, Money discount) async {
+  Future<Result<CheckoutTotals>> previewTotals(
+    List<CartItem> cart,
+    Money discount,
+  ) async {
     try {
       final validated = await _validateCart(cart);
       return Result.ok(_computeTotals(validated.subtotal, discount));
@@ -147,8 +186,12 @@ class CheckoutService {
     // payment, a correction, etc.).
     Money? cashReceived,
   }) async {
-    if (!saleTypes.contains(saleType)) return const Result.failure('Select a valid sale type.');
-    if (!paymentMethods.contains(paymentMethod) || paymentMethod == 'paystack' || paymentMethod == 'intasend') {
+    if (!saleTypes.contains(saleType)) {
+      return const Result.failure('Select a valid sale type.');
+    }
+    if (!paymentMethods.contains(paymentMethod) ||
+        paymentMethod == 'paystack' ||
+        paymentMethod == 'intasend') {
       return const Result.failure('Select a valid payment method.');
     }
 
@@ -159,7 +202,8 @@ class CheckoutService {
       return Result.failure(e.message);
     }
 
-    final isExternal = paymentMethod == 'mpesa' || paymentMethod == 'mpesa_manual';
+    final isExternal =
+        paymentMethod == 'mpesa' || paymentMethod == 'mpesa_manual';
     final totals = _computeTotals(validated.subtotal, discount);
     final saleNumber = await generateSaleNumber();
     final saleId = _idGenerator.newId();
@@ -169,8 +213,12 @@ class CheckoutService {
       id: saleId,
       saleNumber: saleNumber,
       userId: userId,
-      customerName: customerName.trim().isEmpty ? 'Walk-in customer' : customerName.trim(),
-      customerPhone: isExternal && trimmedPhone.isNotEmpty ? trimmedPhone : null,
+      customerName: customerName.trim().isEmpty
+          ? 'Walk-in customer'
+          : customerName.trim(),
+      customerPhone: isExternal && trimmedPhone.isNotEmpty
+          ? trimmedPhone
+          : null,
       saleType: saleType,
       paymentMethod: paymentMethod,
       subtotal: totals.subtotal,
@@ -187,20 +235,25 @@ class CheckoutService {
         await _insertItemsAndStock(saleId, saleNumber, validated.items, userId);
         if (isExternal) {
           final trimmedNote = referenceNote?.trim();
-          await _paymentRecordRepository.create(PaymentRecord(
-            id: '',
-            saleId: saleId,
-            method: paymentMethod,
-            amount: totals.total,
-            referenceNote: (trimmedNote == null || trimmedNote.isEmpty) ? null : trimmedNote,
-            status: 'paid',
-          ));
+          await _paymentRecordRepository.create(
+            PaymentRecord(
+              id: '',
+              saleId: saleId,
+              method: paymentMethod,
+              amount: totals.total,
+              referenceNote: (trimmedNote == null || trimmedNote.isEmpty)
+                  ? null
+                  : trimmedNote,
+              status: 'paid',
+            ),
+          );
         }
       });
     } on _CheckoutAbort catch (e) {
       return Result.failure(e.message);
     }
 
+    _triggerImmediateSync();
     return Result.ok(sale);
   }
 
@@ -224,7 +277,9 @@ class CheckoutService {
     // plain Paystack sale.
     Money? cashReceived,
   }) async {
-    if (!saleTypes.contains(saleType)) return const Result.failure('Select a valid sale type.');
+    if (!saleTypes.contains(saleType)) {
+      return const Result.failure('Select a valid sale type.');
+    }
 
     final _ValidatedCart validated;
     try {
@@ -236,13 +291,17 @@ class CheckoutService {
     final totals = _computeTotals(validated.subtotal, discount);
     final saleId = _idGenerator.newId();
     final trimmedPhone = customerPhone.trim();
-    final gatewayPortion = cashReceived == null ? totals.total : totals.total - cashReceived;
+    final gatewayPortion = cashReceived == null
+        ? totals.total
+        : totals.total - cashReceived;
 
     final sale = Sale(
       id: saleId,
       saleNumber: saleNumber,
       userId: userId,
-      customerName: customerName.trim().isEmpty ? 'Walk-in customer' : customerName.trim(),
+      customerName: customerName.trim().isEmpty
+          ? 'Walk-in customer'
+          : customerName.trim(),
       customerPhone: trimmedPhone.isEmpty ? null : trimmedPhone,
       saleType: saleType,
       paymentMethod: 'paystack',
@@ -258,14 +317,16 @@ class CheckoutService {
       await _db.transaction(() async {
         await _saleRepository.create(sale);
         await _insertItemsAndStock(saleId, saleNumber, validated.items, userId);
-        await _paymentRecordRepository.create(PaymentRecord(
-          id: '',
-          saleId: saleId,
-          method: 'paystack',
-          amount: gatewayPortion,
-          referenceNote: paystackReference,
-          status: 'initiated',
-        ));
+        await _paymentRecordRepository.create(
+          PaymentRecord(
+            id: '',
+            saleId: saleId,
+            method: 'paystack',
+            amount: gatewayPortion,
+            referenceNote: paystackReference,
+            status: 'initiated',
+          ),
+        );
       });
     } on _CheckoutAbort catch (e) {
       return Result.failure(e.message);
@@ -291,7 +352,9 @@ class CheckoutService {
     required String saleNumber,
     required String intasendReference,
   }) async {
-    if (!saleTypes.contains(saleType)) return const Result.failure('Select a valid sale type.');
+    if (!saleTypes.contains(saleType)) {
+      return const Result.failure('Select a valid sale type.');
+    }
 
     final _ValidatedCart validated;
     try {
@@ -308,7 +371,9 @@ class CheckoutService {
       id: saleId,
       saleNumber: saleNumber,
       userId: userId,
-      customerName: customerName.trim().isEmpty ? 'Walk-in customer' : customerName.trim(),
+      customerName: customerName.trim().isEmpty
+          ? 'Walk-in customer'
+          : customerName.trim(),
       customerPhone: trimmedPhone.isEmpty ? null : trimmedPhone,
       saleType: saleType,
       paymentMethod: 'intasend',
@@ -323,14 +388,16 @@ class CheckoutService {
       await _db.transaction(() async {
         await _saleRepository.create(sale);
         await _insertItemsAndStock(saleId, saleNumber, validated.items, userId);
-        await _paymentRecordRepository.create(PaymentRecord(
-          id: '',
-          saleId: saleId,
-          method: 'intasend',
-          amount: totals.total,
-          referenceNote: intasendReference,
-          status: 'initiated',
-        ));
+        await _paymentRecordRepository.create(
+          PaymentRecord(
+            id: '',
+            saleId: saleId,
+            method: 'intasend',
+            amount: totals.total,
+            referenceNote: intasendReference,
+            status: 'initiated',
+          ),
+        );
       });
     } on _CheckoutAbort catch (e) {
       return Result.failure(e.message);
@@ -357,6 +424,7 @@ class CheckoutService {
       }
     });
 
+    _triggerImmediateSync();
     return Result.ok(sale.copyWith(status: 'paid'));
   }
 
@@ -365,7 +433,10 @@ class CheckoutService {
   /// everywhere else in this app - see stock_movements_table.dart) and
   /// marks the sale cancelled. Also idempotent, for the same reason as
   /// above, and also shared across every online gateway despite the name.
-  Future<Result<void>> cancelPaystackSale(String saleId, {String reason = 'Online payment not completed'}) async {
+  Future<Result<void>> cancelPaystackSale(
+    String saleId, {
+    String reason = 'Online payment not completed',
+  }) async {
     final sale = await _saleRepository.findById(saleId);
     if (sale == null) return const Result.failure('Sale not found.');
     if (!sale.isPending) return const Result.ok(null);
@@ -398,7 +469,8 @@ class CheckoutService {
   /// reconcilePendingSales filters to its own paymentMethod before
   /// polling, since a Paystack reference can't be verified against
   /// IntaSend or vice versa.
-  Future<List<Sale>> pendingPaystackSales() => _saleRepository.findPendingPaystack();
+  Future<List<Sale>> pendingPaystackSales() =>
+      _saleRepository.findPendingPaystack();
 
   /// The gateway reference beginPaystackSale stashed in the payment
   /// record's referenceNote - needed to re-poll a sale found by
@@ -413,7 +485,8 @@ class CheckoutService {
     return record?.referenceNote;
   }
 
-  Future<String?> intasendReferenceFor(String saleId) => paystackReferenceFor(saleId);
+  Future<String?> intasendReferenceFor(String saleId) =>
+      paystackReferenceFor(saleId);
 
   Future<void> _insertItemsAndStock(
     String saleId,
@@ -422,16 +495,18 @@ class CheckoutService {
     String userId,
   ) async {
     final saleItems = items
-        .map((item) => SaleItem(
-              id: _idGenerator.newId(),
-              saleId: saleId,
-              productId: item.productId,
-              itemName: item.name,
-              quantity: item.quantity,
-              unitPrice: item.unitPrice,
-              costPrice: item.costPrice,
-              lineTotal: item.lineTotal,
-            ))
+        .map(
+          (item) => SaleItem(
+            id: _idGenerator.newId(),
+            saleId: saleId,
+            productId: item.productId,
+            itemName: item.name,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            costPrice: item.costPrice,
+            lineTotal: item.lineTotal,
+          ),
+        )
         .toList();
     await _saleItemRepository.createMany(saleItems);
 
@@ -446,14 +521,21 @@ class CheckoutService {
         userId: userId,
       );
       if (movement.isFailure) {
-        movement.when(ok: (_) {}, failure: (message) => throw _CheckoutAbort(message));
+        movement.when(
+          ok: (_) {},
+          failure: (message) => throw _CheckoutAbort(message),
+        );
       }
     }
   }
 
   CheckoutTotals _computeTotals(Money subtotal, Money discount) {
-    final nonNegativeDiscount = discount.isNegative ? const Money.zero() : discount;
-    final clampedDiscount = nonNegativeDiscount > subtotal ? subtotal : nonNegativeDiscount;
+    final nonNegativeDiscount = discount.isNegative
+        ? const Money.zero()
+        : discount;
+    final clampedDiscount = nonNegativeDiscount > subtotal
+        ? subtotal
+        : nonNegativeDiscount;
     final total = subtotal - clampedDiscount;
     return CheckoutTotals(
       subtotal: subtotal,
@@ -469,47 +551,71 @@ class CheckoutService {
   /// quantity, latest-entered price wins, same convention used by the
   /// xlsx importer's duplicate-row merge.
   Future<_ValidatedCart> _validateCart(List<CartItem> cart) async {
-    if (cart.isEmpty) throw const _CheckoutAbort('Add at least one product to the sale.');
+    if (cart.isEmpty) {
+      throw const _CheckoutAbort('Add at least one product to the sale.');
+    }
 
     final mergedByProduct = <String, CartItem>{};
     final manualItems = <CartItem>[];
     for (final item in cart) {
       if (item.isManual) {
         final name = item.name.trim();
-        if (name.isEmpty) throw const _CheckoutAbort('Enter the manual item name.');
-        if (item.quantity < 1) throw const _CheckoutAbort('Manual item quantity must be at least 1.');
+        if (name.isEmpty) {
+          throw const _CheckoutAbort('Enter the manual item name.');
+        }
+        if (item.quantity < 1) {
+          throw const _CheckoutAbort(
+            'Manual item quantity must be at least 1.',
+          );
+        }
         if (item.unitPrice.isNegative || item.unitPrice.isZero) {
-          throw const _CheckoutAbort('Manual item price must be greater than 0.');
+          throw const _CheckoutAbort(
+            'Manual item price must be greater than 0.',
+          );
         }
         manualItems.add(item);
         continue;
       }
       final productId = item.productId!;
       if (item.quantity < 1) {
-        throw const _CheckoutAbort('Each sale item must have a valid product and quantity.');
+        throw const _CheckoutAbort(
+          'Each sale item must have a valid product and quantity.',
+        );
       }
       final existing = mergedByProduct[productId];
       mergedByProduct[productId] = existing == null
           ? item
-          : existing.copyWith(quantity: existing.quantity + item.quantity, unitPrice: item.unitPrice);
+          : existing.copyWith(
+              quantity: existing.quantity + item.quantity,
+              unitPrice: item.unitPrice,
+            );
     }
 
     final validated = <CartItem>[...manualItems];
     for (final item in mergedByProduct.values) {
       final product = await _productRepository.findById(item.productId!);
       if (product == null || !product.isActive) {
-        throw const _CheckoutAbort('One of the selected products is no longer available.');
+        throw const _CheckoutAbort(
+          'One of the selected products is no longer available.',
+        );
       }
       if (product.stockQty < 1) {
         throw _CheckoutAbort('${product.name} is out of stock.');
       }
       if (item.quantity > product.stockQty) {
-        throw _CheckoutAbort('Only ${product.stockQty} ${product.name} in stock.');
+        throw _CheckoutAbort(
+          'Only ${product.stockQty} ${product.name} in stock.',
+        );
       }
-      validated.add(item.copyWith(name: product.name, costPrice: product.costPrice));
+      validated.add(
+        item.copyWith(name: product.name, costPrice: product.costPrice),
+      );
     }
 
-    final subtotal = validated.fold(const Money.zero(), (sum, item) => sum + item.lineTotal);
+    final subtotal = validated.fold(
+      const Money.zero(),
+      (sum, item) => sum + item.lineTotal,
+    );
     return _ValidatedCart(items: validated, subtotal: subtotal);
   }
 }

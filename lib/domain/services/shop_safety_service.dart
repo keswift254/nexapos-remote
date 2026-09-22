@@ -58,6 +58,13 @@ class ShopSafetyService {
     required PaystackCredentials credentials,
     required SaveRecovery saveRecovery,
     String? inviteCode,
+    // False only for a joined (non-owner) device leaving its shop: its data
+    // isn't unique to it - by definition it's a copy of what the shop it is
+    // leaving already has - so an encrypted local backup of it is pure
+    // friction, not safety. Left true for founding a shop's own encrypted
+    // backup (its owner device may be the sole copy) and for switching into
+    // a different shop (an inviteCode is present, a less certain case).
+    bool requireBackup = true,
   }) async {
     final action = inviteCode == null ? 'Leave this shop' : 'Switch shop';
     await security.consume(approval, action);
@@ -84,13 +91,24 @@ class ShopSafetyService {
         ],
       );
       try {
-        final archive = await ShopArchive.capture(db);
-        await archive.validate();
-        if (!await saveRecovery(archive)) {
-          await db.customStatement(
-            "DELETE FROM local_safety_state WHERE id='shop_change'",
-          );
-          return false;
+        if (requireBackup) {
+          final archive = await ShopArchive.capture(db);
+          await archive.validate();
+          if (!await saveRecovery(archive)) {
+            await db.customStatement(
+              "DELETE FROM local_safety_state WHERE id='shop_change'",
+            );
+            return false;
+          }
+        } else {
+          // Push first rather than trusting this device is already fully
+          // synced - skipping the backup on a device that turns out to hold
+          // an unsent sale would be real data loss, not just redundant
+          // caution. A failure here (e.g. offline) is caught below like a
+          // failed backup would be: nothing server-side has happened yet, so
+          // the journal is simply cleared and the local data is left intact
+          // to retry from - there is nothing ambiguous to resolve later.
+          await sync.pushLocalChanges(credentials.baseUrl, credentials.apiKey);
         }
       } catch (_) {
         await db.customStatement(

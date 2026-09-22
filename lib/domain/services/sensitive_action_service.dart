@@ -142,6 +142,27 @@ class SensitiveActionService {
     );
   }
 
+  /// Same admin re-authentication as [approve], without the per-device
+  /// authenticator step - for an action whose entire effect is local to
+  /// THIS device (leaving a joined shop resets only the device doing the
+  /// leaving; it touches no shared shop data, settlement, or other
+  /// devices), unlike inviting a device or exporting a backup, where that
+  /// extra step earns its friction. Being logged in as an admin to reach
+  /// the screen this guards is already required and unaffected by this -
+  /// this is the SECOND check, re-confirming the same admin right now.
+  Future<ActionApproval> approveWithPasswordOnly({
+    required String username,
+    required String password,
+    required String action,
+  }) async {
+    final id = await verifyPassword(username, password);
+    return ActionApproval._(
+      id,
+      action,
+      clock.now().add(const Duration(minutes: 5)),
+    );
+  }
+
   Future<void> consume(ActionApproval approval, String action) async {
     if (approval._used ||
         approval.action != action ||

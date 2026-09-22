@@ -62,6 +62,34 @@ class _CartScreenState extends ConsumerState<CartScreen> {
         .toList();
   }
 
+  /// Guards the one tap in this screen that discards something outright
+  /// (every other control here just adjusts a quantity or a field) - a
+  /// cashier's stray tap on the trash icon mid-sale used to drop the line
+  /// with no way back except re-adding and re-entering its quantity.
+  Future<void> _confirmRemove(CartNotifier cart, int index, String name) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Remove this item?'),
+        content: Text('Remove "$name" from this sale?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) cart.removeAt(index);
+  }
+
   void _addFromSearch(CartNotifier cart, Product product) {
     cart.addProduct(product);
     _searchController.clear();
@@ -300,7 +328,12 @@ class _CartScreenState extends ConsumerState<CartScreen> {
                     ),
                     IconButton(
                       icon: const Icon(Icons.delete_outline),
-                      onPressed: () => cart.removeAt(i),
+                      tooltip: 'Remove from sale',
+                      onPressed: () => _confirmRemove(
+                        cart,
+                        i,
+                        cartState.items[i].name,
+                      ),
                     ),
                   ],
                 ),

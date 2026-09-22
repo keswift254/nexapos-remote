@@ -39,7 +39,12 @@ class PaystackException implements Exception {
 /// specific case to a "needs internet" / "can't reach the server"
 /// message instead of a raw socket/timeout error.
 class PaystackOfflineException implements Exception {
-  const PaystackOfflineException();
+  /// True when the server WAS reachable but did not answer within the
+  /// timeout (a slow or waking-up server), as opposed to no connection at
+  /// all. The two need different words: telling a cashier "offline" while
+  /// their internet is fine sends them off to fix the wrong thing.
+  final bool timedOut;
+  const PaystackOfflineException({this.timedOut = false});
 }
 
 /// Shared request/error-mapping plumbing for talking to the operator's
@@ -74,7 +79,7 @@ Future<Map<String, dynamic>> platformRequest(
                 : client.get(uri, headers: headers))
             .timeout(timeout);
   } on TimeoutException {
-    throw const PaystackOfflineException();
+    throw const PaystackOfflineException(timedOut: true);
   } on SocketException {
     throw const PaystackOfflineException();
   } on http.ClientException {

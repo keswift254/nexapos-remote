@@ -124,6 +124,31 @@ void main() {
     );
   });
 
+  test(
+    'approveWithPasswordOnly needs no authenticator, but the approval it '
+    'produces still consumes exactly once, like a full approval',
+    () async {
+      await expectLater(
+        security.approveWithPasswordOnly(
+          username: 'owner',
+          password: 'bad',
+          action: 'Leave this shop',
+        ),
+        throwsStateError,
+      );
+      final approval = await security.approveWithPasswordOnly(
+        username: 'owner',
+        password: 'long-password',
+        action: 'Leave this shop',
+      );
+      await security.consume(approval, 'Leave this shop');
+      await expectLater(
+        security.consume(approval, 'Leave this shop'),
+        throwsStateError,
+      );
+    },
+  );
+
   test('five failures lock attempts even across service recreation', () async {
     for (var i = 0; i < 5; i++) {
       await expectLater(

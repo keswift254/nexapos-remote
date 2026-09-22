@@ -39,6 +39,16 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
 
+#ifdef NEXAPOS_LEGACY_WINDOWS
+  // Windows 7/8 edition only (the legacy build defines this; the Windows 10/11
+  // build does not, so nothing changes there). Flutter now uses Impeller by
+  // default, and Impeller refuses to run without a GPU surface ("Impeller
+  // backend does not support software rendering"). The patched engine below
+  // Windows 10 deliberately draws in software, so on those systems the older
+  // renderer must be used or the engine gives up and the app never opens.
+  project.set_impeller_switch(flutter::ImpellerSwitch::Disabled);
+#endif
+
   FlutterWindow window(project);
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(1280, 720);

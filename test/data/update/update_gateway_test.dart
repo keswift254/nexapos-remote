@@ -55,6 +55,49 @@ void main() {
       expect(result.androidSha256, 'def456');
     });
 
+    test('parses the Windows 7/8 edition installer when the release has one', () async {
+      final gateway = UpdateGateway(MockClient((request) async {
+        return http.Response(
+          jsonEncode({
+            'success': true,
+            'version': '1.0.40',
+            'windows_installer_url': 'https://example.com/NexaPOS-Setup.exe',
+            'android_url': 'https://example.com/NexaPOS.apk',
+            'windows_legacy_installer_url': 'https://example.com/NexaPOS-Setup-Windows7-8.exe',
+            'windows_legacy_installer_sha256': 'fed789',
+          }),
+          200,
+        );
+      }));
+
+      final result = await gateway.fetchLatestVersion();
+
+      expect(result!.windowsLegacyInstallerUrl, 'https://example.com/NexaPOS-Setup-Windows7-8.exe');
+      expect(result.windowsLegacyInstallerSha256, 'fed789');
+      expect(result.windowsInstallerUrl, 'https://example.com/NexaPOS-Setup.exe');
+    });
+
+    test('a release without a Windows 7/8 installer parses as empty/null, not an error', () async {
+      final gateway = UpdateGateway(MockClient((request) async {
+        return http.Response(
+          jsonEncode({
+            'success': true,
+            'version': '1.0.40',
+            'windows_installer_url': 'https://example.com/NexaPOS-Setup.exe',
+            'android_url': 'https://example.com/NexaPOS.apk',
+            'windows_legacy_installer_url': null,
+            'windows_legacy_installer_sha256': null,
+          }),
+          200,
+        );
+      }));
+
+      final result = await gateway.fetchLatestVersion();
+
+      expect(result!.windowsLegacyInstallerUrl, isEmpty);
+      expect(result.windowsLegacyInstallerSha256, isNull);
+    });
+
     test('an older published version with no checksum yet parses as null, not a blank string', () async {
       final gateway = UpdateGateway(MockClient((request) async {
         return http.Response(

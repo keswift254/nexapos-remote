@@ -36,6 +36,11 @@ class LatestVersionInfo {
   // checksum is absent or malformed.
   final String? windowsInstallerSha256;
   final String? androidSha256;
+  // The Windows 7/8 edition's own installer for this same version, present
+  // only when the release included one. Read by the legacy edition alone (see
+  // kLegacyWindowsEdition); every other build ignores it.
+  final String windowsLegacyInstallerUrl;
+  final String? windowsLegacyInstallerSha256;
 
   const LatestVersionInfo({
     required this.version,
@@ -44,6 +49,8 @@ class LatestVersionInfo {
     this.releaseNotes,
     this.windowsInstallerSha256,
     this.androidSha256,
+    this.windowsLegacyInstallerUrl = '',
+    this.windowsLegacyInstallerSha256,
   });
 }
 
@@ -84,6 +91,8 @@ class UpdateGateway {
     final windowsInstallerSha256 =
         (response['windows_installer_sha256'] as String?)?.trim();
     final androidSha256 = (response['android_sha256'] as String?)?.trim();
+    final legacySha256 = (response['windows_legacy_installer_sha256'] as String?)
+        ?.trim();
     return LatestVersionInfo(
       version: version,
       windowsInstallerUrl: (response['windows_installer_url'] as String? ?? '')
@@ -97,6 +106,11 @@ class UpdateGateway {
       androidSha256: (androidSha256 == null || androidSha256.isEmpty)
           ? null
           : androidSha256,
+      windowsLegacyInstallerUrl:
+          (response['windows_legacy_installer_url'] as String? ?? '').trim(),
+      windowsLegacyInstallerSha256: (legacySha256 == null || legacySha256.isEmpty)
+          ? null
+          : legacySha256,
     );
   }
 

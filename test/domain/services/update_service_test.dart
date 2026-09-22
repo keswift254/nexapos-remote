@@ -67,6 +67,78 @@ void main() {
     });
   });
 
+  group('Windows 7/8 edition update track', () {
+    ProviderContainer buildContainer(
+      Map<String, Object?> published, {
+      required bool legacyEdition,
+    }) {
+      final container = ProviderContainer(
+        overrides: [
+          legacyWindowsEditionProvider.overrideWithValue(legacyEdition),
+          updateGatewayProvider.overrideWith(
+            (ref) => UpdateGateway(
+              MockClient(
+                (request) async =>
+                    http.Response(jsonEncode({'success': true, ...published}), 200),
+              ),
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+      return container;
+    }
+
+    const modernOnly = {
+      'version': '1.1.0',
+      'windows_installer_url': 'https://example.com/setup.exe',
+      'android_url': 'https://example.com/app.apk',
+    };
+    const withLegacy = {
+      ...modernOnly,
+      'windows_legacy_installer_url': 'https://example.com/legacy.exe',
+      'windows_legacy_installer_sha256':
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    };
+
+    test('the legacy edition is offered an update once a legacy installer exists', () async {
+      final result = await buildContainer(withLegacy, legacyEdition: true)
+          .read(updateServiceProvider)
+          .checkForUpdate();
+      expect(result.updateAvailable, isTrue);
+    });
+
+    test(
+      'the legacy edition is NOT offered a release that has no legacy installer '
+      '(following the Windows 10 installer would break it)',
+      () async {
+        final result = await buildContainer(modernOnly, legacyEdition: true)
+            .read(updateServiceProvider)
+            .checkForUpdate();
+        expect(result.updateAvailable, isFalse);
+        expect(result.latest?.version, '1.1.0');
+      },
+    );
+
+    test('the normal edition ignores the legacy fields entirely', () async {
+      final result = await buildContainer(modernOnly, legacyEdition: false)
+          .read(updateServiceProvider)
+          .checkForUpdate();
+      expect(result.updateAvailable, isTrue);
+    });
+
+    test('install() in the legacy edition refuses to fall back to the Windows 10 installer', () async {
+      final container = buildContainer(modernOnly, legacyEdition: true);
+      final info = (await container.read(updateServiceProvider).checkForUpdate()).latest!;
+
+      final result = await container.read(updateServiceProvider).install(info);
+
+      // Only meaningful where Platform.isWindows; elsewhere install() reports
+      // the platform is unsupported - either way it must not succeed.
+      expect(result.isFailure, isTrue);
+    });
+  });
+
   group('UpdateService.checkForUpdate', () {
     ProviderContainer buildContainer(http.Client updateClient) {
       final container = ProviderContainer(

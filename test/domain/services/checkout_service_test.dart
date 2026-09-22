@@ -3,7 +3,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nexapos_mobile/core/utils/clock.dart';
 import 'package:nexapos_mobile/core/utils/id_generator.dart';
 import 'package:nexapos_mobile/core/utils/money.dart';
-import 'package:nexapos_mobile/data/local/database.dart' hide Category, Product, User;
+import 'package:nexapos_mobile/data/local/database.dart'
+    hide Category, Product, User;
 import 'package:nexapos_mobile/data/local/sync_metadata.dart';
 import 'package:nexapos_mobile/data/repositories/category_repository_impl.dart';
 import 'package:nexapos_mobile/data/repositories/payment_record_repository_impl.dart';
@@ -29,20 +30,23 @@ void main() {
   late String categoryId;
   late String productId;
   late String userId;
+  late int immediateSyncs;
 
   Future<String> seedProduct({int stock = 10, int priceCents = 10000}) async {
-    final id = await productRepository.create(Product(
-      id: '',
-      sku: 'SKU-${DateTime.now().microsecondsSinceEpoch}',
-      name: 'Widget',
-      categoryId: categoryId,
-      retailPrice: Money(priceCents),
-      wholesalePrice: Money((priceCents * 0.8).round()),
-      costPrice: Money((priceCents * 0.5).round()),
-      stockQty: 0,
-      reorderLevel: 2,
-      status: 'active',
-    ));
+    final id = await productRepository.create(
+      Product(
+        id: '',
+        sku: 'SKU-${DateTime.now().microsecondsSinceEpoch}',
+        name: 'Widget',
+        categoryId: categoryId,
+        retailPrice: Money(priceCents),
+        wholesalePrice: Money((priceCents * 0.8).round()),
+        costPrice: Money((priceCents * 0.5).round()),
+        stockQty: 0,
+        reorderLevel: 2,
+        status: 'active',
+      ),
+    );
     if (stock != 0) {
       final stockService = StockService(
         db,
@@ -52,23 +56,65 @@ void main() {
         const SystemClock(),
         UuidIdGenerator(),
       );
-      await stockService.applyMovement(productId: id, movementType: 'purchase', delta: stock);
+      await stockService.applyMovement(
+        productId: id,
+        movementType: 'purchase',
+        delta: stock,
+      );
     }
     return id;
   }
 
   setUp(() async {
+    immediateSyncs = 0;
     db = AppDatabase(NativeDatabase.memory());
     final syncMeta = SyncMetadataService(db);
     const clock = SystemClock();
     final idGen = UuidIdGenerator();
 
-    final categoryRepository = CategoryRepositoryImpl(db, db.categoriesDao, syncMeta, clock, idGen);
-    productRepository = ProductRepositoryImpl(db, db.productsDao, syncMeta, clock, idGen);
-    saleRepository = SaleRepositoryImpl(db, db.salesDao, syncMeta, clock, idGen);
-    saleItemRepository = SaleItemRepositoryImpl(db, db.saleItemsDao, syncMeta, clock, idGen);
-    paymentRecordRepository = PaymentRecordRepositoryImpl(db, db.paymentRecordsDao, syncMeta, clock, idGen);
-    final stockService = StockService(db, db.productsDao, db.stockMovementsDao, syncMeta, clock, idGen);
+    final categoryRepository = CategoryRepositoryImpl(
+      db,
+      db.categoriesDao,
+      syncMeta,
+      clock,
+      idGen,
+    );
+    productRepository = ProductRepositoryImpl(
+      db,
+      db.productsDao,
+      syncMeta,
+      clock,
+      idGen,
+    );
+    saleRepository = SaleRepositoryImpl(
+      db,
+      db.salesDao,
+      syncMeta,
+      clock,
+      idGen,
+    );
+    saleItemRepository = SaleItemRepositoryImpl(
+      db,
+      db.saleItemsDao,
+      syncMeta,
+      clock,
+      idGen,
+    );
+    paymentRecordRepository = PaymentRecordRepositoryImpl(
+      db,
+      db.paymentRecordsDao,
+      syncMeta,
+      clock,
+      idGen,
+    );
+    final stockService = StockService(
+      db,
+      db.productsDao,
+      db.stockMovementsDao,
+      syncMeta,
+      clock,
+      idGen,
+    );
 
     checkout = CheckoutService(
       db,
@@ -80,14 +126,25 @@ void main() {
       syncMeta,
       clock,
       idGen,
+      onSaleCommitted: () async => immediateSyncs++,
     );
 
-    final category = Category(id: idGen.newId(), name: 'General', status: 'active');
+    final category = Category(
+      id: idGen.newId(),
+      name: 'General',
+      status: 'active',
+    );
     await categoryRepository.create(category);
     categoryId = category.id;
     productId = await seedProduct();
 
-    final userRepository = UserRepositoryImpl(db, db.usersDao, syncMeta, clock, idGen);
+    final userRepository = UserRepositoryImpl(
+      db,
+      db.usersDao,
+      syncMeta,
+      clock,
+      idGen,
+    );
     final user = User(
       id: idGen.newId(),
       role: UserRole.cashier,
@@ -106,7 +163,15 @@ void main() {
 
   test('cash sale records paid immediately, decrements stock, and logs a sale movement', () async {
     final result = await checkout.checkout(
-      cart: [CartItem(productId: productId, name: 'Widget', unitPrice: const Money(10000), costPrice: const Money(5000), quantity: 3)],
+      cart: [
+        CartItem(
+          productId: productId,
+          name: 'Widget',
+          unitPrice: const Money(10000),
+          costPrice: const Money(5000),
+          quantity: 3,
+        ),
+      ],
       discount: const Money.zero(),
       saleType: 'retail',
       paymentMethod: 'cash',
@@ -114,6 +179,11 @@ void main() {
     );
 
     expect(result.isOk, isTrue);
+    expect(
+      immediateSyncs,
+      1,
+      reason: 'a completed cash sale must sync immediately',
+    );
     late String saleId;
     result.when(
       ok: (sale) {
@@ -138,12 +208,23 @@ void main() {
     expect(items.single.lineTotal.cents, 30000);
 
     final paymentRecord = await paymentRecordRepository.forSale(saleId);
-    expect(paymentRecord, isNull, reason: 'cash sales never get a payment_records row');
+    expect(
+      paymentRecord,
+      isNull,
+      reason: 'cash sales never get a payment_records row',
+    );
   });
 
   test('manual items skip stock checks entirely', () async {
     final result = await checkout.checkout(
-      cart: [CartItem(name: 'Custom engraving', unitPrice: const Money(500), costPrice: const Money.zero(), quantity: 2)],
+      cart: [
+        CartItem(
+          name: 'Custom engraving',
+          unitPrice: const Money(500),
+          costPrice: const Money.zero(),
+          quantity: 2,
+        ),
+      ],
       discount: const Money.zero(),
       saleType: 'retail',
       paymentMethod: 'cash',
@@ -151,62 +232,117 @@ void main() {
     );
 
     expect(result.isOk, isTrue);
-    result.when(ok: (sale) => expect(sale.total.cents, 1000), failure: (m) => fail(m));
-  });
-
-  test('rejects a cart that would oversell, with the exact available count in the message', () async {
-    final result = await checkout.checkout(
-      cart: [CartItem(productId: productId, name: 'Widget', unitPrice: const Money(10000), costPrice: const Money(5000), quantity: 999)],
-      discount: const Money.zero(),
-      saleType: 'retail',
-      paymentMethod: 'cash',
-      userId: userId,
-    );
-
-    expect(result.isFailure, isTrue);
-    result.when(ok: (_) => fail('expected failure'), failure: (m) => expect(m, 'Only 10 Widget in stock.'));
-    final product = await productRepository.findById(productId);
-    expect(product!.stockQty, 10, reason: 'a rejected checkout must not touch stock');
-  });
-
-  test('rejects a completely out-of-stock product with a distinct message', () async {
-    final outOfStockId = await seedProduct(stock: 0);
-    // seedProduct with stock:0 skips the purchase movement, so stock_qty stays 0.
-    final result = await checkout.checkout(
-      cart: [CartItem(productId: outOfStockId, name: 'Widget', unitPrice: const Money(10000), costPrice: const Money(5000), quantity: 1)],
-      discount: const Money.zero(),
-      saleType: 'retail',
-      paymentMethod: 'cash',
-      userId: userId,
-    );
-
-    expect(result.isFailure, isTrue);
-    result.when(ok: (_) => fail('expected failure'), failure: (m) => expect(m, 'Widget is out of stock.'));
-  });
-
-  test('discount is clamped to the subtotal, never producing a negative total', () async {
-    final result = await checkout.checkout(
-      cart: [CartItem(productId: productId, name: 'Widget', unitPrice: const Money(10000), costPrice: const Money(5000), quantity: 1)],
-      discount: const Money(50000),
-      saleType: 'retail',
-      paymentMethod: 'cash',
-      userId: userId,
-    );
-
     result.when(
-      ok: (sale) {
-        expect(sale.discount.cents, 10000);
-        expect(sale.total.cents, 0);
-      },
+      ok: (sale) => expect(sale.total.cents, 1000),
       failure: (m) => fail(m),
     );
   });
 
+  test('rejects a cart that would oversell, with the exact available count in the message', () async {
+    final result = await checkout.checkout(
+      cart: [
+        CartItem(
+          productId: productId,
+          name: 'Widget',
+          unitPrice: const Money(10000),
+          costPrice: const Money(5000),
+          quantity: 999,
+        ),
+      ],
+      discount: const Money.zero(),
+      saleType: 'retail',
+      paymentMethod: 'cash',
+      userId: userId,
+    );
+
+    expect(result.isFailure, isTrue);
+    result.when(
+      ok: (_) => fail('expected failure'),
+      failure: (m) => expect(m, 'Only 10 Widget in stock.'),
+    );
+    final product = await productRepository.findById(productId);
+    expect(
+      product!.stockQty,
+      10,
+      reason: 'a rejected checkout must not touch stock',
+    );
+  });
+
+  test(
+    'rejects a completely out-of-stock product with a distinct message',
+    () async {
+      final outOfStockId = await seedProduct(stock: 0);
+      // seedProduct with stock:0 skips the purchase movement, so stock_qty stays 0.
+      final result = await checkout.checkout(
+        cart: [
+          CartItem(
+            productId: outOfStockId,
+            name: 'Widget',
+            unitPrice: const Money(10000),
+            costPrice: const Money(5000),
+            quantity: 1,
+          ),
+        ],
+        discount: const Money.zero(),
+        saleType: 'retail',
+        paymentMethod: 'cash',
+        userId: userId,
+      );
+
+      expect(result.isFailure, isTrue);
+      result.when(
+        ok: (_) => fail('expected failure'),
+        failure: (m) => expect(m, 'Widget is out of stock.'),
+      );
+    },
+  );
+
+  test(
+    'discount is clamped to the subtotal, never producing a negative total',
+    () async {
+      final result = await checkout.checkout(
+        cart: [
+          CartItem(
+            productId: productId,
+            name: 'Widget',
+            unitPrice: const Money(10000),
+            costPrice: const Money(5000),
+            quantity: 1,
+          ),
+        ],
+        discount: const Money(50000),
+        saleType: 'retail',
+        paymentMethod: 'cash',
+        userId: userId,
+      );
+
+      result.when(
+        ok: (sale) {
+          expect(sale.discount.cents, 10000);
+          expect(sale.total.cents, 0);
+        },
+        failure: (m) => fail(m),
+      );
+    },
+  );
+
   test('duplicate cart lines for the same product are merged: quantity summed, latest price wins', () async {
     final result = await checkout.checkout(
       cart: [
-        CartItem(productId: productId, name: 'Widget', unitPrice: const Money(10000), costPrice: const Money(5000), quantity: 2),
-        CartItem(productId: productId, name: 'Widget', unitPrice: const Money(9000), costPrice: const Money(5000), quantity: 1),
+        CartItem(
+          productId: productId,
+          name: 'Widget',
+          unitPrice: const Money(10000),
+          costPrice: const Money(5000),
+          quantity: 2,
+        ),
+        CartItem(
+          productId: productId,
+          name: 'Widget',
+          unitPrice: const Money(9000),
+          costPrice: const Money(5000),
+          quantity: 1,
+        ),
       ],
       discount: const Money.zero(),
       saleType: 'retail',
@@ -215,36 +351,50 @@ void main() {
     );
 
     result.when(
-      ok: (sale) => expect(sale.total.cents, 9000 * 3), // merged qty 3 at the latest price 9000
+      ok: (sale) => expect(
+        sale.total.cents,
+        9000 * 3,
+      ), // merged qty 3 at the latest price 9000
       failure: (m) => fail(m),
     );
   });
 
-  test('mpesa sale records a payment_records row with the cashier note', () async {
-    final result = await checkout.checkout(
-      cart: [CartItem(productId: productId, name: 'Widget', unitPrice: const Money(10000), costPrice: const Money(5000), quantity: 1)],
-      discount: const Money.zero(),
-      customerPhone: '0712345678',
-      saleType: 'retail',
-      paymentMethod: 'mpesa',
-      referenceNote: 'QWE123 confirmation',
-      userId: userId,
-    );
+  test(
+    'mpesa sale records a payment_records row with the cashier note',
+    () async {
+      final result = await checkout.checkout(
+        cart: [
+          CartItem(
+            productId: productId,
+            name: 'Widget',
+            unitPrice: const Money(10000),
+            costPrice: const Money(5000),
+            quantity: 1,
+          ),
+        ],
+        discount: const Money.zero(),
+        customerPhone: '0712345678',
+        saleType: 'retail',
+        paymentMethod: 'mpesa',
+        referenceNote: 'QWE123 confirmation',
+        userId: userId,
+      );
 
-    late String saleId;
-    result.when(
-      ok: (sale) {
-        saleId = sale.id;
-        expect(sale.customerPhone, '0712345678');
-      },
-      failure: (m) => fail(m),
-    );
+      late String saleId;
+      result.when(
+        ok: (sale) {
+          saleId = sale.id;
+          expect(sale.customerPhone, '0712345678');
+        },
+        failure: (m) => fail(m),
+      );
 
-    final record = await paymentRecordRepository.forSale(saleId);
-    expect(record, isNotNull);
-    expect(record!.status, 'paid');
-    expect(record.referenceNote, 'QWE123 confirmation');
-  });
+      final record = await paymentRecordRepository.forSale(saleId);
+      expect(record, isNotNull);
+      expect(record!.status, 'paid');
+      expect(record.referenceNote, 'QWE123 confirmation');
+    },
+  );
 
   test('an empty cart is rejected before anything is written', () async {
     final result = await checkout.checkout(
@@ -257,62 +407,123 @@ void main() {
     expect(result.isFailure, isTrue);
   });
 
-  test('checkout() refuses paystack - it must go through beginPaystackSale', () async {
-    final result = await checkout.checkout(
-      cart: [CartItem(productId: productId, name: 'Widget', unitPrice: const Money(10000), costPrice: const Money(5000), quantity: 1)],
-      discount: const Money.zero(),
-      saleType: 'retail',
-      paymentMethod: 'paystack',
-      userId: userId,
-    );
-    expect(result.isFailure, isTrue);
-  });
+  test(
+    'checkout() refuses paystack - it must go through beginPaystackSale',
+    () async {
+      final result = await checkout.checkout(
+        cart: [
+          CartItem(
+            productId: productId,
+            name: 'Widget',
+            unitPrice: const Money(10000),
+            costPrice: const Money(5000),
+            quantity: 1,
+          ),
+        ],
+        discount: const Money.zero(),
+        saleType: 'retail',
+        paymentMethod: 'paystack',
+        userId: userId,
+      );
+      expect(result.isFailure, isTrue);
+    },
+  );
 
-  test('beginPaystackSale reserves stock and records the sale as pending', () async {
-    final saleNumber = await checkout.generateSaleNumber();
-    final result = await checkout.beginPaystackSale(
-      cart: [CartItem(productId: productId, name: 'Widget', unitPrice: const Money(10000), costPrice: const Money(5000), quantity: 4)],
-      discount: const Money.zero(),
-      saleType: 'retail',
-      userId: userId,
-      saleNumber: saleNumber,
-      paystackReference: saleNumber,
-    );
+  test(
+    'beginPaystackSale reserves stock and records the sale as pending',
+    () async {
+      final saleNumber = await checkout.generateSaleNumber();
+      final result = await checkout.beginPaystackSale(
+        cart: [
+          CartItem(
+            productId: productId,
+            name: 'Widget',
+            unitPrice: const Money(10000),
+            costPrice: const Money(5000),
+            quantity: 4,
+          ),
+        ],
+        discount: const Money.zero(),
+        saleType: 'retail',
+        userId: userId,
+        saleNumber: saleNumber,
+        paystackReference: saleNumber,
+      );
 
-    expect(result.isOk, isTrue);
-    result.when(ok: (sale) => expect(sale.status, 'pending'), failure: (m) => fail(m));
+      expect(result.isOk, isTrue);
+      result.when(
+        ok: (sale) => expect(sale.status, 'pending'),
+        failure: (m) => fail(m),
+      );
 
-    final product = await productRepository.findById(productId);
-    expect(product!.stockQty, 6, reason: 'stock is reserved immediately, before payment confirms');
-  });
+      final product = await productRepository.findById(productId);
+      expect(
+        product!.stockQty,
+        6,
+        reason: 'stock is reserved immediately, before payment confirms',
+      );
+    },
+  );
 
-  test('finalizePaystackSale marks the sale and payment record paid, idempotently', () async {
-    final saleNumber = await checkout.generateSaleNumber();
-    final beginResult = await checkout.beginPaystackSale(
-      cart: [CartItem(productId: productId, name: 'Widget', unitPrice: const Money(10000), costPrice: const Money(5000), quantity: 1)],
-      discount: const Money.zero(),
-      saleType: 'retail',
-      userId: userId,
-      saleNumber: saleNumber,
-      paystackReference: saleNumber,
-    );
-    late String saleId;
-    beginResult.when(ok: (sale) => saleId = sale.id, failure: (m) => fail(m));
+  test(
+    'finalizePaystackSale marks the sale and payment record paid, idempotently',
+    () async {
+      final saleNumber = await checkout.generateSaleNumber();
+      final beginResult = await checkout.beginPaystackSale(
+        cart: [
+          CartItem(
+            productId: productId,
+            name: 'Widget',
+            unitPrice: const Money(10000),
+            costPrice: const Money(5000),
+            quantity: 1,
+          ),
+        ],
+        discount: const Money.zero(),
+        saleType: 'retail',
+        userId: userId,
+        saleNumber: saleNumber,
+        paystackReference: saleNumber,
+      );
+      late String saleId;
+      beginResult.when(ok: (sale) => saleId = sale.id, failure: (m) => fail(m));
 
-    final finalized = await checkout.finalizePaystackSale(saleId);
-    finalized.when(ok: (sale) => expect(sale.status, 'paid'), failure: (m) => fail(m));
-    final record = await paymentRecordRepository.forSale(saleId);
-    expect(record!.status, 'paid');
+      final finalized = await checkout.finalizePaystackSale(saleId);
+      finalized.when(
+        ok: (sale) => expect(sale.status, 'paid'),
+        failure: (m) => fail(m),
+      );
+      final record = await paymentRecordRepository.forSale(saleId);
+      expect(record!.status, 'paid');
+      expect(
+        immediateSyncs,
+        1,
+        reason: 'online confirmation must sync immediately',
+      );
 
-    // Calling it again must not throw or double-process.
-    final secondCall = await checkout.finalizePaystackSale(saleId);
-    expect(secondCall.isOk, isTrue);
-  });
+      // Calling it again must not throw or double-process.
+      final secondCall = await checkout.finalizePaystackSale(saleId);
+      expect(secondCall.isOk, isTrue);
+      expect(
+        immediateSyncs,
+        1,
+        reason: 'an idempotent recheck must not trigger another sync',
+      );
+    },
+  );
 
   test('cancelPaystackSale restores stock and marks the sale cancelled, idempotently', () async {
     final saleNumber = await checkout.generateSaleNumber();
     final beginResult = await checkout.beginPaystackSale(
-      cart: [CartItem(productId: productId, name: 'Widget', unitPrice: const Money(10000), costPrice: const Money(5000), quantity: 4)],
+      cart: [
+        CartItem(
+          productId: productId,
+          name: 'Widget',
+          unitPrice: const Money(10000),
+          costPrice: const Money(5000),
+          quantity: 4,
+        ),
+      ],
       discount: const Money.zero(),
       saleType: 'retail',
       userId: userId,
@@ -329,7 +540,11 @@ void main() {
     expect(cancelled.isOk, isTrue);
 
     product = await productRepository.findById(productId);
-    expect(product!.stockQty, 10, reason: 'the reserved stock must be fully returned');
+    expect(
+      product!.stockQty,
+      10,
+      reason: 'the reserved stock must be fully returned',
+    );
 
     final sale = await saleRepository.findById(saleId);
     expect(sale!.status, 'cancelled');
@@ -342,52 +557,86 @@ void main() {
     expect(product!.stockQty, 10);
   });
 
-  test('checkout() refuses intasend - it must go through beginIntaSendSale', () async {
-    final result = await checkout.checkout(
-      cart: [CartItem(productId: productId, name: 'Widget', unitPrice: const Money(10000), costPrice: const Money(5000), quantity: 1)],
-      discount: const Money.zero(),
-      saleType: 'retail',
-      paymentMethod: 'intasend',
-      userId: userId,
-    );
-    expect(result.isFailure, isTrue);
-  });
+  test(
+    'checkout() refuses intasend - it must go through beginIntaSendSale',
+    () async {
+      final result = await checkout.checkout(
+        cart: [
+          CartItem(
+            productId: productId,
+            name: 'Widget',
+            unitPrice: const Money(10000),
+            costPrice: const Money(5000),
+            quantity: 1,
+          ),
+        ],
+        discount: const Money.zero(),
+        saleType: 'retail',
+        paymentMethod: 'intasend',
+        userId: userId,
+      );
+      expect(result.isFailure, isTrue);
+    },
+  );
 
-  test('beginIntaSendSale reserves stock and records the sale as pending', () async {
-    final saleNumber = await checkout.generateSaleNumber();
-    final result = await checkout.beginIntaSendSale(
-      cart: [CartItem(productId: productId, name: 'Widget', unitPrice: const Money(10000), costPrice: const Money(5000), quantity: 4)],
-      discount: const Money.zero(),
-      customerPhone: '254712345678',
-      saleType: 'retail',
-      userId: userId,
-      saleNumber: saleNumber,
-      intasendReference: saleNumber,
-    );
+  test(
+    'beginIntaSendSale reserves stock and records the sale as pending',
+    () async {
+      final saleNumber = await checkout.generateSaleNumber();
+      final result = await checkout.beginIntaSendSale(
+        cart: [
+          CartItem(
+            productId: productId,
+            name: 'Widget',
+            unitPrice: const Money(10000),
+            costPrice: const Money(5000),
+            quantity: 4,
+          ),
+        ],
+        discount: const Money.zero(),
+        customerPhone: '254712345678',
+        saleType: 'retail',
+        userId: userId,
+        saleNumber: saleNumber,
+        intasendReference: saleNumber,
+      );
 
-    expect(result.isOk, isTrue);
-    late String saleId;
-    result.when(
-      ok: (sale) {
-        saleId = sale.id;
-        expect(sale.status, 'pending');
-        expect(sale.paymentMethod, 'intasend');
-      },
-      failure: (m) => fail(m),
-    );
+      expect(result.isOk, isTrue);
+      late String saleId;
+      result.when(
+        ok: (sale) {
+          saleId = sale.id;
+          expect(sale.status, 'pending');
+          expect(sale.paymentMethod, 'intasend');
+        },
+        failure: (m) => fail(m),
+      );
 
-    final product = await productRepository.findById(productId);
-    expect(product!.stockQty, 6, reason: 'stock is reserved immediately, before payment confirms');
+      final product = await productRepository.findById(productId);
+      expect(
+        product!.stockQty,
+        6,
+        reason: 'stock is reserved immediately, before payment confirms',
+      );
 
-    final record = await paymentRecordRepository.forSale(saleId);
-    expect(record!.method, 'intasend');
-    expect(record.referenceNote, saleNumber);
-  });
+      final record = await paymentRecordRepository.forSale(saleId);
+      expect(record!.method, 'intasend');
+      expect(record.referenceNote, saleNumber);
+    },
+  );
 
   test('finalizePaystackSale and cancelPaystackSale also resolve an intasend sale (shared, gateway-agnostic logic)', () async {
     final saleNumber = await checkout.generateSaleNumber();
     final beginResult = await checkout.beginIntaSendSale(
-      cart: [CartItem(productId: productId, name: 'Widget', unitPrice: const Money(10000), costPrice: const Money(5000), quantity: 1)],
+      cart: [
+        CartItem(
+          productId: productId,
+          name: 'Widget',
+          unitPrice: const Money(10000),
+          costPrice: const Money(5000),
+          quantity: 1,
+        ),
+      ],
       discount: const Money.zero(),
       customerPhone: '254712345678',
       saleType: 'retail',
@@ -399,7 +648,10 @@ void main() {
     beginResult.when(ok: (sale) => saleId = sale.id, failure: (m) => fail(m));
 
     final finalized = await checkout.finalizePaystackSale(saleId);
-    finalized.when(ok: (sale) => expect(sale.status, 'paid'), failure: (m) => fail(m));
+    finalized.when(
+      ok: (sale) => expect(sale.status, 'paid'),
+      failure: (m) => fail(m),
+    );
     final record = await paymentRecordRepository.forSale(saleId);
     expect(record!.status, 'paid');
   });
@@ -407,7 +659,15 @@ void main() {
   test('pendingPaystackSales (the shared stranded-sale query) returns both a pending paystack and a pending intasend sale', () async {
     final paystackSaleNumber = await checkout.generateSaleNumber();
     final paystackResult = await checkout.beginPaystackSale(
-      cart: [CartItem(productId: productId, name: 'Widget', unitPrice: const Money(10000), costPrice: const Money(5000), quantity: 1)],
+      cart: [
+        CartItem(
+          productId: productId,
+          name: 'Widget',
+          unitPrice: const Money(10000),
+          costPrice: const Money(5000),
+          quantity: 1,
+        ),
+      ],
       discount: const Money.zero(),
       saleType: 'retail',
       userId: userId,
@@ -415,11 +675,22 @@ void main() {
       paystackReference: paystackSaleNumber,
     );
     late String paystackSaleId;
-    paystackResult.when(ok: (sale) => paystackSaleId = sale.id, failure: (m) => fail(m));
+    paystackResult.when(
+      ok: (sale) => paystackSaleId = sale.id,
+      failure: (m) => fail(m),
+    );
 
     final intasendSaleNumber = await checkout.generateSaleNumber();
     final intasendResult = await checkout.beginIntaSendSale(
-      cart: [CartItem(productId: productId, name: 'Widget', unitPrice: const Money(10000), costPrice: const Money(5000), quantity: 1)],
+      cart: [
+        CartItem(
+          productId: productId,
+          name: 'Widget',
+          unitPrice: const Money(10000),
+          costPrice: const Money(5000),
+          quantity: 1,
+        ),
+      ],
       discount: const Money.zero(),
       customerPhone: '254712345678',
       saleType: 'retail',
@@ -428,9 +699,15 @@ void main() {
       intasendReference: intasendSaleNumber,
     );
     late String intasendSaleId;
-    intasendResult.when(ok: (sale) => intasendSaleId = sale.id, failure: (m) => fail(m));
+    intasendResult.when(
+      ok: (sale) => intasendSaleId = sale.id,
+      failure: (m) => fail(m),
+    );
 
     final pending = await checkout.pendingPaystackSales();
-    expect(pending.map((s) => s.id), containsAll([paystackSaleId, intasendSaleId]));
+    expect(
+      pending.map((s) => s.id),
+      containsAll([paystackSaleId, intasendSaleId]),
+    );
   });
 }

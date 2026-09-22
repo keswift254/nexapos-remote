@@ -9,6 +9,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'core/providers.dart';
 import 'domain/services/session_service.dart';
 import 'domain/services/sync_service.dart';
+import 'domain/services/lan_sync_service.dart';
 import 'domain/services/license_service.dart';
 import 'domain/entities/user_role.dart';
 import 'domain/repositories/user_repository.dart';
@@ -236,7 +237,8 @@ GoRouter router(Ref ref) {
   );
 }
 
-const _syncInterval = Duration(minutes: 2);
+const _syncInterval = Duration(seconds: 15);
+const _maintenanceInterval = Duration(minutes: 2);
 // A shared shop terminal left logged in indefinitely is a real handoff
 // risk (one cashier's actions attributed to another, or anyone walking
 // up gets a logged-in admin session) - checked on its own, more frequent
@@ -262,18 +264,19 @@ class NexaPosApp extends ConsumerStatefulWidget {
 /// at the app root, not the dashboard, since sync must keep running
 /// regardless of which screen happens to be open; SyncService itself
 /// already no-ops silently when this device isn't registered/joined to
-/// a shop yet, so it's always safe to call. The same timer also carries
-/// LicenseService.backgroundVerify() and UpdateAvailabilityNotifier.check()
-/// - piggybacking on this existing cadence rather than each running its
-/// own timer, per the licensing design's "silently re-check whenever
-/// internet happens to be available".
+/// a shop yet, so it's always safe to call. Lightweight cloud/LAN change
+/// exchange runs every 15 seconds; license verification, update checks and
+/// backups stay on a separate two-minute maintenance cadence so faster sale
+/// visibility does not multiply heavier background work.
 class _NexaPosAppState extends ConsumerState<NexaPosApp>
     with WidgetsBindingObserver {
-  Timer? _timer;
+  Timer? _syncTimer;
+  Timer? _maintenanceTimer;
   Timer? _inactivityTimer;
   DateTime? _lastActivity;
   DateTime? _backgroundedAt;
   bool _syncing = false;
+  bool _maintaining = false;
 
   @override
   void initState() {
@@ -281,9 +284,14 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
     WidgetsBinding.instance.addObserver(this);
     _recordActivity();
     _runSync();
+    _runMaintenance();
     ref.read(pendingPaystackSalesProvider.notifier).reconcile();
     ref.read(cartProvider.notifier).restore();
     _scheduleNextSync();
+    _maintenanceTimer = Timer.periodic(
+      _maintenanceInterval,
+      (_) => _runMaintenance(),
+    );
     _inactivityTimer = Timer.periodic(
       _inactivityCheckInterval,
       (_) => _checkInactivity(),
@@ -295,7 +303,8 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     HardwareKeyboard.instance.removeHandler(_onKeyEvent);
-    _timer?.cancel();
+    _syncTimer?.cancel();
+    _maintenanceTimer?.cancel();
     _inactivityTimer?.cancel();
     super.dispose();
   }
@@ -315,6 +324,7 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
       _backgroundedAt = null;
       _recordActivity();
       _runSync();
+      _runMaintenance();
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden) {
       _backgroundedAt = ref.read(clockProvider).now();
@@ -343,10 +353,10 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
   // "the next tick" arrive in seconds instead of minutes while that
   // initial backlog is still being worked through.
   void _scheduleNextSync() {
-    _timer?.cancel();
+    _syncTimer?.cancel();
     ref.read(syncServiceProvider).needsInitialPull.then((needsPull) {
       if (!mounted) return;
-      _timer = Timer(
+      _syncTimer = Timer(
         needsPull ? hydratingSyncRetryInterval : _syncInterval,
         () {
           _runSync().whenComplete(_scheduleNextSync);
@@ -359,24 +369,40 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
     if (_syncing) return;
     _syncing = true;
     try {
-      await ref.read(licenseServiceProvider).backgroundVerify();
       if (await ref.read(licenseServiceProvider).hasAppAccess()) {
-        await ref.read(syncServiceProvider).runSyncCycle();
+        await Future.wait([
+          ref.read(syncServiceProvider).runSyncCycle(),
+          ref.read(lanSyncServiceProvider).syncNow(),
+        ]);
       }
+    } finally {
+      _syncing = false;
+    }
+  }
+
+  Future<void> _runMaintenance() async {
+    if (_maintaining) return;
+    _maintaining = true;
+    try {
+      await ref.read(licenseServiceProvider).backgroundVerify();
       await ref.read(updateAvailabilityProvider.notifier).check();
       if (ref.read(sessionProvider) != null) {
-        final newBackup = await ref.read(automaticBackupServiceProvider).runIfDue();
+        final newBackup = await ref
+            .read(automaticBackupServiceProvider)
+            .runIfDue();
         if (newBackup != null) {
           // Best-effort mirror: a flaky Drive connection must not break the
           // sync cycle that runs this. The local backup above already
           // succeeded regardless of what happens here.
           try {
-            await ref.read(googleDriveBackupServiceProvider).uploadLatestBackupIfConnected();
+            await ref
+                .read(googleDriveBackupServiceProvider)
+                .uploadLatestBackupIfConnected();
           } catch (_) {}
         }
       }
     } finally {
-      _syncing = false;
+      _maintaining = false;
     }
   }
 

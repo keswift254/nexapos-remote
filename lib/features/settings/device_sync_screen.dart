@@ -16,6 +16,7 @@ import '../../domain/services/paystack_credentials_service.dart';
 import '../../domain/services/sync_service.dart';
 import '../../domain/services/license_service.dart';
 import '../../domain/services/auth_service.dart';
+import '../../domain/services/device_reconnect_service.dart';
 import '../../domain/services/session_service.dart';
 import '../../domain/services/shop_safety_service.dart';
 import '../../domain/services/sensitive_action_service.dart';
@@ -176,6 +177,50 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
     await _register(baseUrl: nexaposPlatformBaseUrl, inviteCode: host.code);
   }
 
+  /// This device is already known to the shop (see [_existingRegistration]):
+  /// go straight back in, with no invite code. The work is in
+  /// [DeviceReconnectService]; this only shows the outcome and, when the
+  /// shop's data has to be downloaded first, waits for that like a fresh join.
+  Future<void> _reconnect() async {
+    if (_submitting) return;
+    setState(() => _submitting = true);
+    try {
+      final result = await ref
+          .read(deviceReconnectServiceProvider)
+          .reconnect(deviceLabel: _deviceLabelController.text);
+      ref.invalidate(currentPaymentCredentialsProvider);
+      final needsDownload = result.when<bool?>(
+        ok: (needsDownload) => needsDownload,
+        failure: (message) {
+          _showMessage(message);
+          return null;
+        },
+      );
+      if (needsDownload == null) return;
+      if (needsDownload) {
+        // Let the screen rebuild into the live download progress view instead of
+        // sitting behind this button's spinner for however long it takes.
+        if (mounted) setState(() => _submitting = false);
+        while (mounted && await ref.read(syncServiceProvider).needsInitialPull) {
+          await _safeSyncNow();
+          if (!mounted) return;
+          if (await ref.read(syncServiceProvider).needsInitialPull) {
+            await Future<void>.delayed(hydratingSyncRetryInterval);
+          }
+        }
+        if (!mounted) return;
+      } else {
+        await _safeSyncNow();
+      }
+      ref.invalidate(hasAnyUsersProvider);
+      if (mounted) context.go('/');
+    } catch (e) {
+      _showMessage('$e');
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
   Future<void> _joinManually() async {
     final label = _deviceLabelController.text.trim();
     if (label.isEmpty) return _showMessage('Enter a label for this device.');
@@ -295,6 +340,15 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
       // renders here until something else happens to navigate.
       if (mounted) context.go('/');
     } catch (e) {
+      // A join that fails part-way (an expired or already-used invite code is
+      // the usual reason) must not strand this device on "waiting for the
+      // shop's data": prepareInitialJoin already marked it as joining. Undo
+      // that if the server confirms the join never happened.
+      if (inviteCode != null) {
+        try {
+          await ref.read(syncServiceProvider).reconcileFailedInitialJoin();
+        } catch (_) {}
+      }
       ref.invalidate(currentPaymentCredentialsProvider);
       _showMessage(e is PaystackException ? e.message : '$e');
     } finally {
@@ -453,13 +507,25 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
   /// correctly false now, since users was part of the wipe) rather than
   /// leaving them sitting on this screen with a stale app state.
   Future<void> _leaveShop(PaystackCredentials credentials) async {
+    // A device that JOINED this shop only ever holds a copy of what the
+    // shop already has - unlike the device that founded it, which may be
+    // the sole copy - so it gets a lighter exit: no per-device authenticator
+    // step (leaving only resets this one device; it touches nothing shared)
+    // and no encrypted backup (changeShop pushes any last unsent changes
+    // instead, which serves the same purpose without the extra file/password).
+    final isJoined = await ref.read(licenseServiceProvider).isJoinedMember;
+    if (!mounted) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Leave this shop?'),
-        content: const Text(
-          'This device will start a new, empty shop. Administrator verification and an encrypted '
-          'recovery backup are required before its local records are removed. Keep the backup password.',
+        content: Text(
+          isJoined
+              ? 'This device will start a new, empty shop and its local records will be removed. '
+                    "The shop's own data is not affected - it already has everything this device does. "
+                    'Enter your administrator password to continue.'
+              : 'This device will start a new, empty shop. Administrator verification and an encrypted '
+                    'recovery backup are required before its local records are removed. Keep the backup password.',
         ),
         actions: [
           TextButton(
@@ -481,6 +547,7 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
     final approval = await requestSensitiveApproval(
       context,
       action: 'Leave this shop',
+      requireAuthenticator: !isJoined,
     );
     if (approval == null || !mounted) return;
 
@@ -492,6 +559,7 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
             approval: approval,
             credentials: credentials,
             saveRecovery: (archive) => saveRecoveryArchive(context, archive),
+            requireBackup: !isJoined,
           );
       if (changed) await _afterShopChange();
     } catch (e) {
@@ -635,6 +703,12 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
               existing.isDisabled
                   ? 'This device was disabled by $_existingShopName and can\'t reconnect with its current identity. '
                         'Ask that shop\'s owner if this is a mistake, or reinstall the app to set this device up fresh.'
+                  : widget.joinOnly && existing.isOwner
+                  ? 'This device is the owner of $_existingShopName - it was set up with a license key, not an '
+                        'invite code, so it unlocks the same way. Tap below to go enter it.'
+                  : widget.joinOnly
+                  ? 'This device was already registered as "${existing.deviceLabel}" for $_existingShopName. '
+                        'Tap Reconnect to go straight back in - no invite code needed.'
                   : 'This device was already registered as "${existing.deviceLabel}" for $_existingShopName. '
                         'Tap below to reconnect using that name, or change it first to update it.',
               style: Theme.of(context).textTheme.bodySmall,
@@ -644,12 +718,41 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
         ],
         TextField(
           controller: _deviceLabelController,
-          enabled: existing?.isDisabled != true,
+          enabled: existing == null || (!existing.isDisabled && !existing.isOwner),
           decoration: const InputDecoration(
             labelText: 'Label for this device (e.g. your shop name or counter)',
           ),
         ),
         const SizedBox(height: 16),
+        if (widget.joinOnly && existing != null && existing.isOwner) ...[
+          FilledButton.icon(
+            onPressed: () => context.go('/activate'),
+            icon: const Icon(Icons.vpn_key),
+            label: const Text('Enter my license key'),
+          ),
+          const SizedBox(height: 20),
+          const Divider(),
+          const SizedBox(height: 8),
+          Text(
+            'Or join a different shop with an invite code',
+            style: Theme.of(context).textTheme.labelLarge,
+          ),
+          const SizedBox(height: 12),
+        ] else if (widget.joinOnly && existing != null && !existing.isDisabled) ...[
+          FilledButton.icon(
+            onPressed: _submitting ? null : _reconnect,
+            icon: _submitting ? _smallSpinner() : const Icon(Icons.login),
+            label: Text('Reconnect to $_existingShopName'),
+          ),
+          const SizedBox(height: 20),
+          const Divider(),
+          const SizedBox(height: 8),
+          Text(
+            'Or join a different shop with an invite code',
+            style: Theme.of(context).textTheme.labelLarge,
+          ),
+          const SizedBox(height: 12),
+        ],
         if (!widget.joinOnly)
           Wrap(
             spacing: 8,
@@ -761,14 +864,21 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
           ),
         ],
         const SizedBox(height: 24),
-        if (!widget.joinOnly)
+        // On the join screen this is the way out of being stuck as an owner
+        // (or disabled, or registered for the wrong shop) without a reinstall:
+        // it does not touch the old server-side registration at all, just gives
+        // this device a new one to register fresh with, so the invite-code
+        // field right above becomes usable again immediately.
+        if (!widget.joinOnly || existing != null)
           Center(
             child: TextButton(
               onPressed: _resettingIdentity ? null : _resetDeviceIdentity,
               child: _resettingIdentity
                   ? _smallSpinner()
                   : Text(
-                      'Registering keeps failing? Reset this device\'s identity',
+                      widget.joinOnly
+                          ? 'Reset this device and join a different shop'
+                          : 'Registering keeps failing? Reset this device\'s identity',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
             ),

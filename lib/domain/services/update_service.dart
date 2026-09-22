@@ -1,12 +1,14 @@
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart' show Provider;
 import 'package:open_file/open_file.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
+import '../../core/legacy_windows_edition.dart';
 import '../../core/result.dart';
 import '../../data/update/update_gateway.dart';
 import 'windows_installer_launcher_native.dart'
@@ -20,6 +22,12 @@ UpdateGateway updateGateway(Ref ref) => UpdateGateway();
 
 @Riverpod(keepAlive: true)
 UpdateService updateService(Ref ref) => UpdateService(ref);
+
+/// Whether this is the Windows 7/8 edition - a provider (not just the
+/// compile-time constant) so tests can exercise both editions.
+final legacyWindowsEditionProvider = Provider<bool>(
+  (ref) => kLegacyWindowsEdition,
+);
 
 /// Result the caller of build "does a newer build exist" once the vendor's
 /// server has been asked - separate from [UpdateAvailabilityNotifier]
@@ -123,8 +131,16 @@ class UpdateService {
   Future<UpdateCheckResult> checkForUpdate() async {
     final packageInfo = await PackageInfo.fromPlatform();
     final latest = await _ref.read(updateGatewayProvider).fetchLatestVersion();
+    // The Windows 7/8 edition only updates from its own installer. A release
+    // published without one is not an update for it: offering the banner
+    // would just end in "no download available" on every check.
+    final hasInstallerForThisEdition =
+        !_ref.read(legacyWindowsEditionProvider) ||
+        (latest?.windowsLegacyInstallerUrl.isNotEmpty ?? false);
     final available =
-        latest != null && isNewerVersion(latest.version, packageInfo.version);
+        latest != null &&
+        hasInstallerForThisEdition &&
+        isNewerVersion(latest.version, packageInfo.version);
     return UpdateCheckResult(
       currentVersion: packageInfo.version,
       latest: latest,
@@ -155,16 +171,25 @@ class UpdateService {
     LatestVersionInfo info,
     void Function(double)? onProgress,
   ) async {
-    if (info.windowsInstallerUrl.isEmpty) {
-      return const Result.failure(
-        'No Windows download is available for this update.',
+    final legacy = _ref.read(legacyWindowsEditionProvider);
+    final url = legacy ? info.windowsLegacyInstallerUrl : info.windowsInstallerUrl;
+    if (url.isEmpty) {
+      return Result.failure(
+        legacy
+            ? 'No Windows 7/8 download is available for this update yet.'
+            : 'No Windows download is available for this update.',
       );
     }
-    return _installWindowsSetup(info, onProgress);
+    return _installWindowsSetup(
+      url,
+      legacy ? info.windowsLegacyInstallerSha256 : info.windowsInstallerSha256,
+      onProgress,
+    );
   }
 
   Future<Result<void>> _installWindowsSetup(
-    LatestVersionInfo info,
+    String url,
+    String? sha256,
     void Function(double)? onProgress,
   ) async {
     try {
@@ -173,7 +198,7 @@ class UpdateService {
       await _ref
           .read(updateGatewayProvider)
           .downloadTo(
-            info.windowsInstallerUrl,
+            url,
             setupFile,
             onProgress: (received, total) {
               if (total != null && total > 0) {
@@ -181,10 +206,7 @@ class UpdateService {
               }
             },
           );
-      final checksumError = await _verifyChecksum(
-        setupFile,
-        info.windowsInstallerSha256,
-      );
+      final checksumError = await _verifyChecksum(setupFile, sha256);
       if (checksumError != null) return Result.failure(checksumError);
       onProgress?.call(1.0);
       installer_launcher.launchWindowsInstallerElevated(setupFile.path);

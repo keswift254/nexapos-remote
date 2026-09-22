@@ -86,6 +86,14 @@ class LicenseService {
   Future<bool> get membershipBlocked async =>
       (await _membership())?['blocked'] == true;
 
+  /// True for a device that got into its current shop by joining it (an
+  /// invite code, or DeviceReconnectService's no-code reconnect - see
+  /// confirmJoinedMembership), as opposed to the device that founded the
+  /// shop by activating a license key. Purely local, no network call - lets
+  /// a screen tell the two apart (e.g. "Leave this shop") without first
+  /// asking the server who owns what.
+  Future<bool> get isJoinedMember async => await _membership() != null;
+
   Future<bool> hasAppAccess() async {
     final membership = await _membership();
     if (membership?['blocked'] == true) return false;

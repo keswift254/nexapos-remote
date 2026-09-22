@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show MissingPluginException;
 import 'package:local_auth/local_auth.dart';
 
+import '../../core/legacy_windows_edition.dart';
 import 'device_authentication_gateway.dart';
 
 /// Split out of app_security_service.dart because local_auth is
@@ -15,8 +17,17 @@ class LocalDeviceAuthenticationGateway implements DeviceAuthenticationGateway {
   final LocalAuthentication _auth = LocalAuthentication();
 
   @override
-  Future<bool> isSupported() async =>
-      await _auth.canCheckBiometrics || await _auth.isDeviceSupported();
+  Future<bool> isSupported() async {
+    // The Windows 7/8 edition is built without the local_auth plugin (Windows
+    // Hello does not exist there and the plugin cannot load), so there is
+    // nothing to ask - and no plugin to answer if we did.
+    if (kLegacyWindowsEdition) return false;
+    try {
+      return await _auth.canCheckBiometrics || await _auth.isDeviceSupported();
+    } on MissingPluginException {
+      return false;
+    }
+  }
 
   @override
   Future<bool> authenticate() => _auth.authenticate(

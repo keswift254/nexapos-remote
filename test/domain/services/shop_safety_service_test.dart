@@ -269,6 +269,63 @@ void main() {
     },
   );
 
+  test(
+    'requireBackup:false (a joined device leaving) skips the backup and pushes any last unsent changes instead',
+    () async {
+      var saveRecoveryCalled = false;
+      expect(
+        await service.changeShop(
+          approval: await approve('Leave this shop'),
+          credentials: credentials,
+          saveRecovery: (_) async {
+            saveRecoveryCalled = true;
+            return true;
+          },
+          requireBackup: false,
+        ),
+        isTrue,
+      );
+      expect(saveRecoveryCalled, isFalse,
+          reason: 'a joined device does not need its own backup - the shop it is leaving already has this data');
+      expect(requests, contains('push_changes'),
+          reason: 'the owner user created in setUp was never pushed, so leaving must push it before wiping it');
+      expect(await db.select(db.users).get(), isEmpty);
+      expect(await sync.hasPendingShopChange, isFalse);
+    },
+  );
+
+  test(
+    'requireBackup:false is refused (not silently skipped) when there is no connection to push over',
+    () async {
+      final offlineSync = SyncService(
+        db,
+        SyncMetadataService(db),
+        PlatformSyncGateway(
+          MockClient((_) async => throw http.ClientException('offline')),
+        ),
+        PaystackCredentialsService(const FlutterSecureStorage()),
+        onboarding: gateway,
+      );
+      final offlineService = ShopSafetyService(db, offlineSync, security, gateway);
+      await expectLater(
+        offlineService.changeShop(
+          approval: await approve('Leave this shop'),
+          credentials: credentials,
+          saveRecovery: (_) async => throw StateError('must not be called - no backup on this path'),
+          requireBackup: false,
+        ),
+        throwsA(anything),
+      );
+      // Nothing server-side happened yet (the failed push is a pre-flight
+      // step, same as a failed backup) - so, like a failed backup, this
+      // clears the journal rather than leaving something to resolve later.
+      expect(gateway.calls, 0,
+          reason: 'must not tell the server this device left while its own push has not gone through');
+      expect(await offlineSync.hasPendingShopChange, isFalse);
+      expect(await db.select(db.users).get(), hasLength(1));
+    },
+  );
+
   test('successful leave requires saved backup and removes only local business rows', () async {
     final identity = await db.select(db.deviceMeta).getSingle();
     expect(

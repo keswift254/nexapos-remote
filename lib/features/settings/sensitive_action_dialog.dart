@@ -12,15 +12,23 @@ import '../../core/providers.dart';
 Future<ActionApproval?> requestSensitiveApproval(
   BuildContext context, {
   required String action,
+  bool requireAuthenticator = true,
 }) => showDialog<ActionApproval>(
   context: context,
   barrierDismissible: false,
-  builder: (_) => _ApprovalDialog(action: action),
+  builder: (_) => _ApprovalDialog(
+    action: action,
+    requireAuthenticator: requireAuthenticator,
+  ),
 );
 
 class _ApprovalDialog extends ConsumerStatefulWidget {
   final String action;
-  const _ApprovalDialog({required this.action});
+  final bool requireAuthenticator;
+  const _ApprovalDialog({
+    required this.action,
+    this.requireAuthenticator = true,
+  });
   @override
   ConsumerState<_ApprovalDialog> createState() => _ApprovalDialogState();
 }
@@ -86,6 +94,15 @@ class _ApprovalDialogState extends ConsumerState<_ApprovalDialog> {
     try {
       final service = ref.read(sensitiveActionProvider);
       final username = ref.read(sessionProvider)?.username ?? '';
+      if (!widget.requireAuthenticator) {
+        final approval = await service.approveWithPasswordOnly(
+          username: username,
+          password: password.text,
+          action: widget.action,
+        );
+        if (mounted) Navigator.pop(context, approval);
+        return;
+      }
       if (!verifiedPassword) {
         final id = await service.verifyPassword(username, password.text);
         final enrolled = await service.isEnrolled(id);

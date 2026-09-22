@@ -8,6 +8,34 @@ import 'package:nexapos_mobile/data/payments/platform_onboarding_gateway.dart';
 const _baseUrl = 'http://localhost/nexapos_platform/public/index.php';
 
 void main() {
+  group('getLanSyncCredentials', () {
+    test('parses the native shop key without sending it in the request body', () async {
+      final gateway = PlatformOnboardingGateway(MockClient((request) async {
+        expect(request.method, 'GET');
+        expect(request.url.queryParameters['action'], 'lan_sync_credentials');
+        expect(request.headers['Authorization'], 'Bearer native-key');
+        expect(request.body, isEmpty);
+        return http.Response(
+          jsonEncode({
+            'success': true,
+            'shop_id': 42,
+            'device_id': 'native-device',
+            'secret': 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+          }),
+          200,
+        );
+      }));
+
+      final result = await gateway.getLanSyncCredentials(
+        baseUrl: _baseUrl,
+        apiKey: 'native-key',
+      );
+      expect(result.shopId, 42);
+      expect(result.deviceId, 'native-device');
+      expect(result.secret, isNotEmpty);
+    });
+  });
+
   group('registerDevice', () {
     test('parses the returned api_key and sends the registration secret', () async {
       final gateway = PlatformOnboardingGateway(MockClient((request) async {

@@ -160,4 +160,16 @@ void main() {
       expect(await service.hasAppAccess(), true);
     },
   );
+  test(
+    'isJoinedMember tells a joined device from the one that founded its shop',
+    () async {
+      expect(await service.isJoinedMember, false,
+          reason: 'a brand new device, before ever joining or activating anything, is not a joined member');
+      await service.confirmJoinedMembership();
+      expect(await service.isJoinedMember, true);
+      await service.clearJoinedMembership();
+      expect(await service.isJoinedMember, false,
+          reason: 'after leaving, this device is unaffiliated again, same as before it ever joined');
+    },
+  );
 }

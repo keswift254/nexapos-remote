@@ -1,23 +1,45 @@
 import 'package:http/http.dart' as http;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+
 import '../../core/is_web.dart';
 import 'platform_http_client.dart';
 
 part 'platform_onboarding_gateway.g.dart';
 
 @Riverpod(keepAlive: true)
-PlatformOnboardingGateway platformOnboardingGateway(Ref ref) => PlatformOnboardingGateway();
+PlatformOnboardingGateway platformOnboardingGateway(Ref ref) =>
+    PlatformOnboardingGateway();
 
 class DeviceRegistration {
   final String apiKey;
   const DeviceRegistration(this.apiKey);
 }
 
+class LanSyncCredentials {
+  final int shopId;
+  final String deviceId;
+  final String secret;
+
+  const LanSyncCredentials({
+    required this.shopId,
+    required this.deviceId,
+    required this.secret,
+  });
+}
+
 class RegistrationLookup {
   final String deviceLabel;
   final String businessName;
   final bool isDisabled;
-  const RegistrationLookup({required this.deviceLabel, required this.businessName, required this.isDisabled});
+  // True for the device that founded its own shop by activating a license key - it is
+  // unlocked by that key again, never by reconnecting/joining (see DeviceReconnectService).
+  final bool isOwner;
+  const RegistrationLookup({
+    required this.deviceLabel,
+    required this.businessName,
+    required this.isDisabled,
+    required this.isOwner,
+  });
 }
 
 class InviteResult {
@@ -31,7 +53,11 @@ class SettlementResult {
   final bool isVerified;
   final String accountName;
 
-  const SettlementResult({required this.subaccountCode, required this.isVerified, required this.accountName});
+  const SettlementResult({
+    required this.subaccountCode,
+    required this.isVerified,
+    required this.accountName,
+  });
 }
 
 class ClientStatus {
@@ -95,7 +121,8 @@ class DeviceInfo {
   bool get isOnline =>
       !isDisabled &&
       lastSeenAt != null &&
-      DateTime.now().toUtc().difference(lastSeenAt!) < const Duration(minutes: 5);
+      DateTime.now().toUtc().difference(lastSeenAt!) <
+          const Duration(minutes: 5);
 }
 
 class BankOption {
@@ -103,7 +130,11 @@ class BankOption {
   final String code;
   final String type;
 
-  const BankOption({required this.name, required this.code, required this.type});
+  const BankOption({
+    required this.name,
+    required this.code,
+    required this.type,
+  });
 
   // Paystack Kenya uses both 'mobile_money' (M-PESA, Airtel Money,
   // Telkom T-Kash) and 'mobile_money_business' (M-PESA Paybill/Till) -
@@ -120,7 +151,37 @@ class BankOption {
 class PlatformOnboardingGateway {
   final http.Client _client;
 
-  PlatformOnboardingGateway([http.Client? client]) : _client = client ?? http.Client();
+  PlatformOnboardingGateway([http.Client? client])
+    : _client = client ?? http.Client();
+
+  /// Native-only. The server rejects browser-channel credentials even if a
+  /// caller manually invokes this endpoint from web code.
+  Future<LanSyncCredentials> getLanSyncCredentials({
+    required String baseUrl,
+    required String apiKey,
+  }) async {
+    final response = await platformRequest(
+      _client,
+      'GET',
+      'lan_sync_credentials',
+      baseUrl,
+      apiKey: apiKey,
+    );
+    final secret = (response['secret'] as String? ?? '').trim();
+    if (response['success'] != true || secret.isEmpty) {
+      throw PaystackException(
+        platformResponseMessage(
+          response,
+          'Could not load LAN sync credentials.',
+        ),
+      );
+    }
+    return LanSyncCredentials(
+      shopId: (response['shop_id'] as num? ?? 0).toInt(),
+      deviceId: (response['device_id'] as String? ?? '').trim(),
+      secret: secret,
+    );
+  }
 
   Future<DeviceRegistration> registerDevice({
     required String baseUrl,
@@ -146,10 +207,16 @@ class PlatformOnboardingGateway {
       },
     );
     if (response['success'] != true) {
-      throw PaystackException(platformResponseMessage(response, 'Could not register this device.'));
+      throw PaystackException(
+        platformResponseMessage(response, 'Could not register this device.'),
+      );
     }
     final apiKey = (response['api_key'] as String? ?? '').trim();
-    if (apiKey.isEmpty) throw const PaystackException('The payments server did not return an API key.');
+    if (apiKey.isEmpty) {
+      throw const PaystackException(
+        'The payments server did not return an API key.',
+      );
+    }
     return DeviceRegistration(apiKey);
   }
 
@@ -173,7 +240,10 @@ class PlatformOnboardingGateway {
         'POST',
         'registration_lookup',
         baseUrl,
-        body: {'device_id': deviceId, 'registration_secret': registrationSecret},
+        body: {
+          'device_id': deviceId,
+          'registration_secret': registrationSecret,
+        },
       );
     } on PaystackException {
       return null;
@@ -182,12 +252,20 @@ class PlatformOnboardingGateway {
       deviceLabel: (response['device_label'] as String? ?? '').trim(),
       businessName: (response['business_name'] as String? ?? '').trim(),
       isDisabled: response['is_disabled'] == true,
+      // Older servers that haven't deployed this field yet answer null; treating that
+      // as "not owner" only ever shows the Reconnect button too eagerly, which
+      // DeviceReconnectService/register_device+client_status still catch and refuse.
+      isOwner: response['is_owner'] == true,
     );
   }
 
   /// Lets an already-registered device join an existing shop's sync
   /// group via a code generated on another device (see [generateInvite]).
-  Future<void> joinShop({required String baseUrl, required String apiKey, required String inviteCode}) async {
+  Future<void> joinShop({
+    required String baseUrl,
+    required String apiKey,
+    required String inviteCode,
+  }) async {
     final response = await platformRequest(
       _client,
       'POST',
@@ -197,7 +275,9 @@ class PlatformOnboardingGateway {
       body: {'invite_code': inviteCode},
     );
     if (response['success'] != true) {
-      throw PaystackException(platformResponseMessage(response, 'Could not join that shop.'));
+      throw PaystackException(
+        platformResponseMessage(response, 'Could not join that shop.'),
+      );
     }
   }
 
@@ -207,19 +287,41 @@ class PlatformOnboardingGateway {
   /// different shop_id now) - the caller is responsible for wiping this
   /// device's own local business data and sync cursors to match, since
   /// none of that is meaningful against the new shop_id either.
-  Future<void> leaveShop({required String baseUrl, required String apiKey}) async {
-    final response = await platformRequest(_client, 'POST', 'leave_shop', baseUrl, apiKey: apiKey);
+  Future<void> leaveShop({
+    required String baseUrl,
+    required String apiKey,
+  }) async {
+    final response = await platformRequest(
+      _client,
+      'POST',
+      'leave_shop',
+      baseUrl,
+      apiKey: apiKey,
+    );
     if (response['success'] != true) {
-      throw PaystackException(platformResponseMessage(response, 'Could not leave that shop.'));
+      throw PaystackException(
+        platformResponseMessage(response, 'Could not leave that shop.'),
+      );
     }
   }
 
   /// Generates a short-lived code another device can redeem via
   /// [joinShop] to join this device's shop.
-  Future<InviteResult> generateInvite({required String baseUrl, required String apiKey}) async {
-    final response = await platformRequest(_client, 'POST', 'generate_invite', baseUrl, apiKey: apiKey);
+  Future<InviteResult> generateInvite({
+    required String baseUrl,
+    required String apiKey,
+  }) async {
+    final response = await platformRequest(
+      _client,
+      'POST',
+      'generate_invite',
+      baseUrl,
+      apiKey: apiKey,
+    );
     if (response['success'] != true) {
-      throw PaystackException(platformResponseMessage(response, 'Could not generate an invite code.'));
+      throw PaystackException(
+        platformResponseMessage(response, 'Could not generate an invite code.'),
+      );
     }
     return InviteResult(
       code: (response['code'] as String? ?? '').trim(),
@@ -254,7 +356,9 @@ class PlatformOnboardingGateway {
       },
     );
     if (response['success'] != true) {
-      throw PaystackException(platformResponseMessage(response, 'Could not save settlement details.'));
+      throw PaystackException(
+        platformResponseMessage(response, 'Could not save settlement details.'),
+      );
     }
     return SettlementResult(
       subaccountCode: (response['subaccount_code'] as String? ?? '').trim(),
@@ -267,10 +371,24 @@ class PlatformOnboardingGateway {
   /// what" - the phone never caches this itself (see PaystackCredentials
   /// for why that's deliberate: it would drift from whatever the
   /// operator or a dashboard edit changed server-side).
-  Future<ClientStatus> getClientStatus({required String baseUrl, required String apiKey}) async {
-    final response = await platformRequest(_client, 'GET', 'client_status', baseUrl, apiKey: apiKey);
+  Future<ClientStatus> getClientStatus({
+    required String baseUrl,
+    required String apiKey,
+  }) async {
+    final response = await platformRequest(
+      _client,
+      'GET',
+      'client_status',
+      baseUrl,
+      apiKey: apiKey,
+    );
     if (response['success'] != true) {
-      throw PaystackException(platformResponseMessage(response, 'Could not load your payment settings.'));
+      throw PaystackException(
+        platformResponseMessage(
+          response,
+          'Could not load your payment settings.',
+        ),
+      );
     }
     return ClientStatus(
       shopId: (response['shop_id'] as num? ?? 0).toInt(),
@@ -294,29 +412,42 @@ class PlatformOnboardingGateway {
   /// in index.php's list_devices) - lets the shop's founding device see
   /// every device currently able to sync its data, as the basis for
   /// [revokeDevice].
-  Future<List<DeviceInfo>> listDevices({required String baseUrl, required String apiKey}) async {
-    final response = await platformRequest(_client, 'GET', 'list_devices', baseUrl, apiKey: apiKey);
+  Future<List<DeviceInfo>> listDevices({
+    required String baseUrl,
+    required String apiKey,
+  }) async {
+    final response = await platformRequest(
+      _client,
+      'GET',
+      'list_devices',
+      baseUrl,
+      apiKey: apiKey,
+    );
     if (response['success'] != true) {
-      throw PaystackException(platformResponseMessage(response, 'Could not load devices.'));
+      throw PaystackException(
+        platformResponseMessage(response, 'Could not load devices.'),
+      );
     }
     final devices = (response['devices'] as List?) ?? const [];
     return devices
         .whereType<Map>()
-        .map((device) => DeviceInfo(
-              id: (device['id'] as num? ?? 0).toInt(),
-              deviceLabel: (device['device_label'] as String? ?? '').trim(),
-              isOwner: device['is_owner'] == true,
-              status: (device['status'] as String? ?? '').trim(),
-              // MySQL's TIMESTAMP comes back as a naive "YYYY-MM-DD
-              // HH:MM:SS" string with no zone suffix - it's UTC (the
-              // column has no app-level timezone handling), so DateTime
-              // must be told that explicitly or it parses as local time.
-              lastSeenAt: (device['last_seen_at'] as String?) == null
-                  ? null
-                  : DateTime.tryParse(
-                      '${(device['last_seen_at'] as String).replaceFirst(' ', 'T')}Z',
-                    ),
-            ))
+        .map(
+          (device) => DeviceInfo(
+            id: (device['id'] as num? ?? 0).toInt(),
+            deviceLabel: (device['device_label'] as String? ?? '').trim(),
+            isOwner: device['is_owner'] == true,
+            status: (device['status'] as String? ?? '').trim(),
+            // MySQL's TIMESTAMP comes back as a naive "YYYY-MM-DD
+            // HH:MM:SS" string with no zone suffix - it's UTC (the
+            // column has no app-level timezone handling), so DateTime
+            // must be told that explicitly or it parses as local time.
+            lastSeenAt: (device['last_seen_at'] as String?) == null
+                ? null
+                : DateTime.tryParse(
+                    '${(device['last_seen_at'] as String).replaceFirst(' ', 'T')}Z',
+                  ),
+          ),
+        )
         .toList();
   }
 
@@ -326,27 +457,52 @@ class PlatformOnboardingGateway {
   /// There's no way back from this via the API on purpose (see
   /// revoke_device's own comment) - a device that needs to rejoin does
   /// so as a fresh registration + a new invite code.
-  Future<void> revokeDevice({required String baseUrl, required String apiKey, required int clientId}) async {
-    final response =
-        await platformRequest(_client, 'POST', 'revoke_device', baseUrl, apiKey: apiKey, body: {'client_id': clientId});
+  Future<void> revokeDevice({
+    required String baseUrl,
+    required String apiKey,
+    required int clientId,
+  }) async {
+    final response = await platformRequest(
+      _client,
+      'POST',
+      'revoke_device',
+      baseUrl,
+      apiKey: apiKey,
+      body: {'client_id': clientId},
+    );
     if (response['success'] != true) {
-      throw PaystackException(platformResponseMessage(response, 'Could not revoke that device.'));
+      throw PaystackException(
+        platformResponseMessage(response, 'Could not revoke that device.'),
+      );
     }
   }
 
-  Future<List<BankOption>> listBanks({required String baseUrl, required String apiKey}) async {
-    final response = await platformRequest(_client, 'GET', 'list_banks', baseUrl, apiKey: apiKey);
+  Future<List<BankOption>> listBanks({
+    required String baseUrl,
+    required String apiKey,
+  }) async {
+    final response = await platformRequest(
+      _client,
+      'GET',
+      'list_banks',
+      baseUrl,
+      apiKey: apiKey,
+    );
     if (response['success'] != true) {
-      throw PaystackException(platformResponseMessage(response, 'Could not load the bank list.'));
+      throw PaystackException(
+        platformResponseMessage(response, 'Could not load the bank list.'),
+      );
     }
     final banks = (response['banks'] as List?) ?? const [];
     return banks
         .whereType<Map>()
-        .map((bank) => BankOption(
-              name: (bank['name'] as String? ?? '').trim(),
-              code: (bank['code'] as String? ?? '').trim(),
-              type: (bank['type'] as String? ?? '').trim(),
-            ))
+        .map(
+          (bank) => BankOption(
+            name: (bank['name'] as String? ?? '').trim(),
+            code: (bank['code'] as String? ?? '').trim(),
+            type: (bank['type'] as String? ?? '').trim(),
+          ),
+        )
         .toList();
   }
 }
