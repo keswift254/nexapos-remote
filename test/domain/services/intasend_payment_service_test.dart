@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:drift/native.dart';
@@ -209,7 +210,7 @@ void main() {
     expect(product!.stockQty, 9, reason: 'stock must be reserved as soon as IntaSend accepts the STK push');
   });
 
-  test('a network failure during collect is reported as needing internet, and nothing is written', () async {
+  test('a network failure during collect does not blame the device\'s own connection, and nothing is written', () async {
     final gateway = IntaSendGateway(MockClient((request) async {
       throw const SocketException('unreachable');
     }));
@@ -220,11 +221,32 @@ void main() {
     expect(result.isFailure, isTrue);
     result.when(
       ok: (_) => fail('expected failure'),
-      failure: (m) => expect(m, 'Could not reach the payments server. Check your internet connection and try again.'),
+      // Not "check your internet connection" - this is thrown just as
+      // easily when the payments SERVER is unreachable with the device's
+      // own connection working fine (confirmed for real), so it must not
+      // assert that as the diagnosis.
+      failure: (m) {
+        expect(m, isNot(contains('your internet')));
+        expect(m, 'Could not reach the payments server right now. Try again in a moment.');
+      },
     );
 
     final product = await productRepository.findById(productId);
     expect(product!.stockQty, 10, reason: 'a failed collect must never reserve stock');
+  });
+
+  test('a slow-to-respond payments server says so, distinctly from a plain connection failure', () async {
+    final gateway = IntaSendGateway(MockClient((request) async {
+      throw TimeoutException('no answer');
+    }));
+    final service = IntaSendPaymentService(gateway, _FakeCredentialsService(configured), checkoutService);
+
+    final result = await service.start(cart: oneWidget(), discount: const Money.zero(), customerPhone: '0712345678', saleType: 'retail', userId: userId);
+
+    result.when(
+      ok: (_) => fail('expected failure'),
+      failure: (m) => expect(m, 'The payments server is taking a while to respond. Try again in a moment.'),
+    );
   });
 
   test('poll() finalizes the sale once IntaSend confirms success', () async {

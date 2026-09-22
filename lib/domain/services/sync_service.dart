@@ -608,7 +608,20 @@ class SyncService {
       await _syncMeta.setLastPushedLocalRev(slice.last.json['localRev'] as int);
     }
 
-    await _pushLanRelayOutbox(baseUrl, apiKey);
+    // Best-effort, deliberately not awaited into a rethrow: this device's
+    // OWN changes are already safely recorded on the server by this point.
+    // A LAN-relayed change (received from another device over the network,
+    // not this device's own data) that the server permanently refuses -
+    // confirmed for real: most often because its source device has since
+    // left the shop or been disabled - must never make pushLocalChanges
+    // itself look like it failed, or anything that depends on it
+    // succeeding (leaving a shop, in particular - see shop_safety_service's
+    // requireBackup:false path) would be blocked by data that was never
+    // this device's own to begin with. Retried on the next normal cycle
+    // either way.
+    try {
+      await _pushLanRelayOutbox(baseUrl, apiKey);
+    } catch (_) {}
   }
 
   Future<void> _ensureLanTables() async {
@@ -785,6 +798,15 @@ class SyncService {
     },
   );
 
+  Future<void> _deleteRelayOutboxRows(Iterable<int> rowIds) async {
+    final ids = rowIds.toList();
+    if (ids.isEmpty) return;
+    await _db.customStatement(
+      'DELETE FROM local_lan_relay_outbox WHERE rowid IN (${List.filled(ids.length, '?').join(',')})',
+      ids,
+    );
+  }
+
   Future<void> _pushLanRelayOutbox(String baseUrl, String apiKey) async {
     await _ensureLanTables();
     while (true) {
@@ -798,16 +820,47 @@ class SyncService {
         return (jsonDecode(row.data['record'] as String) as Map)
             .cast<String, dynamic>();
       }).toList();
-      await _gateway.pushChanges(
-        baseUrl: baseUrl,
-        apiKey: apiKey,
-        changes: changes,
-      );
-      final ids = rows.map((row) => row.data['rowid'] as int).toList();
-      await _db.customStatement(
-        'DELETE FROM local_lan_relay_outbox WHERE rowid IN (${List.filled(ids.length, '?').join(',')})',
-        ids,
-      );
+      try {
+        await _gateway.pushChanges(
+          baseUrl: baseUrl,
+          apiKey: apiKey,
+          changes: changes,
+        );
+        await _deleteRelayOutboxRows(
+          rows.map((row) => row.data['rowid'] as int),
+        );
+      } on PaystackException catch (e) {
+        if (e.statusCode != 422) rethrow;
+        if (rows.length == 1) {
+          // Already know exactly which single change was rejected - no
+          // need to resend it just to learn that again. Permanently drop
+          // it: it came from a peer device, not this one, so dropping it
+          // loses nothing this device made.
+          await _deleteRelayOutboxRows([rows.single.data['rowid'] as int]);
+          continue;
+        }
+        // The server rejects one bad entry's whole batch (see push_changes),
+        // even when only one relayed change out of many is actually invalid
+        // - most often because its source device has since left the shop or
+        // been disabled. Retry one row at a time so the rest of the batch
+        // still gets through, and permanently drop only the one the server
+        // genuinely never accepts on its own.
+        for (final row in rows) {
+          final rowId = row.data['rowid'] as int;
+          final change = (jsonDecode(row.data['record'] as String) as Map)
+              .cast<String, dynamic>();
+          try {
+            await _gateway.pushChanges(
+              baseUrl: baseUrl,
+              apiKey: apiKey,
+              changes: [change],
+            );
+          } on PaystackException catch (single) {
+            if (single.statusCode != 422) rethrow;
+          }
+          await _deleteRelayOutboxRows([rowId]);
+        }
+      }
     }
   }
 

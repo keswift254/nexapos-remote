@@ -102,8 +102,17 @@ class PaystackPaymentService {
         email: credentials.defaultEmail,
         currency: credentials.currency,
       );
-    } on PaystackOfflineException {
-      return const Result.failure('Could not reach the payments server. Check your internet connection and try again.');
+    } on PaystackOfflineException catch (e) {
+      // Not "check your internet connection" - a real report confirmed this
+      // fires just as easily when the device's own connection is fine and
+      // the payments SERVER is the one having trouble (its own backend was
+      // unreachable, not this device), and telling someone to fix their
+      // internet when it's actually fine helps nobody find the real cause.
+      return Result.failure(
+        e.timedOut
+            ? 'The payments server is taking a while to respond. Try again in a moment.'
+            : 'Could not reach the payments server right now. Try again in a moment.',
+      );
     } on PaystackException catch (e) {
       return Result.failure(e.message);
     }

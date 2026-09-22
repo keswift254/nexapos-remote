@@ -84,6 +84,30 @@ class AppDatabase extends _$AppDatabase {
   /// AppDatabase - most of this app's domain/data layer - now also can.
   AppDatabase.defaults() : super(connection.openConnection());
 
+  /// Web-only workaround for a real drift bug, confirmed for real against
+  /// this app's own live web deployment: a transaction's COMMIT runs while
+  /// drift's internal "in transaction" flag is still set, so the
+  /// flush-to-IndexedDB logic that runs after every statement never fires
+  /// for the transaction's own writes - they exist only in the page's
+  /// memory until something else happens to flush later, and are silently
+  /// lost if the page reloads first. Confirmed as the cause of "changes
+  /// disappear on refresh, especially on iOS Safari" - fixed upstream
+  /// (github.com/simolus3/drift pull #3865) but not yet in a published
+  /// drift release as of writing. A harmless statement run immediately
+  /// after the transaction has fully closed reliably triggers the flush
+  /// that was skipped, at the cost of one extra trivial round trip per
+  /// transaction. Native (SQLite via FFI) has no such bug and no IndexedDB
+  /// to flush to, so this only runs on web.
+  @override
+  Future<T> transaction<T>(
+    Future<T> Function() action, {
+    bool requireNew = false,
+  }) async {
+    final result = await super.transaction<T>(action, requireNew: requireNew);
+    if (isWeb) await customStatement('SELECT 1');
+    return result;
+  }
+
   @override
   int get schemaVersion => 5;
 
