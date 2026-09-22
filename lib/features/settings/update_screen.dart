@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -151,7 +152,26 @@ class _UpdateScreenState extends ConsumerState<UpdateScreen> {
                     ),
                   ),
                   const SizedBox(height: 20),
-                  if (installState.installing) ...[
+                  if (kIsWeb)
+                    // The browser edition has no installer to download -
+                    // it updates itself the next time the page loads fresh,
+                    // once the newly-deployed version is live. Showing the
+                    // same "Download & Install" button as native here would
+                    // always fail with "not available on this platform yet",
+                    // which reads as broken rather than as the different
+                    // (and simpler) way web actually updates.
+                    Row(
+                      children: [
+                        Icon(Icons.info_outline, color: theme.colorScheme.primary),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text(
+                            'The browser version updates itself - reload NexaPOS in your browser to get this version.',
+                          ),
+                        ),
+                      ],
+                    )
+                  else if (installState.installing) ...[
                     LinearProgressIndicator(value: installState.progress > 0 ? installState.progress : null),
                     const SizedBox(height: 8),
                     Text(

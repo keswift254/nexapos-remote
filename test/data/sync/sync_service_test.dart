@@ -1071,8 +1071,13 @@ void main() {
     );
 
     test(
-      'a mixed relay batch drops only the entry the server rejects - the rest still reach the cloud',
+      'a batch mixing a good and a bad source device isolates per source, not per row',
       () async {
+        // Whether the server accepts a relayed change depends on its SOURCE
+        // device, never on the individual row - so a 3-row bad source mixed
+        // with a 1-row good source must resolve in one combined attempt
+        // plus one grouped retry per source (2 requests touching the bad
+        // source), not one request per row (which would be 4).
         final sourceRepo = CategoryRepositoryImpl(
           db,
           db.categoriesDao,
@@ -1081,20 +1086,46 @@ void main() {
           UuidIdGenerator(),
         );
         await sourceRepo.create(
-          const Category(id: 'good-relay', name: 'Good', status: 'active'),
+          const Category(id: 'bad-relay-1', name: 'Bad 1', status: 'active'),
         );
         await sourceRepo.create(
-          const Category(id: 'bad-relay', name: 'Bad', status: 'active'),
+          const Category(id: 'bad-relay-2', name: 'Bad 2', status: 'active'),
         );
-        final sourceDeviceId = await syncMeta.deviceId();
-        final sourceService = buildService(
+        await sourceRepo.create(
+          const Category(id: 'bad-relay-3', name: 'Bad 3', status: 'active'),
+        );
+        final badSourceDeviceId = await syncMeta.deviceId();
+        final badSourceService = buildService(
           MockClient((_) async => throw StateError('unused')),
+        );
+
+        final goodDb = AppDatabase(NativeDatabase.memory());
+        addTearDown(goodDb.close);
+        final goodMeta = SyncMetadataService(goodDb);
+        final goodRepo = CategoryRepositoryImpl(
+          goodDb,
+          goodDb.categoriesDao,
+          goodMeta,
+          const SystemClock(),
+          UuidIdGenerator(),
+        );
+        await goodRepo.create(
+          const Category(id: 'good-relay', name: 'Good', status: 'active'),
+        );
+        final goodSourceService = SyncService(
+          goodDb,
+          goodMeta,
+          PlatformSyncGateway(
+            MockClient((_) async => throw StateError('unused')),
+          ),
+          _FakeCredentialsService(configured),
         );
 
         final receiverDb = AppDatabase(NativeDatabase.memory());
         addTearDown(receiverDb.close);
         final receiverMeta = SyncMetadataService(receiverDb);
         final acceptedRowIds = <String>[];
+        var requestsTouchingBadSource = 0;
         final receiverService = SyncService(
           receiverDb,
           receiverMeta,
@@ -1104,12 +1135,12 @@ void main() {
                   .cast<String, dynamic>();
               final relayed = (body['changes'] as List)
                   .cast<Map>()
-                  .where((c) => c['source_device_id'] == sourceDeviceId)
+                  .where((c) => c['source_device_id'] == badSourceDeviceId ||
+                      c['row_id'] == 'good-relay')
                   .toList();
-              // The server rejects the WHOLE request over one bad entry,
-              // batched with good ones or not - exactly what forces the
-              // one-at-a-time fallback under test here.
-              if (relayed.any((c) => c['row_id'] == 'bad-relay')) {
+              if (relayed.isEmpty) return http.Response('{"success":true}', 200);
+              if (relayed.any((c) => c['source_device_id'] == badSourceDeviceId)) {
+                requestsTouchingBadSource++;
                 return http.Response(
                   jsonEncode({
                     'success': false,
@@ -1128,14 +1159,15 @@ void main() {
           _FakeCredentialsService(configured),
         );
 
-        final changes = await sourceService.exportLanChanges(
+        final badChanges = (await badSourceService.exportLanChanges(
           await receiverService.lanRevisionCursors(),
-        );
-        final relayChanges = changes
-            .where((c) => c.rowId == 'good-relay' || c.rowId == 'bad-relay')
-            .toList();
-        expect(relayChanges, hasLength(2));
-        await receiverService.applyLanChanges(relayChanges);
+        )).where((c) => c.rowId.startsWith('bad-relay-')).toList();
+        final goodChanges = (await goodSourceService.exportLanChanges(
+          await receiverService.lanRevisionCursors(),
+        )).where((c) => c.rowId == 'good-relay').toList();
+        expect(badChanges, hasLength(3));
+        expect(goodChanges, hasLength(1));
+        await receiverService.applyLanChanges([...badChanges, ...goodChanges]);
 
         await receiverService.pushLocalChanges(
           configured.baseUrl,
@@ -1145,10 +1177,99 @@ void main() {
         expect(
           acceptedRowIds,
           contains('good-relay'),
-          reason:
-              'a batch-mate of a bad relay must still get through via the one-at-a-time fallback',
+          reason: 'a batch-mate from a different, still-active source must still get through',
         );
-        expect(acceptedRowIds, isNot(contains('bad-relay')));
+        expect(
+          requestsTouchingBadSource,
+          2,
+          reason: 'isolating a 3-row bad source must cost one combined attempt '
+              'plus one grouped retry - never one request per row',
+        );
+      },
+    );
+
+    test(
+      'a large backlog from one now-inactive source clears in a single extra request, not one per row',
+      () async {
+        // Reproduces a real field report: after days of testing, dozens to
+        // hundreds of relayed rows can pile up from a source device that
+        // has since gone inactive. Retrying rejected rows one at a time
+        // would cost one HTTP round trip PER ROW to rediscover the exact
+        // same fact (this source is no longer active) over and over -
+        // easily minutes, and exactly what made leaving a shop on a
+        // device with such a backlog look permanently stuck.
+        final sourceRepo = CategoryRepositoryImpl(
+          db,
+          db.categoriesDao,
+          syncMeta,
+          const SystemClock(),
+          UuidIdGenerator(),
+        );
+        for (var i = 0; i < 50; i++) {
+          await sourceRepo.create(
+            Category(id: 'stale-relay-$i', name: 'Stale $i', status: 'active'),
+          );
+        }
+        final sourceDeviceId = await syncMeta.deviceId();
+        final sourceService = buildService(
+          MockClient((_) async => throw StateError('unused')),
+        );
+
+        final receiverDb = AppDatabase(NativeDatabase.memory());
+        addTearDown(receiverDb.close);
+        final receiverMeta = SyncMetadataService(receiverDb);
+        var requestsTouchingStaleSource = 0;
+        final receiverService = SyncService(
+          receiverDb,
+          receiverMeta,
+          PlatformSyncGateway(
+            MockClient((request) async {
+              final body = (jsonDecode(request.body) as Map)
+                  .cast<String, dynamic>();
+              final touchesStaleSource = (body['changes'] as List)
+                  .cast<Map>()
+                  .any((c) => c['source_device_id'] == sourceDeviceId);
+              if (touchesStaleSource) {
+                requestsTouchingStaleSource++;
+                return http.Response(
+                  jsonEncode({
+                    'success': false,
+                    'message':
+                        'Could not record changes: Relayed source device is not active in this shop.',
+                  }),
+                  422,
+                );
+              }
+              return http.Response('{"success":true}', 200);
+            }),
+          ),
+          _FakeCredentialsService(configured),
+        );
+
+        final changes = await sourceService.exportLanChanges(
+          await receiverService.lanRevisionCursors(),
+        );
+        final staleChanges = changes
+            .where((c) => c.rowId.startsWith('stale-relay-'))
+            .toList();
+        expect(staleChanges, hasLength(50));
+        await receiverService.applyLanChanges(staleChanges);
+
+        await receiverService.pushLocalChanges(
+          configured.baseUrl,
+          configured.apiKey,
+        );
+
+        expect(
+          requestsTouchingStaleSource,
+          1,
+          reason: 'a whole-batch-one-source rejection must clear the entire '
+              'backlog from that one rejection, with zero further requests',
+        );
+        final remaining = await receiverDb
+            .customSelect('SELECT COUNT(*) AS c FROM local_lan_relay_outbox')
+            .getSingle();
+        expect(remaining.data['c'], 0);
       },
     );
   });

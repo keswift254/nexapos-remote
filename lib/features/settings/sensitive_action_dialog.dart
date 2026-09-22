@@ -336,6 +336,9 @@ class _OtpCodeFieldState extends State<_OtpCodeField> {
     );
     _syncFromController();
     widget.controller.addListener(_syncFromController);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focusNodes.first.requestFocus();
+    });
   }
 
   void _syncFromController() {

@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:drift/drift.dart' show Variable;
+import 'package:drift/drift.dart' show QueryRow, Variable;
 
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
@@ -807,58 +807,78 @@ class SyncService {
     );
   }
 
+  List<Map<String, dynamic>> _relayChangesOf(Iterable<QueryRow> rows) => rows
+      .map(
+        (row) => (jsonDecode(row.data['record'] as String) as Map)
+            .cast<String, dynamic>(),
+      )
+      .toList();
+
   Future<void> _pushLanRelayOutbox(String baseUrl, String apiKey) async {
     await _ensureLanTables();
     while (true) {
       final rows = await _db
           .customSelect(
-            'SELECT rowid, record FROM local_lan_relay_outbox ORDER BY rowid LIMIT $_pushBatchSize',
+            'SELECT rowid, source_device_id, record FROM local_lan_relay_outbox ORDER BY rowid LIMIT $_pushBatchSize',
           )
           .get();
       if (rows.isEmpty) return;
-      final changes = rows.map((row) {
-        return (jsonDecode(row.data['record'] as String) as Map)
-            .cast<String, dynamic>();
-      }).toList();
       try {
         await _gateway.pushChanges(
           baseUrl: baseUrl,
           apiKey: apiKey,
-          changes: changes,
+          changes: _relayChangesOf(rows),
         );
         await _deleteRelayOutboxRows(
           rows.map((row) => row.data['rowid'] as int),
         );
+        continue;
       } on PaystackException catch (e) {
         if (e.statusCode != 422) rethrow;
-        if (rows.length == 1) {
-          // Already know exactly which single change was rejected - no
-          // need to resend it just to learn that again. Permanently drop
-          // it: it came from a peer device, not this one, so dropping it
-          // loses nothing this device made.
-          await _deleteRelayOutboxRows([rows.single.data['rowid'] as int]);
-          continue;
-        }
-        // The server rejects one bad entry's whole batch (see push_changes),
-        // even when only one relayed change out of many is actually invalid
-        // - most often because its source device has since left the shop or
-        // been disabled. Retry one row at a time so the rest of the batch
-        // still gets through, and permanently drop only the one the server
-        // genuinely never accepts on its own.
-        for (final row in rows) {
-          final rowId = row.data['rowid'] as int;
-          final change = (jsonDecode(row.data['record'] as String) as Map)
-              .cast<String, dynamic>();
-          try {
-            await _gateway.pushChanges(
-              baseUrl: baseUrl,
-              apiKey: apiKey,
-              changes: [change],
-            );
-          } on PaystackException catch (single) {
-            if (single.statusCode != 422) rethrow;
-          }
-          await _deleteRelayOutboxRows([rowId]);
+      }
+      // Whether the server accepts a relayed change depends on its SOURCE
+      // device (is it still an active client of this shop?), a single
+      // fact shared by every row from that source - never a fact about
+      // an individual row. Retrying per row here previously meant a
+      // source inactive for a while, with hundreds of rows queued up
+      // after days of testing, cost one HTTP round trip PER ROW to
+      // rediscover the same fact hundreds of times - easily minutes, and
+      // exactly what made leaving a shop on a device with such a backlog
+      // look permanently stuck. Grouping by source bounds this to one
+      // extra request per DISTINCT source device instead - typically a
+      // handful, never hundreds.
+      final bySource = <String, List<QueryRow>>{};
+      for (final row in rows) {
+        (bySource[row.data['source_device_id'] as String] ??= []).add(row);
+      }
+      if (bySource.length == 1) {
+        // The whole batch was already this one source and we just learned
+        // it's rejected - no need to ask again. Drop every row queued for
+        // it, not just this LIMIT-sized slice, so a large backlog clears
+        // in this one extra request instead of being rediscovered (and
+        // paid for again) batch after batch.
+        await _db.customStatement(
+          'DELETE FROM local_lan_relay_outbox WHERE source_device_id = ?',
+          [bySource.keys.single],
+        );
+        continue;
+      }
+      for (final group in bySource.values) {
+        try {
+          await _gateway.pushChanges(
+            baseUrl: baseUrl,
+            apiKey: apiKey,
+            changes: _relayChangesOf(group),
+          );
+          await _deleteRelayOutboxRows(
+            group.map((row) => row.data['rowid'] as int),
+          );
+        } on PaystackException catch (single) {
+          if (single.statusCode != 422) rethrow;
+          await _db.customStatement(
+            'DELETE FROM local_lan_relay_outbox WHERE source_device_id = ?',
+            [group.first.data['source_device_id'] as String],
+          );
         }
       }
     }
