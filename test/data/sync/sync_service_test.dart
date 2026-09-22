@@ -160,8 +160,9 @@ void main() {
             starts++;
             return http.Response(jsonEncode(meta), 200);
           }
-          if (action == 'discard_sync_snapshot')
+          if (action == 'discard_sync_snapshot') {
             return http.Response('{"success":true}', 200);
+          }
           final after = request.url.queryParameters['after']!;
           cursors.add(after);
           if (after == '2' && failSecond) throw http.ClientException('offline');
@@ -231,11 +232,13 @@ void main() {
             'high_water': 1000,
             'total': 5,
           };
-          if (action == 'start_sync_snapshot')
+          if (action == 'start_sync_snapshot') {
             return http.Response(jsonEncode(meta), 200);
+          }
           final after = request.url.queryParameters['after']!;
-          if (after == '2' && alwaysFailAfterFirstPage)
+          if (after == '2' && alwaysFailAfterFirstPage) {
             throw http.ClientException('offline');
+          }
           return http.Response(
             jsonEncode({
               ...meta,
