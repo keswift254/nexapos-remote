@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/services.dart' show MethodChannel;
 import 'package:flutter_riverpod/flutter_riverpod.dart' show Provider;
 import 'package:open_file/open_file.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -231,9 +232,11 @@ class UpdateService {
         'No Android download is available for this update.',
       );
     }
+    await _AndroidDownloadNotification.start('Downloading update...');
     try {
       final tempDir = await getTemporaryDirectory();
       final apkFile = File(path.join(tempDir.path, 'NexaPOS-update.apk'));
+      var lastNotifiedPercent = -1;
       await _ref
           .read(updateGatewayProvider)
           .downloadTo(
@@ -242,6 +245,14 @@ class UpdateService {
             onProgress: (received, total) {
               if (total != null && total > 0) {
                 onProgress?.call(received / total);
+                final percent = (received / total * 100).floor().clamp(0, 100);
+                if (percent != lastNotifiedPercent) {
+                  lastNotifiedPercent = percent;
+                  _AndroidDownloadNotification.update(
+                    'Downloading update... $percent%',
+                    percent,
+                  );
+                }
               }
             },
           );
@@ -277,6 +288,11 @@ class UpdateService {
       );
     } on UpdateException catch (e) {
       return Result.failure(e.message);
+    } finally {
+      // Always runs - success, a handled failure above, or an unexpected
+      // exception propagating out - so the notification never lingers
+      // after the app stops actually downloading anything.
+      await _AndroidDownloadNotification.stop();
     }
   }
 
@@ -365,5 +381,37 @@ class UpdateInstallNotifier extends _$UpdateInstallNotifier {
       ok: (_) => state = const UpdateInstallState(),
       failure: (message) => state = UpdateInstallState(error: message, info: info),
     );
+  }
+}
+
+/// Bridges to DownloadForegroundService (android/app/src/main/kotlin/...) -
+/// a persistent "Downloading update..." notification that keeps this app's
+/// process at Android's foreground-priority tier for as long as the update
+/// download is running. Without it, the download previously had no
+/// protection from Android's own background app management, or a phone
+/// maker's more aggressive battery-saving mode, and could be killed just
+/// from the user switching away from NexaPOS mid-download. A no-op on
+/// every other platform - the native side of this channel only exists in
+/// the Android app.
+class _AndroidDownloadNotification {
+  static const _channel = MethodChannel('com.nexapos/download_service');
+
+  static Future<void> start(String text) {
+    if (!Platform.isAndroid) return Future.value();
+    return _channel
+        .invokeMethod('start', {'text': text})
+        .catchError((_) {});
+  }
+
+  static Future<void> update(String text, int progressPercent) {
+    if (!Platform.isAndroid) return Future.value();
+    return _channel
+        .invokeMethod('update', {'text': text, 'progress': progressPercent})
+        .catchError((_) {});
+  }
+
+  static Future<void> stop() {
+    if (!Platform.isAndroid) return Future.value();
+    return _channel.invokeMethod('stop').catchError((_) {});
   }
 }

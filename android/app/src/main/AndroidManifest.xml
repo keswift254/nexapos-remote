@@ -14,6 +14,21 @@
          if they haven't yet. Irrelevant for Play Store distribution rules
          since this app isn't distributed through Play. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+    <!-- Lets the in-app update's download keep a persistent "Downloading
+         update..." notification while it runs, which tells Android to
+         treat this app's process as foreground-priority for as long as
+         the notification is showing - real field report: this download
+         previously ran with no such protection and could be cut off by
+         Android's own background app management (or a phone maker's more
+         aggressive battery-saving mode) just from switching away from
+         NexaPOS mid-download. FOREGROUND_SERVICE_DATA_SYNC and the
+         service's declared type are required from Android 14 (API 34)
+         onward; POST_NOTIFICATIONS (Android 13/API 33+) only affects
+         whether the notification itself is visible - the priority
+         protection applies either way. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- allowBackup off: left unset, Android defaults it ON, so Auto Backup
          would copy this app's SQLite file - including its device_meta
          device id and sync cursors - into the owner's Google account and
@@ -58,6 +73,10 @@
                 <data android:scheme="nexapos" android:host="checkout-return" />
             </intent-filter>
         </activity>
+        <service
+            android:name=".DownloadForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
