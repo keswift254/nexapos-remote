@@ -45,12 +45,14 @@ class ShopSafetyService {
   final SensitiveActionService security;
   final PlatformOnboardingGateway gateway;
   final Future<void> Function(bool joining)? onShopChanged;
+  final Duration retryDelay;
   ShopSafetyService(
     this.db,
     this.sync,
     this.security,
     this.gateway, {
     this.onShopChanged,
+    this.retryDelay = const Duration(seconds: 3),
   });
 
   Future<bool> changeShop({
@@ -108,7 +110,18 @@ class ShopSafetyService {
           // failed backup would be: nothing server-side has happened yet, so
           // the journal is simply cleared and the local data is left intact
           // to retry from - there is nothing ambiguous to resolve later.
-          await sync.pushLocalChanges(credentials.baseUrl, credentials.apiKey);
+          //
+          // Retried a few times in place: the password approval above is
+          // one-time-use (already consumed), so a transient failure here
+          // used to fail the whole attempt and send the user all the way
+          // back to re-entering their password for another try - confirmed
+          // for real, a device with an occasionally slow connection needed
+          // three full manual retries (three password prompts) just to
+          // leave. A short automatic retry absorbs exactly that kind of
+          // blip without asking for anything more than a few seconds' wait.
+          await _withRetry(
+            () => sync.pushLocalChanges(credentials.baseUrl, credentials.apiKey),
+          );
         }
       } catch (_) {
         await db.customStatement(
@@ -116,21 +129,41 @@ class ShopSafetyService {
         );
         rethrow;
       }
-      if (inviteCode == null) {
-        await gateway.leaveShop(
-          baseUrl: credentials.baseUrl,
-          apiKey: credentials.apiKey,
-        );
-      } else {
-        await gateway.joinShop(
-          baseUrl: credentials.baseUrl,
-          apiKey: credentials.apiKey,
-          inviteCode: inviteCode,
-        );
-      }
+      // Same reasoning as the retry above: this is the step that actually
+      // changes shop membership, and by this point the approval is spent
+      // and (for the light path) the push already succeeded - a transient
+      // failure here specifically must not throw the user back to square
+      // one either.
+      await _withRetry(() => inviteCode == null
+          ? gateway.leaveShop(
+              baseUrl: credentials.baseUrl,
+              apiKey: credentials.apiKey,
+            )
+          : gateway.joinShop(
+              baseUrl: credentials.baseUrl,
+              apiKey: credentials.apiKey,
+              inviteCode: inviteCode,
+            ));
       await _finishLocalChange(joining: inviteCode != null);
       return true;
     });
+  }
+
+  /// Retries a step that talks to the platform server up to 3 times total,
+  /// with a short pause between attempts - just enough to ride out an
+  /// occasional slow/dropped connection without surfacing a failure that
+  /// would otherwise force the caller all the way back to a fresh
+  /// (re-authenticated) attempt for what was really a transient blip.
+  Future<T> _withRetry<T>(Future<T> Function() action) async {
+    const maxAttempts = 3;
+    for (var attempt = 1; ; attempt++) {
+      try {
+        return await action();
+      } catch (_) {
+        if (attempt >= maxAttempts) rethrow;
+        if (retryDelay > Duration.zero) await Future<void>.delayed(retryDelay);
+      }
+    }
   }
 
   Future<void> _finishLocalChange({required bool joining}) =>

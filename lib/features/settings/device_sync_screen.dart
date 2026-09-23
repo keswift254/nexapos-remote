@@ -69,6 +69,7 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
   bool _leaving = false;
   bool _resettingIdentity = false;
   String? _syncError;
+  bool _sawHydrating = false;
 
   RegistrationLookup? _existingRegistration;
 
@@ -1176,7 +1177,33 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
         if (!snapshot.hasData) {
           return const Center(child: CircularProgressIndicator());
         }
-        if (snapshot.data != true) return _buildRegisterView();
+        if (snapshot.data == true) _sawHydrating = true;
+        if (snapshot.data != true) {
+          if (_sawHydrating) {
+            // Hydration just finished on THIS screen instance a moment
+            // ago - _register() is about to navigate away (context.go
+            // after its own while-loop exits), but that navigation and
+            // the router's own async redirect chain take a beat, and
+            // this widget can rebuild for unrelated reasons (any watched
+            // provider changing) before it lands. needsInitialPull alone
+            // can't tell "hydration finished" apart from "hydration
+            // never started" - both read false - so without this guard
+            // any such rebuild fell through to the blank "join a shop"
+            // form, which read as the join screen randomly reappearing
+            // right before the app opened the login screen.
+            return const Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Connected - opening NexaPOS...'),
+                ],
+              ),
+            );
+          }
+          return _buildRegisterView();
+        }
         return ValueListenableBuilder<SyncProgress>(
           valueListenable: ref.read(syncServiceProvider).progress,
           builder: (context, progress, _) => Center(

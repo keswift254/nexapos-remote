@@ -27,6 +27,7 @@ import 'sensitive_action_service_test.dart' show TestClock;
 class FakeMembership extends PlatformOnboardingGateway {
   int shop = 1;
   bool fail = false;
+  int failFirstNCalls = 0;
   int calls = 0;
   @override
   Future<ClientStatus> getClientStatus({
@@ -50,7 +51,7 @@ class FakeMembership extends PlatformOnboardingGateway {
     required String apiKey,
   }) async {
     calls++;
-    if (fail) throw StateError('Connection lost');
+    if (fail || calls <= failFirstNCalls) throw StateError('Connection lost');
     shop = 2;
   }
 
@@ -143,7 +144,7 @@ void main() {
       stored,
       onboarding: gateway,
     );
-    service = ShopSafetyService(db, sync, security, gateway);
+    service = ShopSafetyService(db, sync, security, gateway, retryDelay: Duration.zero);
   });
   tearDown(() => db.close());
 
@@ -306,7 +307,7 @@ void main() {
         PaystackCredentialsService(const FlutterSecureStorage()),
         onboarding: gateway,
       );
-      final offlineService = ShopSafetyService(db, offlineSync, security, gateway);
+      final offlineService = ShopSafetyService(db, offlineSync, security, gateway, retryDelay: Duration.zero);
       await expectLater(
         offlineService.changeShop(
           approval: await approve('Leave this shop'),
@@ -323,6 +324,35 @@ void main() {
           reason: 'must not tell the server this device left while its own push has not gone through');
       expect(await offlineSync.hasPendingShopChange, isFalse);
       expect(await db.select(db.users).get(), hasLength(1));
+    },
+  );
+
+  test(
+    'a transient failure actually leaving the shop is retried automatically, not surfaced as needing a fresh password',
+    () async {
+      // Reproduces a real field report: an occasionally slow connection
+      // made "leave shop" fail outright, and since the password approval
+      // above is one-time-use (already consumed by the time this call is
+      // reached), each failure meant going all the way back to re-entering
+      // the password for another try - three times, for what was really
+      // just a flaky connection succeeding on a later attempt.
+      gateway.failFirstNCalls = 2;
+      expect(
+        await service.changeShop(
+          approval: await approve('Leave this shop'),
+          credentials: credentials,
+          saveRecovery: (_) async =>
+              throw StateError('must not be called - no backup on this path'),
+          requireBackup: false,
+        ),
+        isTrue,
+      );
+      expect(
+        gateway.calls,
+        3,
+        reason: 'failed twice, succeeded on the third attempt - all within '
+            'one changeShop() call, with no further approval needed',
+      );
     },
   );
 
