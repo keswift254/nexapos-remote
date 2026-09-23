@@ -23,6 +23,7 @@ import '../../domain/services/sensitive_action_service.dart';
 import 'sensitive_action_dialog.dart';
 import 'save_recovery.dart';
 import '../../app.dart' show hasAnyUsersProvider;
+import '../dashboard/dashboard_screen.dart' show dashboardDataProvider;
 import '../checkout/cart_notifier.dart';
 import '../../domain/services/pending_sales_notifier.dart';
 import 'payment_settings_screen.dart' show currentPaymentCredentialsProvider;
@@ -582,22 +583,6 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
   /// wants an actual clean slate, not just a working registration -
   /// null means cancelled, false means identity only, true means both.
   Future<void> _resetDeviceIdentity() async {
-    final db = ref.read(appDatabaseProvider);
-    final records = await db
-        .customSelect(
-          'SELECT (SELECT COUNT(*) FROM users) + '
-          '(SELECT COUNT(*) FROM products) + (SELECT COUNT(*) FROM sales) + '
-          '(SELECT COUNT(*) FROM expenses) + (SELECT COUNT(*) FROM categories) + '
-          '(SELECT COUNT(*) FROM stock_movements) + (SELECT COUNT(*) FROM payment_records) + '
-          '(SELECT COUNT(*) FROM sale_items) AS count',
-        )
-        .getSingle();
-    if (records.read<int>('count') > 0) {
-      _showMessage(
-        'This device contains shop data. Reconnect it or contact the shop administrator; identity reset is blocked.',
-      );
-      return;
-    }
     if (!mounted) return;
     final choice = await showDialog<bool>(
       context: context,
@@ -629,6 +614,36 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
       ),
     );
     if (choice == null) return;
+
+    if (!choice) {
+      // Keeping the existing data under a brand-new identity only makes
+      // sense when that data doesn't actually belong to another
+      // registration - otherwise this device would look freshly
+      // registered while still holding someone else's shop data. This
+      // used to block the WHOLE reset outright whenever any data was
+      // present, with no way forward even via "erase data too" (which
+      // exists specifically to handle this) - confirmed for real: a
+      // device the shop had disabled, still holding that shop's last-
+      // synced data (the normal state for a device that was actually
+      // used), could never reset at all.
+      final db = ref.read(appDatabaseProvider);
+      final records = await db
+          .customSelect(
+            'SELECT (SELECT COUNT(*) FROM users) + '
+            '(SELECT COUNT(*) FROM products) + (SELECT COUNT(*) FROM sales) + '
+            '(SELECT COUNT(*) FROM expenses) + (SELECT COUNT(*) FROM categories) + '
+            '(SELECT COUNT(*) FROM stock_movements) + (SELECT COUNT(*) FROM payment_records) + '
+            '(SELECT COUNT(*) FROM sale_items) AS count',
+          )
+          .getSingle();
+      if (records.read<int>('count') > 0) {
+        if (!mounted) return;
+        _showMessage(
+          'This device still holds shop data - choose "Reset identity + erase data" instead, reconnect to that shop, or contact its administrator.',
+        );
+        return;
+      }
+    }
 
     setState(() => _resettingIdentity = true);
     try {
@@ -1144,6 +1159,14 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
     if (!mounted) return;
     ref.read(cartProvider.notifier).clear();
     ref.invalidate(pendingPaystackSalesProvider);
+    // resetForFreshStart's bulk deletes DO fire dashboardChangeTicker
+    // reactively, in principle - but a real report ("dashboard still
+    // shows the old shop's sales/records until the app is fully closed
+    // and reopened") showed that isn't reliable enough on its own here,
+    // same lesson as the sale-completion sites already learned the hard
+    // way (see dashboardData's own doc comment). Explicit invalidation
+    // is the unconditionally-correct fix.
+    ref.invalidate(dashboardDataProvider);
     await ref.read(sessionProvider.notifier).logout();
     await _safeSyncNow();
     ref.invalidate(hasAnyUsersProvider);

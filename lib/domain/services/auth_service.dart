@@ -85,8 +85,8 @@ class AuthService {
     if (username.trim().toLowerCase() == 'nexapos-support') {
       return const Result.failure('This username is reserved for support recovery.');
     }
-    if (password.length < 8) {
-      return const Result.failure('Password must be at least 8 characters.');
+    if (password.length < 6) {
+      return const Result.failure('Password must be at least 6 characters.');
     }
     final existing = await _userRepository.findByUsername(username.trim());
     if (existing != null) {
@@ -112,8 +112,8 @@ class AuthService {
 
   /// Support recovery changes only the password, preserving the latest account details.
   Future<Result<void>> resetUserPassword(String id, String password) async {
-    if (password.length < 8) {
-      return const Result.failure('Password must be at least 8 characters.');
+    if (password.length < 6) {
+      return const Result.failure('Password must be at least 6 characters.');
     }
     final updated = await _userRepository.updatePassword(id, BCrypt.hashpw(password, BCrypt.gensalt()));
     if (!updated) {
@@ -137,8 +137,8 @@ class AuthService {
   }) async {
     if (name.trim().isEmpty) return const Result.failure('Enter a name.');
     if (username.trim().isEmpty) return const Result.failure('Enter a username.');
-    if (newPassword != null && newPassword.isNotEmpty && newPassword.length < 8) {
-      return const Result.failure('Password must be at least 8 characters.');
+    if (newPassword != null && newPassword.isNotEmpty && newPassword.length < 6) {
+      return const Result.failure('Password must be at least 6 characters.');
     }
 
     final existing = await _userRepository.findById(id);

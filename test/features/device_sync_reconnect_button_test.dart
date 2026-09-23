@@ -146,4 +146,57 @@ void main() {
     expect(find.textContaining('was disabled by'), findsNothing);
     expect(find.text('Invite code'), findsOneWidget);
   });
+
+  Future<void> seedOneCategory(AppDatabase db) => db.customStatement(
+    "INSERT INTO categories (id, name, status, created_at, updated_at, local_rev, created_by_device_id) "
+    "VALUES ('cat-1', 'Leftover', 'active', '2026-01-01T00:00:00.000000Z', '2026-01-01T00:00:00.000000Z', 1, 'old-device')",
+  );
+
+  testWidgets(
+    'a device disabled by its old shop, still holding that shop\'s data, can erase it and reset - the normal case',
+    (tester) async {
+      // Reproduces a real field report: a device the shop had disabled
+      // still held that shop's last-synced data (the ordinary state for
+      // a device that was actually used, not a fresh install) and could
+      // never reset at all - "identity reset is blocked" with no way
+      // forward, even though "erase data too" exists specifically for
+      // this.
+      await seedOneCategory(db);
+      await openJoinScreen(
+        tester,
+        answer: (action) => action == 'registration_lookup' ? known(disabled: true) : http.Response('{}', 404),
+      );
+
+      await tester.tap(find.text('Reset this device and join a different shop'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Reset identity + erase data'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('identity reset is blocked'), findsNothing);
+      expect(find.textContaining('was disabled by'), findsNothing);
+      expect(find.text('Invite code'), findsOneWidget);
+      expect(await db.select(db.categories).get(), isEmpty);
+    },
+  );
+
+  testWidgets(
+    '"Reset identity only" (keeping data) is refused, with a way forward, when the device still holds shop data',
+    (tester) async {
+      await seedOneCategory(db);
+      await openJoinScreen(
+        tester,
+        answer: (action) => action == 'registration_lookup' ? known(disabled: true) : http.Response('{}', 404),
+      );
+
+      await tester.tap(find.text('Reset this device and join a different shop'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Reset identity only'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('erase data'), findsOneWidget);
+      // Nothing was reset - still shows the disabled banner, data intact.
+      expect(find.textContaining('was disabled by'), findsOneWidget);
+      expect(await db.select(db.categories).get(), hasLength(1));
+    },
+  );
 }

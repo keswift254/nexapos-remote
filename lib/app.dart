@@ -265,9 +265,12 @@ class NexaPosApp extends ConsumerStatefulWidget {
 /// regardless of which screen happens to be open; SyncService itself
 /// already no-ops silently when this device isn't registered/joined to
 /// a shop yet, so it's always safe to call. Lightweight cloud/LAN change
-/// exchange runs every 15 seconds; license verification, update checks and
-/// backups stay on a separate two-minute maintenance cadence so faster sale
-/// visibility does not multiply heavier background work.
+/// exchange AND license/membership verification run every 15 seconds -
+/// the latter moved here from the slower maintenance cadence after a
+/// real report that a revoked device took up to two minutes to actually
+/// lock out; update checks and backups stay on the separate two-minute
+/// maintenance cadence, since those aren't security-sensitive the same
+/// way and don't need to multiply heavier background work.
 class _NexaPosAppState extends ConsumerState<NexaPosApp>
     with WidgetsBindingObserver {
   Timer? _syncTimer;
@@ -369,6 +372,14 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
     if (_syncing) return;
     _syncing = true;
     try {
+      // Runs every sync tick, not just the slower maintenance cadence -
+      // real report: revoking a device from Connected Devices (or a
+      // license simply expiring) took up to two minutes to actually
+      // lock that device back to the activation screen, since this used
+      // to only run on the maintenance timer. hasAppAccess() below reads
+      // whatever this just refreshed, so a revoke is now noticed within
+      // about the same ~15s window sales already sync in.
+      await ref.read(licenseServiceProvider).backgroundVerify();
       if (await ref.read(licenseServiceProvider).hasAppAccess()) {
         await Future.wait([
           ref.read(syncServiceProvider).runSyncCycle(),
@@ -384,7 +395,6 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
     if (_maintaining) return;
     _maintaining = true;
     try {
-      await ref.read(licenseServiceProvider).backgroundVerify();
       await ref.read(updateAvailabilityProvider.notifier).check();
       if (ref.read(sessionProvider) != null) {
         final newBackup = await ref
