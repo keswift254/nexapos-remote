@@ -139,14 +139,13 @@ class _UpdateScreenState extends ConsumerState<UpdateScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          // Deliberately just the version: whatever was typed
+                          // into the release-notes box when the release was
+                          // published (a download link, once) is not shown here.
                           Text(
                             'Update available: ${latest.version}',
                             style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
                           ),
-                          if ((latest.releaseNotes ?? '').isNotEmpty) ...[
-                            const SizedBox(height: 8),
-                            Text(latest.releaseNotes!),
-                          ],
                         ],
                       ),
                     ),
