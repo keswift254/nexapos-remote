@@ -148,6 +148,110 @@ void main() {
         throwsA(isA<UpdateException>().having((e) => e.message, 'message', 'Something broke.')),
       );
     });
+
+    test('parses delta-update patch fields when the release publishes them', () async {
+      final gateway = UpdateGateway(MockClient((request) async {
+        return http.Response(
+          jsonEncode({
+            'success': true,
+            'version': '1.0.46',
+            'windows_installer_url': 'https://example.com/NexaPOS-Setup.exe',
+            'android_url': 'https://example.com/NexaPOS.apk',
+            'patch_from_version': '1.0.45',
+            'android_patch_url': 'https://example.com/android.nxpatch',
+            'android_patch_sha256': 'aa',
+            'windows_installer_patch_url': 'https://example.com/windows.nxbundle',
+            'windows_installer_patch_sha256': 'bb',
+            'windows_legacy_installer_patch_url': 'https://example.com/legacy.nxbundle',
+            'windows_legacy_installer_patch_sha256': 'cc',
+            'patch_applier_url': 'https://example.com/NexaPosPatchApply.exe',
+            'patch_applier_sha256': 'dd',
+          }),
+          200,
+        );
+      }));
+
+      final result = await gateway.fetchLatestVersion();
+
+      expect(result!.patchFromVersion, '1.0.45');
+      expect(result.androidPatchUrl, 'https://example.com/android.nxpatch');
+      expect(result.androidPatchSha256, 'aa');
+      expect(result.windowsInstallerPatchUrl, 'https://example.com/windows.nxbundle');
+      expect(result.windowsInstallerPatchSha256, 'bb');
+      expect(result.windowsLegacyInstallerPatchUrl, 'https://example.com/legacy.nxbundle');
+      expect(result.windowsLegacyInstallerPatchSha256, 'cc');
+      expect(result.patchApplierUrl, 'https://example.com/NexaPosPatchApply.exe');
+      expect(result.patchApplierSha256, 'dd');
+    });
+
+    test('a release with no patch fields parses them all as null, not empty strings', () async {
+      final gateway = UpdateGateway(MockClient((request) async {
+        return http.Response(
+          jsonEncode({
+            'success': true,
+            'version': '1.0.46',
+            'windows_installer_url': 'https://example.com/NexaPOS-Setup.exe',
+            'android_url': 'https://example.com/NexaPOS.apk',
+          }),
+          200,
+        );
+      }));
+
+      final result = await gateway.fetchLatestVersion();
+
+      expect(result!.patchFromVersion, isNull);
+      expect(result.androidPatchUrl, isNull);
+      expect(result.windowsInstallerPatchUrl, isNull);
+      expect(result.patchApplierUrl, isNull);
+    });
+  });
+
+  group('downloadBytes', () {
+    test('returns the response body bytes for a small file', () async {
+      final gateway = UpdateGateway(MockClient((request) async {
+        return http.Response.bytes([1, 2, 3, 4, 5], 200);
+      }));
+
+      final bytes = await gateway.downloadBytes('https://example.com/patch.nxpatch');
+
+      expect(bytes, [1, 2, 3, 4, 5]);
+    });
+
+    test('refuses a non-HTTPS URL without even attempting the request', () async {
+      var called = false;
+      final gateway = UpdateGateway(MockClient((request) async {
+        called = true;
+        return http.Response('', 200);
+      }));
+
+      await expectLater(
+        gateway.downloadBytes('http://example.com/patch.nxpatch'),
+        throwsA(isA<UpdateException>()),
+      );
+      expect(called, isFalse);
+    });
+
+    test('a 4xx/5xx response throws UpdateException', () async {
+      final gateway = UpdateGateway(MockClient((request) async {
+        return http.Response('not found', 404);
+      }));
+
+      await expectLater(
+        gateway.downloadBytes('https://example.com/patch.nxpatch'),
+        throwsA(isA<UpdateException>()),
+      );
+    });
+
+    test('an unreachable server throws UpdateOfflineException', () async {
+      final gateway = UpdateGateway(MockClient((request) async {
+        throw const SocketException('unreachable');
+      }));
+
+      await expectLater(
+        gateway.downloadBytes('https://example.com/patch.nxpatch'),
+        throwsA(isA<UpdateOfflineException>()),
+      );
+    });
   });
 
   group('downloadTo', () {

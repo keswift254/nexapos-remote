@@ -1,11 +1,14 @@
 import 'dart:convert';
 
+import 'package:archive/archive.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
+import 'package:nexapos_mobile/core/result.dart';
 import 'package:nexapos_mobile/data/update/update_gateway.dart';
 import 'package:nexapos_mobile/domain/services/update_service.dart';
 
@@ -137,6 +140,146 @@ void main() {
       // the platform is unsupported - either way it must not succeed.
       expect(result.isFailure, isTrue);
     });
+  });
+
+  group('Windows delta-update patch fallback (_tryWindowsPatch via install())', () {
+    // None of these scenarios may ever reach exit(0) - that would kill the
+    // test runner process itself. Every fixture below deliberately omits
+    // windows_installer_sha256, so even if _tryWindowsPatch falls through
+    // to the full-installer path (exactly what it's designed to do on any
+    // failure), _verifyChecksum's "no published checksum" guard fails the
+    // install before installer_launcher/exit(0) is ever reached - the same
+    // safety net the pre-existing "install() in the legacy edition..." test
+    // above already relies on.
+    ProviderContainer buildContainer(
+      Map<String, Object?> published, {
+      Future<http.Response> Function(http.Request)? handler,
+    }) {
+      final container = ProviderContainer(
+        overrides: [
+          legacyWindowsEditionProvider.overrideWithValue(false),
+          updateGatewayProvider.overrideWith(
+            (ref) => UpdateGateway(
+              MockClient(
+                handler ??
+                    (request) async => http.Response(
+                      jsonEncode({'success': true, ...published}),
+                      200,
+                    ),
+              ),
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+      return container;
+    }
+
+    const baseInfo = {
+      'version': '1.0.46',
+      'windows_installer_url': 'https://example.com/setup.exe',
+      'android_url': 'https://example.com/app.apk',
+    };
+
+    Future<Result<void>> install(ProviderContainer container) async {
+      final info = (await container.read(updateServiceProvider).checkForUpdate()).latest!;
+      return container.read(updateServiceProvider).install(info);
+    }
+
+    test(
+      'no patch fields published: falls through to the full-installer flow without attempting a patch',
+      () async {
+        final result = await install(buildContainer(baseInfo));
+        expect(result.isFailure, isTrue);
+      },
+    );
+
+    test(
+      'the published patch was built from a different version than what is installed: falls back without attempting it',
+      () async {
+        final published = {
+          ...baseInfo,
+          // The mocked PackageInfo version (see setUp) is '1.0.0'.
+          'patch_from_version': '9.9.9',
+          'windows_installer_patch_url': 'https://example.com/bundle.nxbundle',
+          'windows_installer_patch_sha256': List.filled(64, 'a').join(),
+          'patch_applier_url': 'https://example.com/apply.exe',
+          'patch_applier_sha256': List.filled(64, 'b').join(),
+        };
+        final result = await install(buildContainer(published));
+        expect(result.isFailure, isTrue);
+      },
+    );
+
+    test(
+      'the downloaded patch bundle fails its checksum: falls back to the full install',
+      () async {
+        final published = {
+          ...baseInfo,
+          'patch_from_version': '1.0.0',
+          'windows_installer_patch_url': 'https://example.com/bundle.nxbundle',
+          // Deliberately wrong - won't match whatever bytes the mock
+          // server actually returns for this URL.
+          'windows_installer_patch_sha256': List.filled(64, 'a').join(),
+          'patch_applier_url': 'https://example.com/apply.exe',
+          'patch_applier_sha256': List.filled(64, 'b').join(),
+        };
+        final result = await install(buildContainer(published));
+        expect(result.isFailure, isTrue);
+      },
+    );
+
+    test(
+      'a well-formed patch bundle referencing a file this device does not have installed: '
+      'falls back to the full install without throwing',
+      () async {
+        final manifestBytes = utf8.encode(
+          jsonEncode({
+            'files': [
+              {
+                'path': 'this-file-does-not-exist-on-the-test-machine.bin',
+                'oldSha256': List.filled(64, '0').join(),
+                'newSha256': List.filled(64, '1').join(),
+                'patchFile': 'patch_0.nxpatch',
+              },
+            ],
+          }),
+        );
+        final archive = Archive()
+          ..addFile(ArchiveFile('manifest.json', manifestBytes.length, manifestBytes))
+          ..addFile(ArchiveFile('patch_0.nxpatch', 4, [0, 1, 2, 3]));
+        final bundleBytes = ZipEncoder().encode(archive)!;
+        final bundleSha256 = sha256.convert(bundleBytes).toString();
+        final applierBytes = utf8.encode('not a real exe - this path is never reached');
+        final applierSha256 = sha256.convert(applierBytes).toString();
+
+        final published = {
+          ...baseInfo,
+          'patch_from_version': '1.0.0',
+          'windows_installer_patch_url': 'https://example.com/bundle.nxbundle',
+          'windows_installer_patch_sha256': bundleSha256,
+          'patch_applier_url': 'https://example.com/apply.exe',
+          'patch_applier_sha256': applierSha256,
+        };
+
+        final container = buildContainer(
+          published,
+          handler: (request) async {
+            final url = request.url.toString();
+            if (url.contains('bundle.nxbundle')) {
+              return http.Response.bytes(bundleBytes, 200);
+            }
+            if (url.contains('apply.exe')) {
+              return http.Response.bytes(applierBytes, 200);
+            }
+            return http.Response(jsonEncode({'success': true, ...published}), 200);
+          },
+        );
+
+        final result = await install(container);
+        expect(result.isFailure, isTrue);
+      },
+    );
   });
 
   group('UpdateService.checkForUpdate', () {

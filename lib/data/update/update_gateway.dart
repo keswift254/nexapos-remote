@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -42,6 +43,30 @@ class LatestVersionInfo {
   final String windowsLegacyInstallerUrl;
   final String? windowsLegacyInstallerSha256;
 
+  // Delta-update fields: all optional, and only usable together with the
+  // exact version this patch was built FROM - see UpdateService's
+  // _tryAndroidPatch/_tryWindowsPatch, which fall back to a plain full
+  // download (the fields above) whenever any of this is missing, doesn't
+  // match the installed version, or fails to verify. patchFromVersion is
+  // shared across platforms since a release publishes patches from the
+  // SAME previous version for all of them together. androidPatch* is a
+  // single bsdiff-style patch (nxpatch.dart) against this device's own
+  // installed APK. windows*PatchUrl/Sha256 point at a small zip bundle
+  // (nxpatch.dart's parseNxPatchManifest) covering every runtime file
+  // that changed; patchApplierUrl/Sha256 is the small elevated helper
+  // that copies the already-verified result into Program Files (see
+  // release-tools/NexaPosPatchApply.cs) - stable across releases, so it
+  // is published once and rarely needs to change.
+  final String? patchFromVersion;
+  final String? androidPatchUrl;
+  final String? androidPatchSha256;
+  final String? windowsInstallerPatchUrl;
+  final String? windowsInstallerPatchSha256;
+  final String? windowsLegacyInstallerPatchUrl;
+  final String? windowsLegacyInstallerPatchSha256;
+  final String? patchApplierUrl;
+  final String? patchApplierSha256;
+
   const LatestVersionInfo({
     required this.version,
     this.windowsInstallerUrl = '',
@@ -51,6 +76,15 @@ class LatestVersionInfo {
     this.androidSha256,
     this.windowsLegacyInstallerUrl = '',
     this.windowsLegacyInstallerSha256,
+    this.patchFromVersion,
+    this.androidPatchUrl,
+    this.androidPatchSha256,
+    this.windowsInstallerPatchUrl,
+    this.windowsInstallerPatchSha256,
+    this.windowsLegacyInstallerPatchUrl,
+    this.windowsLegacyInstallerPatchSha256,
+    this.patchApplierUrl,
+    this.patchApplierSha256,
   });
 }
 
@@ -93,6 +127,10 @@ class UpdateGateway {
     final androidSha256 = (response['android_sha256'] as String?)?.trim();
     final legacySha256 = (response['windows_legacy_installer_sha256'] as String?)
         ?.trim();
+    String? clean(String key) {
+      final value = (response[key] as String?)?.trim();
+      return (value == null || value.isEmpty) ? null : value;
+    }
     return LatestVersionInfo(
       version: version,
       windowsInstallerUrl: (response['windows_installer_url'] as String? ?? '')
@@ -111,7 +149,50 @@ class UpdateGateway {
       windowsLegacyInstallerSha256: (legacySha256 == null || legacySha256.isEmpty)
           ? null
           : legacySha256,
+      patchFromVersion: clean('patch_from_version'),
+      androidPatchUrl: clean('android_patch_url'),
+      androidPatchSha256: clean('android_patch_sha256'),
+      windowsInstallerPatchUrl: clean('windows_installer_patch_url'),
+      windowsInstallerPatchSha256: clean('windows_installer_patch_sha256'),
+      windowsLegacyInstallerPatchUrl: clean('windows_legacy_installer_patch_url'),
+      windowsLegacyInstallerPatchSha256: clean('windows_legacy_installer_patch_sha256'),
+      patchApplierUrl: clean('patch_applier_url'),
+      patchApplierSha256: clean('patch_applier_sha256'),
     );
+  }
+
+  /// Downloads [url] fully into memory - only ever used for the small
+  /// delta-update patch files (a few percent of the full app's size, see
+  /// nxpatch.dart), never for a full APK/installer, which always goes
+  /// through [downloadTo] instead so it streams straight to disk.
+  Future<Uint8List> downloadBytes(String url) async {
+    final uri = Uri.parse(url);
+    if (uri.scheme != 'https') {
+      throw const UpdateException(
+        'The update download URL is not secure (not HTTPS) - refusing to download it.',
+      );
+    }
+    http.Response response;
+    try {
+      response = await _client.get(uri).timeout(const Duration(minutes: 2));
+    } on TimeoutException {
+      throw const UpdateOfflineException();
+    } on SocketException {
+      throw const UpdateOfflineException();
+    } on http.ClientException {
+      throw const UpdateOfflineException();
+    }
+    if (response.statusCode >= 400) {
+      throw UpdateException(
+        'Could not download the update patch (server said ${response.statusCode}).',
+      );
+    }
+    if (response.bodyBytes.length > maxDownloadBytes) {
+      throw const UpdateException(
+        'The update patch is unexpectedly large - refusing to use it.',
+      );
+    }
+    return response.bodyBytes;
   }
 
   /// Streams [url] straight to [destination] rather than buffering the

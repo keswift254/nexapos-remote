@@ -1,5 +1,8 @@
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/services.dart' show MethodChannel;
 import 'package:flutter_riverpod/flutter_riverpod.dart' show Provider;
@@ -12,6 +15,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../core/legacy_windows_edition.dart';
 import '../../core/result.dart';
 import '../../data/update/update_gateway.dart';
+import 'nxpatch.dart';
 import 'windows_installer_launcher_native.dart'
     if (dart.library.js_interop) 'windows_installer_launcher_stub.dart'
     as installer_launcher;
@@ -173,6 +177,17 @@ class UpdateService {
     void Function(double)? onProgress,
   ) async {
     final legacy = _ref.read(legacyWindowsEditionProvider);
+    // Tried first, before ever falling back to the full installer: patches
+    // this device's own currently-installed runtime files (a few percent
+    // of the full download, see release-tools/nxpatch.py) instead of
+    // downloading the whole thing again. On success this never returns -
+    // it calls exit(0) itself, the same way _installWindowsSetup does
+    // after launching the full installer elevated. Any reason a patch
+    // can't be used here (none published, this device isn't on the exact
+    // version it was built from, a download/apply/verify step fails)
+    // leaves everything untouched and falls through to the full download
+    // below, so a patch is purely an optimization, never a new way to fail.
+    await _tryWindowsPatch(info, legacy: legacy);
     final url = legacy ? info.windowsLegacyInstallerUrl : info.windowsInstallerUrl;
     if (url.isEmpty) {
       return Result.failure(
@@ -186,6 +201,129 @@ class UpdateService {
       legacy ? info.windowsLegacyInstallerSha256 : info.windowsInstallerSha256,
       onProgress,
     );
+  }
+
+  /// See _installWindows's doc comment - never returns on success (the
+  /// process exits), returns normally (having changed nothing) for any
+  /// reason a patch can't be used this time.
+  Future<void> _tryWindowsPatch(
+    LatestVersionInfo info, {
+    required bool legacy,
+  }) async {
+    final bundleUrl = legacy
+        ? info.windowsLegacyInstallerPatchUrl
+        : info.windowsInstallerPatchUrl;
+    final bundleSha256 = legacy
+        ? info.windowsLegacyInstallerPatchSha256
+        : info.windowsInstallerPatchSha256;
+    final applierUrl = info.patchApplierUrl;
+    final applierSha256 = info.patchApplierSha256;
+    if (bundleUrl == null ||
+        bundleSha256 == null ||
+        applierUrl == null ||
+        applierSha256 == null ||
+        info.patchFromVersion == null) {
+      return;
+    }
+    try {
+      final packageInfo = await PackageInfo.fromPlatform();
+      if (packageInfo.version != info.patchFromVersion) return;
+
+      final installDir = path.dirname(Platform.resolvedExecutable);
+      final gateway = _ref.read(updateGatewayProvider);
+
+      final bundleBytes = await gateway.downloadBytes(bundleUrl);
+      if (sha256.convert(bundleBytes).toString().toLowerCase() !=
+          bundleSha256.toLowerCase()) {
+        return;
+      }
+
+      final archive = ZipDecoder().decodeBytes(bundleBytes);
+      final manifestFile = archive.findFile('manifest.json');
+      if (manifestFile == null) return;
+      final manifestEntries = parseNxPatchManifest(
+        utf8.decode(manifestFile.content as List<int>),
+      );
+      if (manifestEntries.isEmpty) return;
+
+      final tempDir = await getTemporaryDirectory();
+      final stagingDir = Directory(
+        path.join(
+          tempDir.path,
+          'nexapos-patch-staging-${DateTime.now().millisecondsSinceEpoch}',
+        ),
+      );
+      await stagingDir.create(recursive: true);
+
+      final applyEntries = <Map<String, String>>[];
+      for (final entry in manifestEntries) {
+        final oldFile = File(path.join(installDir, entry.path));
+        if (!await oldFile.exists()) return;
+        final oldBytes = await oldFile.readAsBytes();
+        if (sha256.convert(oldBytes).toString().toLowerCase() !=
+            entry.oldSha256.toLowerCase()) {
+          // This device isn't on exactly the version this patch expects -
+          // not an error, just means the patch doesn't apply here.
+          return;
+        }
+
+        final patchZipEntry = archive.findFile(entry.patchFile);
+        if (patchZipEntry == null) return;
+        final reconstructed = applyNxPatch(
+          Uint8List.fromList(oldBytes),
+          Uint8List.fromList(patchZipEntry.content as List<int>),
+        );
+        if (sha256.convert(reconstructed).toString().toLowerCase() !=
+            entry.newSha256.toLowerCase()) {
+          return;
+        }
+
+        final stagedFile = File(
+          path.join(stagingDir.path, '${applyEntries.length}.bin'),
+        );
+        await stagedFile.writeAsBytes(reconstructed);
+        applyEntries.add({
+          'relativePath': entry.path,
+          'stagedPath': stagedFile.path,
+          'newSha256': entry.newSha256,
+        });
+      }
+
+      // Every file verified - only now download the small elevated
+      // helper that will copy them into Program Files. Deliberately
+      // never applies or trusts a patch itself; see NexaPosPatchApply.cs.
+      final applierBytes = await gateway.downloadBytes(applierUrl);
+      if (sha256.convert(applierBytes).toString().toLowerCase() !=
+          applierSha256.toLowerCase()) {
+        return;
+      }
+      final applierFile = File(
+        path.join(tempDir.path, 'NexaPosPatchApply.exe'),
+      );
+      await applierFile.writeAsBytes(applierBytes);
+
+      final applyManifestFile = File(
+        path.join(stagingDir.path, 'apply-manifest.json'),
+      );
+      await applyManifestFile.writeAsString(
+        jsonEncode({
+          'installDir': installDir,
+          'exePath': Platform.resolvedExecutable,
+          'files': applyEntries,
+        }),
+      );
+
+      installer_launcher.launchWindowsInstallerElevated(
+        applierFile.path,
+        arguments: '"${applyManifestFile.path}"',
+      );
+      exit(0);
+    } catch (_) {
+      // Any failure here (network, a corrupt/unexpected bundle, a patch
+      // that doesn't verify) just means this update happens the normal
+      // way instead - nothing has been changed yet at this point.
+      return;
+    }
   }
 
   Future<Result<void>> _installWindowsSetup(
@@ -236,29 +374,43 @@ class UpdateService {
     try {
       final tempDir = await getTemporaryDirectory();
       final apkFile = File(path.join(tempDir.path, 'NexaPOS-update.apk'));
-      var lastNotifiedPercent = -1;
-      await _ref
-          .read(updateGatewayProvider)
-          .downloadTo(
-            info.androidUrl,
-            apkFile,
-            onProgress: (received, total) {
-              if (total != null && total > 0) {
-                onProgress?.call(received / total);
-                final percent = (received / total * 100).floor().clamp(0, 100);
-                if (percent != lastNotifiedPercent) {
-                  lastNotifiedPercent = percent;
-                  _AndroidDownloadNotification.update(
-                    'Downloading update... $percent%',
-                    percent,
-                  );
-                }
-              }
-            },
-          );
 
-      final checksumError = await _verifyChecksum(apkFile, info.androidSha256);
-      if (checksumError != null) return Result.failure(checksumError);
+      // Tried first: patches this device's own currently-installed APK
+      // (a few percent of the full download, see release-tools/nxpatch.py)
+      // instead of downloading the whole thing again. Any reason it can't
+      // be used here (none published, this device isn't on the exact
+      // version it was built from, a download/apply/verify step fails)
+      // leaves apkFile untouched and falls through to the normal full
+      // download below - a patch is purely an optimization, never a new
+      // way for an update to fail.
+      final patched = await _tryAndroidPatch(info, apkFile);
+      if (!patched) {
+        var lastNotifiedPercent = -1;
+        await _ref
+            .read(updateGatewayProvider)
+            .downloadTo(
+              info.androidUrl,
+              apkFile,
+              onProgress: (received, total) {
+                if (total != null && total > 0) {
+                  onProgress?.call(received / total);
+                  final percent = (received / total * 100).floor().clamp(0, 100);
+                  if (percent != lastNotifiedPercent) {
+                    lastNotifiedPercent = percent;
+                    _AndroidDownloadNotification.update(
+                      'Downloading update... $percent%',
+                      percent,
+                    );
+                  }
+                }
+              },
+            );
+
+        final checksumError = await _verifyChecksum(apkFile, info.androidSha256);
+        if (checksumError != null) return Result.failure(checksumError);
+      } else {
+        onProgress?.call(1.0);
+      }
 
       final result = await OpenFile.open(
         apkFile.path,
@@ -293,6 +445,57 @@ class UpdateService {
       // exception propagating out - so the notification never lingers
       // after the app stops actually downloading anything.
       await _AndroidDownloadNotification.stop();
+    }
+  }
+
+  /// Tries to reconstruct the new APK by patching this device's own
+  /// currently-installed one (read via packageCodePath - no special
+  /// permission needed for an app to read its own APK), writing the
+  /// result to [destination] only once it is verified byte-for-byte
+  /// correct. Returns false (destination left untouched) for any reason
+  /// a patch can't be used this time - no patch published, this device
+  /// isn't on the exact version it was built from, a download/apply/
+  /// verify step fails - so the caller always has the normal full
+  /// download to fall back to. Never throws.
+  Future<bool> _tryAndroidPatch(LatestVersionInfo info, File destination) async {
+    final patchUrl = info.androidPatchUrl;
+    final expectedNewSha256 = info.androidSha256;
+    if (patchUrl == null ||
+        expectedNewSha256 == null ||
+        info.patchFromVersion == null) {
+      return false;
+    }
+    try {
+      final packageInfo = await PackageInfo.fromPlatform();
+      if (packageInfo.version != info.patchFromVersion) return false;
+
+      final apkPath = await _AndroidAppInfo.getApkPath();
+      if (apkPath == null) return false;
+      final oldBytes = await File(apkPath).readAsBytes();
+
+      final patchBytes = await _ref
+          .read(updateGatewayProvider)
+          .downloadBytes(patchUrl);
+      final patchSha256 = info.androidPatchSha256;
+      if (patchSha256 != null &&
+          sha256.convert(patchBytes).toString().toLowerCase() !=
+              patchSha256.toLowerCase()) {
+        return false;
+      }
+
+      final reconstructed = applyNxPatch(
+        Uint8List.fromList(oldBytes),
+        Uint8List.fromList(patchBytes),
+      );
+      if (sha256.convert(reconstructed).toString().toLowerCase() !=
+          expectedNewSha256.toLowerCase()) {
+        return false;
+      }
+
+      await destination.writeAsBytes(reconstructed);
+      return true;
+    } catch (_) {
+      return false;
     }
   }
 
@@ -413,5 +616,23 @@ class _AndroidDownloadNotification {
   static Future<void> stop() {
     if (!Platform.isAndroid) return Future.value();
     return _channel.invokeMethod('stop').catchError((_) {});
+  }
+}
+
+/// Bridges to MainActivity.kt's app_info channel - lets a delta update
+/// (see _tryAndroidPatch) read this device's own currently-installed
+/// APK bytes to patch against. packageCodePath needs no special
+/// permission (an app can always read its own APK); there is no
+/// equivalent Dart-only API for it. A no-op on every other platform.
+class _AndroidAppInfo {
+  static const _channel = MethodChannel('com.nexapos/app_info');
+
+  static Future<String?> getApkPath() async {
+    if (!Platform.isAndroid) return null;
+    try {
+      return await _channel.invokeMethod<String>('getApkPath');
+    } catch (_) {
+      return null;
+    }
   }
 }

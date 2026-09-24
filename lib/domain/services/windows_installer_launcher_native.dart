@@ -13,13 +13,13 @@ import 'package:win32/win32.dart';
 /// dart.library.js_interop in update_service.dart; only ever actually
 /// called when Platform.isWindows is true, so the web stub's
 /// UnimplementedError is unreachable in practice.
-void launchWindowsInstallerElevated(String setupPath) {
+void launchWindowsInstallerElevated(String setupPath, {String? arguments}) {
   final result = using((arena) {
     return ShellExecute(
       null,
       arena.pcwstr('runas'),
       arena.pcwstr(setupPath),
-      null,
+      arguments == null ? null : arena.pcwstr(arguments),
       null,
       SW_SHOWNORMAL,
     );

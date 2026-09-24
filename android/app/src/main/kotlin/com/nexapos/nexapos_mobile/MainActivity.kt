@@ -9,12 +9,22 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterFragmentActivity() {
     private var checkoutChannel: MethodChannel? = null
     private var downloadChannel: MethodChannel? = null
+    private var appInfoChannel: MethodChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         checkoutChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.nexapos/checkout_return")
         checkoutChannel?.setMethodCallHandler { call, result ->
             if (call.method == "initialCheckoutReturn") result.success(checkoutReturn(intent))
+            else result.notImplemented()
+        }
+        // Lets UpdateService read this device's own currently-installed APK
+        // bytes (packageCodePath - the real file on disk, no special
+        // permission needed to read an app's own APK) to patch against for
+        // a delta update, instead of always downloading the whole new APK.
+        appInfoChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.nexapos/app_info")
+        appInfoChannel?.setMethodCallHandler { call, result ->
+            if (call.method == "getApkPath") result.success(applicationInfo.sourceDir)
             else result.notImplemented()
         }
         downloadChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.nexapos/download_service")
