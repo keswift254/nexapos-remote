@@ -60,6 +60,48 @@ LicenseService licenseService(Ref ref) {
   return LicenseService(ref);
 }
 
+enum LicenseState {
+  /// Licensed and within its validity window (or it never expires).
+  active,
+  /// The validity window has ended.
+  expired,
+  /// The vendor ended it before its time (a refund, a dispute).
+  revoked,
+  /// No license of its own: joined a shop owned by another device, whose
+  /// access is kept alive by re-confirming the membership online.
+  joined,
+  notActivated,
+}
+
+/// What the Settings > License screen shows. Read-only: building one never
+/// changes what the device has stored (clearing an ended license, and the
+/// lock back to the activation screen that follows, stay [backgroundVerify]'s job).
+class LicenseStatus {
+  const LicenseStatus({
+    required this.state,
+    this.validUntil,
+    this.joinedVerifiedAt,
+    this.checkedWithServer = false,
+  });
+
+  final LicenseState state;
+
+  /// End of the license window. Null while [state] is [LicenseState.active]
+  /// means it never expires.
+  final DateTime? validUntil;
+
+  /// Joined devices only: when this device last confirmed its membership.
+  final DateTime? joinedVerifiedAt;
+
+  /// True when the license server answered just now; false when this is only
+  /// what the device has saved (offline, or the server did not answer).
+  final bool checkedWithServer;
+}
+
+/// How long a joined device may go without confirming its membership online
+/// before it locks - the same 24 hours [LicenseService.hasAppAccess] enforces.
+const joinedMembershipGrace = Duration(hours: 24);
+
 /// Online-activate-once, offline-run-forever: [activate] is the only
 /// call that must succeed while online; after that the cached token
 /// (plus an optional cached valid_until) alone gates the app, and
@@ -105,7 +147,7 @@ class LicenseService {
     if (verified == null) return false;
     final now = _ref.read(clockProvider).now();
     if (now.isBefore(verified.subtract(_clockRollbackTolerance)) ||
-        now.difference(verified) >= const Duration(hours: 24)) {
+        now.difference(verified) >= joinedMembershipGrace) {
       return false;
     }
     return membership['deviceId'] ==
@@ -312,6 +354,73 @@ class LicenseService {
     final token = await storage.read(key: _tokenKey);
     if (token == null || token.isEmpty) return false;
     return !await _isExpired(storage);
+  }
+
+  /// The license state for the Settings > License screen. With [askServer]
+  /// it first asks the license server (so a revoke or an extension made by
+  /// the vendor shows up immediately, not on the next 15-second cycle) and
+  /// falls back to what this device has saved when the server cannot be
+  /// reached - the offline answer is the same one the app itself enforces.
+  /// The server does not say WHY a license is invalid, but it does return
+  /// the license's end date: an end date already past means it ran out, any
+  /// other invalid answer means it was revoked.
+  Future<LicenseStatus> currentStatus({bool askServer = true}) async {
+    final storage = _ref.read(secureStorageProvider);
+    final token = await storage.read(key: _tokenKey);
+
+    if (token == null || token.isEmpty) {
+      final membership = await _membership();
+      if (membership == null) {
+        return const LicenseStatus(state: LicenseState.notActivated);
+      }
+      if (membership['blocked'] == true) {
+        return const LicenseStatus(state: LicenseState.revoked);
+      }
+      return LicenseStatus(
+        state: LicenseState.joined,
+        joinedVerifiedAt: DateTime.tryParse(
+          membership['verifiedAt'] as String? ?? '',
+        ),
+      );
+    }
+
+    final expiredLocally = await _isExpired(storage);
+    final savedRaw = await storage.read(key: _validUntilKey);
+    final savedValidUntil = savedRaw == null || savedRaw.isEmpty
+        ? null
+        : DateTime.tryParse(savedRaw);
+
+    if (askServer) {
+      try {
+        final result = await _ref
+            .read(licenseGatewayProvider)
+            .verify(baseUrl: licenseServerBaseUrl, activationToken: token);
+        final now = _ref.read(clockProvider).now();
+        if (!result.valid) {
+          final ranOut =
+              result.validUntil != null && !result.validUntil!.isAfter(now);
+          return LicenseStatus(
+            state: ranOut ? LicenseState.expired : LicenseState.revoked,
+            validUntil: result.validUntil ?? savedValidUntil,
+            checkedWithServer: true,
+          );
+        }
+        return LicenseStatus(
+          state: expiredLocally ? LicenseState.expired : LicenseState.active,
+          validUntil: result.validUntil,
+          checkedWithServer: true,
+        );
+      } on LicenseOfflineException {
+        // Fall through to what is saved on this device.
+      } on LicenseException {
+        // Same: a server hiccup must not make a good license look bad.
+      }
+    }
+
+    return LicenseStatus(
+      state: expiredLocally ? LicenseState.expired : LicenseState.active,
+      validUntil: savedValidUntil,
+    );
   }
 
   /// Called from app.dart's existing periodic sync timer - never called

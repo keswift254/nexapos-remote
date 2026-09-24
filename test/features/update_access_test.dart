@@ -82,6 +82,8 @@ void main() {
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
       expect(find.text('Privacy'), findsOneWidget);
+      // Every role can see the license status (it holds nothing secret).
+      expect(find.text('License'), findsOneWidget);
       if (role != UserRole.admin) {
         expect(find.text('General Settings'), findsNothing);
         expect(find.text('Payment Settings'), findsNothing);

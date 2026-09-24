@@ -236,6 +236,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                     child: Text('Backup'),
                   ),
                 const PopupMenuItem(
+                  value: '/license',
+                  child: Text('License'),
+                ),
+                const PopupMenuItem(
                   value: '/update',
                   child: Text('Check for Updates'),
                 ),

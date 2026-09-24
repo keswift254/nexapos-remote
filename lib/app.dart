@@ -33,6 +33,7 @@ import 'features/settings/business_settings_screen.dart';
 import 'features/settings/device_management_screen.dart'
     show ConnectedDevicesEntryScreen;
 import 'features/settings/device_sync_screen.dart';
+import 'features/settings/license_screen.dart';
 import 'features/settings/update_screen.dart';
 import 'features/expenses/expenses_screen.dart';
 import 'features/reports/reports_screen.dart';
@@ -208,6 +209,10 @@ GoRouter router(Ref ref) {
       GoRoute(
         path: '/connected-devices',
         builder: (context, state) => const ConnectedDevicesEntryScreen(),
+      ),
+      GoRoute(
+        path: '/license',
+        builder: (context, state) => const LicenseScreen(),
       ),
       GoRoute(
         path: '/update',

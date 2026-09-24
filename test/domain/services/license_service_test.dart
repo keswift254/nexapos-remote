@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io' show SocketException;
 import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -265,5 +266,190 @@ void main() {
 
     expect(result.isOk, isTrue);
     expect(await service.hasValidCachedLicense(), isTrue);
+  });
+
+  group('currentStatus (Settings > License)', () {
+    // The activate call answers with [activatedUntil]; every verify call after
+    // that is answered by whatever [verifyAnswer] currently returns.
+    late int verifyCalls;
+    late http.Response Function() verifyAnswer;
+    late FixedClock clock;
+
+    ProviderContainer build({String? activatedUntil = '2026-01-31 00:00:00'}) {
+      verifyCalls = 0;
+      verifyAnswer = () => http.Response(
+        jsonEncode({'success': true, 'valid': true, 'valid_until': activatedUntil}),
+        200,
+      );
+      clock = FixedClock(DateTime.utc(2026, 1, 1));
+      return buildContainer(
+        clock: clock,
+        licenseClient: MockClient((request) async {
+          if (request.url.queryParameters['action'] == 'verify') {
+            verifyCalls++;
+            return verifyAnswer();
+          }
+          return http.Response(
+            jsonEncode({'success': true, 'activation_token': 'a' * 64, 'valid_until': activatedUntil}),
+            200,
+          );
+        }),
+      );
+    }
+
+    http.Response invalid(String? validUntil) =>
+        http.Response(jsonEncode({'success': true, 'valid': false, 'valid_until': validUntil}), 200);
+
+    test('a live license is active, with the end date the SERVER just reported', () async {
+      final container = build();
+      final service = container.read(licenseServiceProvider);
+      await service.activate('CODE1');
+      // The vendor extended it since activation.
+      verifyAnswer = () => http.Response(
+        jsonEncode({'success': true, 'valid': true, 'valid_until': '2026-03-01 12:00:00'}),
+        200,
+      );
+
+      final status = await service.currentStatus();
+
+      expect(status.state, LicenseState.active);
+      expect(status.validUntil, DateTime.utc(2026, 3, 1, 12));
+      expect(status.checkedWithServer, isTrue);
+    });
+
+    test('a license with no end date never expires', () async {
+      final container = build(activatedUntil: null);
+      final service = container.read(licenseServiceProvider);
+      await service.activate('CODE1');
+
+      final status = await service.currentStatus();
+
+      expect(status.state, LicenseState.active);
+      expect(status.validUntil, isNull);
+    });
+
+    test('invalid with an end date already past means it ran out: expired', () async {
+      final container = build();
+      final service = container.read(licenseServiceProvider);
+      await service.activate('CODE1');
+      clock.set(DateTime.utc(2026, 2, 5));
+      verifyAnswer = () => invalid('2026-01-31 00:00:00');
+
+      final status = await service.currentStatus();
+
+      expect(status.state, LicenseState.expired);
+      expect(status.validUntil, DateTime.utc(2026, 1, 31));
+    });
+
+    test('invalid while time is still left means the vendor ended it: revoked', () async {
+      final container = build();
+      final service = container.read(licenseServiceProvider);
+      await service.activate('CODE1');
+      verifyAnswer = () => invalid('2026-01-31 00:00:00');
+
+      final status = await service.currentStatus();
+
+      expect(status.state, LicenseState.revoked);
+    });
+
+    test('invalid for a never-expiring license is revoked too', () async {
+      final container = build(activatedUntil: null);
+      final service = container.read(licenseServiceProvider);
+      await service.activate('CODE1');
+      verifyAnswer = () => invalid(null);
+
+      expect((await service.currentStatus()).state, LicenseState.revoked);
+    });
+
+    test('offline: shows what is saved and says it was not confirmed', () async {
+      final container = build();
+      final service = container.read(licenseServiceProvider);
+      await service.activate('CODE1');
+      verifyAnswer = () => throw const SocketException('no internet');
+
+      final status = await service.currentStatus();
+
+      expect(status.state, LicenseState.active);
+      expect(status.validUntil, DateTime.utc(2026, 1, 31));
+      expect(status.checkedWithServer, isFalse);
+    });
+
+    test('offline with a saved end date already past: expired, no server needed', () async {
+      final container = build();
+      final service = container.read(licenseServiceProvider);
+      await service.activate('CODE1');
+      clock.set(DateTime.utc(2026, 2, 5));
+      verifyAnswer = () => throw const SocketException('no internet');
+
+      final status = await service.currentStatus();
+
+      expect(status.state, LicenseState.expired);
+      expect(status.checkedWithServer, isFalse);
+    });
+
+    test('a server error does not make a good license look bad', () async {
+      final container = build();
+      final service = container.read(licenseServiceProvider);
+      await service.activate('CODE1');
+      verifyAnswer = () => http.Response(jsonEncode({'success': false, 'message': 'boom'}), 500);
+
+      expect((await service.currentStatus()).state, LicenseState.active);
+    });
+
+    test('askServer: false never contacts the server', () async {
+      final container = build();
+      final service = container.read(licenseServiceProvider);
+      await service.activate('CODE1');
+
+      final status = await service.currentStatus(askServer: false);
+
+      expect(verifyCalls, 0);
+      expect(status.state, LicenseState.active);
+      expect(status.checkedWithServer, isFalse);
+    });
+
+    test('is read-only: seeing "revoked" does not clear the saved license', () async {
+      final container = build();
+      final service = container.read(licenseServiceProvider);
+      await service.activate('CODE1');
+      verifyAnswer = () => invalid('2026-01-31 00:00:00');
+
+      await service.currentStatus();
+
+      expect(await container.read(secureStorageProvider).read(key: 'nexapos.license.activationToken'), isNotNull);
+      expect(await service.hasValidCachedLicense(), isTrue);
+    });
+
+    test('a device that joined a shop reports it, with when it last confirmed', () async {
+      final container = build();
+      final storage = container.read(secureStorageProvider);
+      await storage.write(
+        key: 'nexapos.license.shopMembership',
+        value: jsonEncode({
+          'shopId': 7,
+          'deviceId': 'd',
+          'verifiedAt': DateTime.utc(2025, 12, 31, 20).toIso8601String(),
+          'blocked': false,
+        }),
+      );
+
+      final status = await container.read(licenseServiceProvider).currentStatus();
+
+      expect(status.state, LicenseState.joined);
+      expect(status.joinedVerifiedAt, DateTime.utc(2025, 12, 31, 20));
+      expect(verifyCalls, 0);
+    });
+
+    test('a blocked membership is revoked; nothing at all is not activated', () async {
+      final container = build();
+      final service = container.read(licenseServiceProvider);
+      expect((await service.currentStatus()).state, LicenseState.notActivated);
+
+      await container.read(secureStorageProvider).write(
+        key: 'nexapos.license.shopMembership',
+        value: jsonEncode({'blocked': true}),
+      );
+      expect((await service.currentStatus()).state, LicenseState.revoked);
+    });
   });
 }
