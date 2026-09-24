@@ -22,14 +22,9 @@ part 'license_service.g.dart';
 const _leaseKey = 'nexapos.license.lease';
 const _tokenKey = 'nexapos.license.activationToken';
 const _validUntilKey = 'nexapos.license.validUntil';
-const _lastSeenKey = 'nexapos.license.lastSeenAt';
+const _ownCountKey = 'nexapos.license.ownCount';
 const _lastEndKey = 'nexapos.license.lastEnd';
 const _membershipKey = 'nexapos.license.shopMembership';
-// Small grace for legitimate clock jitter (NTP corrections, DST edge
-// cases) - real rollback attempts to dodge a days/weeks-long expiry
-// window are far larger than this, so it doesn't meaningfully widen
-// the loophole while avoiding false positives on ordinary clock nudges.
-const _clockRollbackTolerance = Duration(minutes: 10);
 
 /// Whether a cached, still-valid activation exists on this device - the
 /// single source of truth app.dart's redirect guard checks, mirroring
@@ -90,9 +85,14 @@ class LicenseStatus {
     this.checkedWithServer = false,
     this.sharedRemaining,
     this.sharedNeverExpires = false,
+    this.remaining,
   });
 
   final LicenseState state;
+
+  /// Time left on the license this device itself holds, as counted here (or as
+  /// the server just computed it). Null when it never expires or is not known.
+  final Duration? remaining;
 
   /// Joined devices only: time left on the shop's license, as received from
   /// the shop's main device and counted down here. Null until one was received.
@@ -116,9 +116,6 @@ enum LicenseEndReason {
   expired,
   /// The vendor ended it before its time.
   revoked,
-  /// This device's clock reads earlier than the device has already seen, so
-  /// the license end date cannot be trusted (see the clock-rollback guard).
-  clockSetBack,
   /// A joined device: the license of the shop it follows ran out.
   shopLicenseExpired,
 }
@@ -180,6 +177,14 @@ class LicenseService {
   final LeaseCountdown _leaseCountdown;
   Duration? _lastLeaseWrite;
 
+  /// Counts the license THIS device holds (as opposed to [_leaseCountdown],
+  /// which counts a joined device's borrowed one) - see [_advanceOwn].
+  late final LeaseCountdown _ownCountdown = LeaseCountdown(
+    _ref.read(clockProvider),
+    _ref.read(monotonicClockProvider),
+  );
+  Duration? _lastOwnWrite;
+
   /// A received lease replaces the one already held only when it has more
   /// time left by at least this much - shared counts differ by seconds, and
   /// that must not cause a rewrite on every exchange.
@@ -228,7 +233,7 @@ class LicenseService {
     );
     if (verified == null) return false;
     final now = _ref.read(clockProvider).now();
-    if (now.isBefore(verified.subtract(_clockRollbackTolerance)) ||
+    if (now.isBefore(verified.subtract(leaseClockTolerance)) ||
         now.difference(verified) >= joinedMembershipGrace) {
       return false;
     }
@@ -298,16 +303,13 @@ class LicenseService {
   /// a joined device passes on the lease it follows. Null when there is
   /// nothing worth giving (no license, or an ended one).
   Future<LeaseOffer?> leaseToShare() async {
-    final storage = _ref.read(secureStorageProvider);
-    final token = await storage.read(key: _tokenKey);
-    if (token != null && token.isNotEmpty) {
-      if (await _isExpired(storage)) return null;
-      final validUntil = await _savedValidUntil(storage);
-      if (validUntil == null) {
-        return const LeaseOffer(remaining: Duration.zero, neverExpires: true);
-      }
-      final left = validUntil.difference(_ref.read(clockProvider).now());
-      return left > Duration.zero ? LeaseOffer(remaining: left) : null;
+    final own = await _advanceOwn();
+    if (own != null) {
+      if (own.isExpired) return null;
+      return LeaseOffer(
+        remaining: own.remaining,
+        neverExpires: own.neverExpires,
+      );
     }
     final lease = await _advanceLease();
     if (lease == null || lease.isExpired) return null;
@@ -567,6 +569,11 @@ class LicenseService {
           );
       final storage = _ref.read(secureStorageProvider);
       await storage.write(key: _tokenKey, value: result.token);
+      await _syncOwnCount(
+        validUntil: result.validUntil,
+        serverTime: result.serverTime,
+        replace: true,
+      );
       await _writeValidUntil(storage, result.validUntil);
       // Licensed again - the "your license ended" notice no longer applies.
       await storage.delete(key: _lastEndKey);
@@ -583,17 +590,16 @@ class LicenseService {
   }
 
   /// The offline-enforceable half of "is this device still licensed" -
-  /// a cached token with no valid_until (or one still in the future)
-  /// counts as licensed with zero network access required. This is what
-  /// makes a license-duration expiry actually deactivate the app on
-  /// schedule even if it never reaches the server again after
-  /// activation - not just something verify() happens to reject next
-  /// time it's reachable.
+  /// a cached token whose license has time left (or never expires) counts
+  /// as licensed with zero network access required. This is what makes a
+  /// license-duration expiry actually deactivate the app on schedule even
+  /// if it never reaches the server again after activation - not just
+  /// something verify() happens to reject next time it's reachable. The time
+  /// left is counted by [LeaseCountdown], so changing the device's date and
+  /// time cannot extend it (and cannot cut it short by mistake either).
   Future<bool> hasValidCachedLicense() async {
-    final storage = _ref.read(secureStorageProvider);
-    final token = await storage.read(key: _tokenKey);
-    if (token == null || token.isEmpty) return false;
-    return !await _isExpired(storage);
+    final own = await _advanceOwn();
+    return own != null && !own.isExpired;
   }
 
   /// The license state for the Settings > License screen. With [askServer]
@@ -629,7 +635,8 @@ class LicenseService {
       );
     }
 
-    final expiredLocally = await _isExpired(storage);
+    final own = await _advanceOwn();
+    final expiredLocally = own?.isExpired ?? false;
     final savedValidUntil = await _savedValidUntil(storage);
 
     if (askServer) {
@@ -638,18 +645,31 @@ class LicenseService {
             .read(licenseGatewayProvider)
             .verify(baseUrl: licenseServerBaseUrl, activationToken: token);
         final now = _ref.read(clockProvider).now();
+        // The server's own clock when it gave one; the device's only as a
+        // fallback (a device whose date is wrong must not misjudge this).
+        final trustedNow = result.serverTime ?? now;
         if (!result.valid) {
           return LicenseStatus(
-            state: _ranOut(result.validUntil, now)
+            state: _ranOut(result.validUntil, trustedNow)
                 ? LicenseState.expired
                 : LicenseState.revoked,
             validUntil: result.validUntil ?? savedValidUntil,
             checkedWithServer: true,
           );
         }
+        // Time left as the server itself computes it, when it can; otherwise
+        // this device's own count.
+        Duration? left;
+        if (result.validUntil != null && result.serverTime != null) {
+          left = result.validUntil!.difference(result.serverTime!);
+          if (left.isNegative) left = Duration.zero;
+        }
+        final ended = left != null ? left <= Duration.zero : expiredLocally;
         return LicenseStatus(
-          state: expiredLocally ? LicenseState.expired : LicenseState.active,
+          state: ended ? LicenseState.expired : LicenseState.active,
           validUntil: result.validUntil,
+          remaining:
+              left ?? (result.validUntil == null ? null : own?.remaining),
           checkedWithServer: true,
         );
       } on LicenseOfflineException {
@@ -662,6 +682,7 @@ class LicenseService {
     return LicenseStatus(
       state: expiredLocally ? LicenseState.expired : LicenseState.active,
       validUntil: savedValidUntil,
+      remaining: own == null || own.neverExpires ? null : own.remaining,
     );
   }
 
@@ -683,10 +704,11 @@ class LicenseService {
     final token = await storage.read(key: _tokenKey);
     if (token == null || token.isEmpty) return;
 
-    if (await _isExpired(storage)) {
-      await _clearLicense(storage, end: await _endFromSavedLicense(storage));
-      return;
-    }
+    // A count that has run out ends the license - unless the server can be
+    // reached: its answer wins. That is what saves a device whose date was
+    // jumped far forward (the count cannot tell that from a long sleep, see
+    // LeaseCountdown) and one whose license was renewed while it was offline.
+    final countRanOut = await _ownExpired();
 
     try {
       final result = await _ref
@@ -698,7 +720,7 @@ class LicenseService {
         await _clearLicense(
           storage,
           end: LicenseEnd(
-            reason: _ranOut(result.validUntil, now)
+            reason: _ranOut(result.validUntil, result.serverTime ?? now)
                 ? LicenseEndReason.expired
                 : LicenseEndReason.revoked,
             validUntil: result.validUntil ?? saved,
@@ -707,61 +729,167 @@ class LicenseService {
         );
         return;
       }
+      // Re-anchors the count on what the server just said (its own clock
+      // against the license's end date), which also wipes out whatever error
+      // this device's counting picked up while it was out of contact. Must run
+      // BEFORE the saved end date is overwritten below: without a server clock
+      // it works out an extension from the old and new end dates.
+      await _syncOwnCount(
+        validUntil: result.validUntil,
+        serverTime: result.serverTime,
+        replace: false,
+      );
+      if (countRanOut) {
+        if (await _ownExpired()) {
+          // The server calls the license valid but sent no clock to count
+          // from, so the count cannot be put right.
+          await _clearLicense(
+            storage,
+            end: await _endFromSavedLicense(storage),
+          );
+          return;
+        }
+        // Back in business: let the guard that may already have locked the
+        // screen look again.
+        _ref.invalidate(hasCachedLicenseProvider);
+        _ref.read(licenseChangeSignalProvider.notifier).bump();
+      }
       // Keeps the locally-cached deadline in sync with the server's -
       // covers a vendor-side revoke/extend that changed valid_until
       // without this device needing to reactivate.
       await _writeValidUntil(storage, result.validUntil);
       await _applyAuthenticatorReset(result.authenticatorGeneration);
     } on LicenseOfflineException {
-      // No internet right now - stay licensed, try again next cycle.
+      // No internet right now - stay licensed, try again next cycle. (Unless
+      // the count has already run out: offline is exactly where that must be
+      // enforced.)
+      if (countRanOut) {
+        await _clearLicense(storage, end: await _endFromSavedLicense(storage));
+      }
     } on LicenseException {
       // Transient server-side error - stay licensed, try again next cycle.
+      if (countRanOut) {
+        await _clearLicense(storage, end: await _endFromSavedLicense(storage));
+      }
     }
   }
 
-  Future<bool> _isExpired(FlutterSecureStorage storage) async {
+  Future<LicenseLease?> _readOwn() async {
+    final raw = await _ref.read(secureStorageProvider).read(key: _ownCountKey);
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      return LicenseLease.fromJson(jsonDecode(raw));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _writeOwn(LicenseLease lease) async {
+    _lastOwnWrite = _ref.read(monotonicClockProvider).elapsed();
+    await _ref
+        .read(secureStorageProvider)
+        .write(key: _ownCountKey, value: jsonEncode(lease.toJson()));
+  }
+
+  /// The count of the license THIS device holds, brought up to date with the
+  /// present, or null when it holds none. It is time left, counted by
+  /// [LeaseCountdown], so a date change (back or forward) cannot extend it.
+  /// A device activated before counting existed has only the license's end
+  /// DATE saved; its count is started from that once, using the device's
+  /// clock (the only clock it has), and corrected by the next server contact.
+  Future<LicenseLease?> _advanceOwn() async {
+    final storage = _ref.read(secureStorageProvider);
+    final token = await storage.read(key: _tokenKey);
+    if (token == null || token.isEmpty) return null;
+    var saved = await _readOwn();
+    if (saved == null) {
+      final validUntil = await _savedValidUntil(storage);
+      final now = _ref.read(clockProvider).now();
+      saved = validUntil == null
+          ? LicenseLease(
+              remaining: Duration.zero,
+              accountedAt: now,
+              neverExpires: true,
+            )
+          : LicenseLease(
+              remaining: _atLeastZero(validUntil.difference(now)),
+              accountedAt: now,
+            );
+      await _writeOwn(saved);
+    }
+    // Once it has run out it stays run out, whatever the date does afterwards,
+    // until the server (or a new activation) sets it again.
+    if (saved.isExpired) return saved;
+    final advanced = _ownCountdown.advance(saved);
+    final last = _lastOwnWrite;
+    final monotonicNow = _ref.read(monotonicClockProvider).elapsed();
+    if (last == null ||
+        monotonicNow - last >= const Duration(seconds: 5) ||
+        (advanced.isExpired && !saved.isExpired)) {
+      await _writeOwn(advanced);
+    }
+    return advanced;
+  }
+
+  Duration _atLeastZero(Duration value) =>
+      value.isNegative ? Duration.zero : value;
+
+  Future<bool> _ownExpired() async {
+    final own = await _advanceOwn();
+    return own != null && own.isExpired;
+  }
+
+  /// Sets this device's count from what the license server just told it.
+  ///  * With the server's own clock: time left = end date - server time. Real
+  ///    time, independent of this device's date - so contact with the server
+  ///    always puts the count right, whatever the date on this device did.
+  ///  * Without it (unusual - a proxy that strips the header, or a test): a
+  ///    brand-new activation can only use this device's clock; a routine check
+  ///    changes nothing except to carry an EXTENSION, worked out as the
+  ///    difference between the old and the new end date - never from the
+  ///    device's clock, which is exactly what a rollback would corrupt.
+  Future<void> _syncOwnCount({
+    required DateTime? validUntil,
+    required DateTime? serverTime,
+    required bool replace,
+  }) async {
     final now = _ref.read(clockProvider).now();
-    // Always tracked, regardless of whether a valid_until is even set,
-    // so the protection already has a baseline the moment a
-    // subscription-style license shows up later via re-activation.
-    final rolledBack = await _trackClockAndDetectRollback(storage, now);
-
-    final raw = await storage.read(key: _validUntilKey);
-    if (raw == null || raw.isEmpty) {
-      return false; // never expires - nothing to dodge, rollback is moot
+    LicenseLease? next;
+    if (validUntil == null) {
+      next = LicenseLease(
+        remaining: Duration.zero,
+        accountedAt: now,
+        neverExpires: true,
+      );
+    } else if (serverTime != null) {
+      next = LicenseLease(
+        remaining: _atLeastZero(validUntil.difference(serverTime)),
+        accountedAt: now,
+      );
+    } else if (replace || await _readOwn() == null) {
+      next = LicenseLease(
+        remaining: _atLeastZero(validUntil.difference(now)),
+        accountedAt: now,
+      );
+    } else {
+      final own = await _advanceOwn();
+      final previous = await _savedValidUntil(
+        _ref.read(secureStorageProvider),
+      );
+      if (own != null &&
+          !own.neverExpires &&
+          previous != null &&
+          validUntil.isAfter(previous)) {
+        next = own.copyWith(
+          remaining: own.remaining + validUntil.difference(previous),
+        );
+      }
     }
-    final validUntil = DateTime.tryParse(raw);
-    if (validUntil == null) return false;
-
-    // A rolled-back clock can't be trusted to say "not expired yet" -
-    // this is the actual defense: without it, winding the system clock
-    // back to before valid_until would make an offline check pass again.
-    if (rolledBack) return true;
-    return !validUntil.isAfter(now);
-  }
-
-  /// Maintains a monotonic watermark (secure storage key
-  /// nexapos.license.lastSeenAt) of the latest time this device has
-  /// ever legitimately observed - never moves backward, persists across
-  /// activate()/_clearLicense (it's a device-level fact, not tied to
-  /// any one license's lifecycle, otherwise a rollback-then-reactivate
-  /// cycle would just reset it and defeat the whole point). Returns
-  /// whether `now` is suspiciously earlier than that watermark, beyond
-  /// [_clockRollbackTolerance].
-  Future<bool> _trackClockAndDetectRollback(
-    FlutterSecureStorage storage,
-    DateTime now,
-  ) async {
-    final lastSeenRaw = await storage.read(key: _lastSeenKey);
-    final lastSeen = lastSeenRaw != null && lastSeenRaw.isNotEmpty
-        ? DateTime.tryParse(lastSeenRaw)
-        : null;
-    final rolledBack =
-        lastSeen != null && lastSeen.difference(now) > _clockRollbackTolerance;
-    if (lastSeen == null || now.isAfter(lastSeen)) {
-      await storage.write(key: _lastSeenKey, value: now.toIso8601String());
-    }
-    return rolledBack;
+    if (next == null) return;
+    await _writeOwn(next);
+    _ownCountdown
+      ..reset()
+      ..advance(next);
   }
 
   Future<void> _writeValidUntil(
@@ -787,19 +915,14 @@ class LicenseService {
     return raw == null || raw.isEmpty ? null : DateTime.tryParse(raw);
   }
 
-  /// Why the license saved on this device counts as ended right now, judged
-  /// only from what is saved (no network): an end date that has passed means
-  /// it ran out; a locally-expired license whose end date is still ahead can
-  /// only be the clock-rollback guard firing.
+  /// The notice for a license whose own count has run out. The end date shown
+  /// is the one the server gave (a calendar date, correct whatever this
+  /// device's clock says).
   Future<LicenseEnd> _endFromSavedLicense(FlutterSecureStorage storage) async {
-    final now = _ref.read(clockProvider).now();
-    final validUntil = await _savedValidUntil(storage);
     return LicenseEnd(
-      reason: _ranOut(validUntil, now)
-          ? LicenseEndReason.expired
-          : LicenseEndReason.clockSetBack,
-      validUntil: validUntil,
-      noticedAt: now,
+      reason: LicenseEndReason.expired,
+      validUntil: await _savedValidUntil(storage),
+      noticedAt: _ref.read(clockProvider).now(),
     );
   }
 
@@ -812,7 +935,7 @@ class LicenseService {
     final storage = _ref.read(secureStorageProvider);
     final token = await storage.read(key: _tokenKey);
     if (token != null && token.isNotEmpty) {
-      return await _isExpired(storage) ? _endFromSavedLicense(storage) : null;
+      return await _ownExpired() ? _endFromSavedLicense(storage) : null;
     }
     // A joined device whose shop's license has run out: explained right away,
     // even before the background check has had a chance to record it.
@@ -839,10 +962,8 @@ class LicenseService {
     }
   }
 
-  /// Deliberately does NOT delete _lastSeenKey - see
-  /// _trackClockAndDetectRollback's doc for why that watermark must
-  /// outlive any single license. [end] is written FIRST, so the activation
-  /// screen it is about to lock the app onto already has something to say.
+  /// [end] is written FIRST, so the activation screen it is about to lock the
+  /// app onto already has something to say.
   Future<void> _clearLicense(
     FlutterSecureStorage storage, {
     LicenseEnd? end,
@@ -852,6 +973,8 @@ class LicenseService {
     }
     await storage.delete(key: _tokenKey);
     await storage.delete(key: _validUntilKey);
+    await storage.delete(key: _ownCountKey);
+    _ownCountdown.reset();
     _ref.invalidate(hasCachedLicenseProvider);
     _ref.read(licenseChangeSignalProvider.notifier).bump();
   }

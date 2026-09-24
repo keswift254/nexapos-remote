@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/providers.dart';
+import '../../core/utils/monotonic_clock.dart';
 import '../../domain/services/license_service.dart';
 
 /// Settings > License: whether this device's license is active, expired or
@@ -32,24 +33,24 @@ class _LicenseScreenState extends ConsumerState<LicenseScreen> {
   Timer? _ticker;
   int _ticks = 0;
 
-  /// Time since [_status] was read. The shop-license countdown of a joined
-  /// device is drawn as "time left when read, minus this" - a stopwatch, so
-  /// changing the device's date cannot make the number on screen jump.
-  final Stopwatch _sinceRead = Stopwatch()..start();
+  /// The countdown drawn on screen is "time left when read, minus the time
+  /// since" - measured by the monotonic clock, so changing the device's date
+  /// cannot make the number on screen jump.
+  late final MonotonicClock _monotonic = ref.read(monotonicClockProvider);
+  Duration _readAt = Duration.zero;
+
+  Duration get _sinceRead => _monotonic.elapsed() - _readAt;
 
   void _setStatus(LicenseStatus status) {
     _status = status;
-    _sinceRead
-      ..reset()
-      ..start();
+    _readAt = _monotonic.elapsed();
   }
 
   @override
   void initState() {
     super.initState();
-    // Redraws every second. An owner device's countdown is computed in build
-    // from the injected clock; a joined device's from [_sinceRead]. Every
-    // 15 seconds a joined device also re-reads what it holds, so a renewal
+    // Redraws every second. Every 15 seconds a device that gets its time from
+    // the shop's main device also re-reads what it holds, so a renewal
     // received over the shop's network appears here without reopening.
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
@@ -132,7 +133,7 @@ class _LicenseScreenState extends ConsumerState<LicenseScreen> {
                 _StatusCard(
                   status: status,
                   now: ref.read(clockProvider).now(),
-                  sinceRead: _sinceRead.elapsed,
+                  sinceRead: _sinceRead,
                 ),
                 const SizedBox(height: 12),
                 _SourceNote(status: status, checking: _checking),
@@ -164,17 +165,24 @@ class _StatusCard extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
 
-    // An active license whose end passed while this screen was open is
-    // expired now, not "active with 0 seconds left".
+    // This device's own license: its time left is what it held when read,
+    // minus the time since - never the end date compared with the device's
+    // clock, which anyone can change. (Falls back to that only if no count
+    // was given.) One that ran out while this screen was open is expired now,
+    // not "active with 0 seconds left".
     var state = status.state;
     final validUntil = status.validUntil;
+    final ownLeft = validUntil == null
+        ? null
+        : status.remaining != null
+        ? status.remaining! - sinceRead
+        : validUntil.difference(now);
     if (state == LicenseState.active &&
-        validUntil != null &&
-        !validUntil.isAfter(now)) {
+        ownLeft != null &&
+        ownLeft <= Duration.zero) {
       state = LicenseState.expired;
     }
-    // A joined device following the shop's license: its time left is what it
-    // held when read, minus a stopwatch - never a date compared with the clock.
+    // A joined device following the shop's license: same idea.
     final followsShopLicense =
         status.sharedRemaining != null || status.sharedNeverExpires;
     final sharedLeft = status.sharedRemaining == null
@@ -225,7 +233,7 @@ class _StatusCard extends StatelessWidget {
 
     switch (state) {
       case LicenseState.active:
-        if (validUntil == null) {
+        if (validUntil == null || ownLeft == null) {
           children.add(const Text('This license never expires.'));
         } else {
           children.addAll([
@@ -233,7 +241,7 @@ class _StatusCard extends StatelessWidget {
             const SizedBox(height: 16),
             Text('Time remaining', style: theme.textTheme.labelLarge),
             const SizedBox(height: 8),
-            _Countdown(remaining: validUntil.difference(now)),
+            _Countdown(remaining: ownLeft),
           ]);
         }
       case LicenseState.expired:

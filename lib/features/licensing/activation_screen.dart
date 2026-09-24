@@ -97,14 +97,6 @@ class _LicenseEndedBannerState extends ConsumerState<_LicenseEndedBanner> {
         Colors.orange.shade800,
         Icons.event_busy,
       ),
-      LicenseEndReason.clockSetBack => (
-        "This device's date or time looks wrong",
-        'NexaPOS locked itself because the clock on this device was set '
-            "back, so your license's end date can't be trusted. Correct the "
-            'date and time, then enter your license key below to continue.',
-        Colors.orange.shade800,
-        Icons.schedule,
-      ),
     };
 
     return _NoticeBox(color: color, icon: icon, title: title, body: body);

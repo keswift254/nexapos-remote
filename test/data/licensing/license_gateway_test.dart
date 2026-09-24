@@ -36,6 +36,30 @@ void main() {
       expect(result.validUntil, DateTime.utc(2026, 9, 22, 17, 44, 5));
     });
 
+    test('reports the server\'s own clock from the response Date header', () async {
+      final gateway = LicenseGateway(MockClient((request) async {
+        return http.Response(
+          jsonEncode({'success': true, 'activation_token': 'a' * 64, 'valid_until': null}),
+          200,
+          headers: {'date': 'Thu, 24 Sep 2026 12:30:05 GMT'},
+        );
+      }));
+
+      final result = await gateway.activate(baseUrl: _baseUrl, code: 'L3RLFCH5KA', deviceId: 'device-1');
+
+      expect(result.serverTime, DateTime.utc(2026, 9, 24, 12, 30, 5));
+    });
+
+    test('has no server time when the response carries no readable Date header', () async {
+      final gateway = LicenseGateway(MockClient((request) async {
+        return http.Response(jsonEncode({'success': true, 'activation_token': 'a' * 64}), 200);
+      }));
+
+      final result = await gateway.activate(baseUrl: _baseUrl, code: 'L3RLFCH5KA', deviceId: 'device-1');
+
+      expect(result.serverTime, isNull);
+    });
+
     test('a code that was already used surfaces the backend message', () async {
       final gateway = LicenseGateway(MockClient((request) async {
         return http.Response(
@@ -74,6 +98,20 @@ void main() {
 
       expect(result.valid, isTrue);
       expect(result.validUntil, isNull);
+    });
+
+    test('reports the server\'s own clock from the response Date header', () async {
+      final gateway = LicenseGateway(MockClient((request) async {
+        return http.Response(
+          jsonEncode({'success': true, 'valid': true, 'valid_until': '2026-12-01 00:00:00'}),
+          200,
+          headers: {'date': 'Fri, 25 Sep 2026 01:02:03 GMT'},
+        );
+      }));
+
+      final result = await gateway.verify(baseUrl: _baseUrl, activationToken: 'some_token_123');
+
+      expect(result.serverTime, DateTime.utc(2026, 9, 25, 1, 2, 3));
     });
 
     test('a revoked license is reported as valid:false, not an exception', () async {

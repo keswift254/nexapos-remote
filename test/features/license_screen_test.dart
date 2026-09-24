@@ -11,26 +11,30 @@ import 'package:http/testing.dart';
 import 'package:nexapos_mobile/core/providers.dart';
 import 'package:nexapos_mobile/core/secure_storage_provider.dart';
 import 'package:nexapos_mobile/core/utils/clock.dart';
+import 'package:nexapos_mobile/core/utils/monotonic_clock.dart';
 import 'package:nexapos_mobile/data/licensing/license_gateway.dart';
 import 'package:nexapos_mobile/data/local/database.dart';
 import 'package:nexapos_mobile/domain/services/license_service.dart';
 import 'package:nexapos_mobile/features/settings/license_screen.dart';
 
+import '../support/fake_monotonic_clock.dart';
 import '../support/fake_secure_storage.dart';
 
 const _tokenKey = 'nexapos.license.activationToken';
 const _validUntilKey = 'nexapos.license.validUntil';
 const _membershipKey = 'nexapos.license.shopMembership';
 
-http.Response _verify({required bool valid, String? validUntil}) => http.Response(
+http.Response _verify({required bool valid, String? validUntil, String? serverDate}) => http.Response(
   jsonEncode({'success': true, 'valid': valid, 'valid_until': validUntil}),
   200,
+  headers: {'date': ?serverDate},
 );
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   late FixedClock clock;
+  late FakeMonotonicClock mono;
   late http.Response Function() serverAnswer;
   late ProviderContainer container;
   late AppDatabase db;
@@ -52,10 +56,12 @@ void main() {
   }) async {
     installFakeSecureStorage();
     clock = FixedClock(DateTime.utc(2026, 1, 1));
+    mono = FakeMonotonicClock();
     db = AppDatabase(NativeDatabase.memory());
     container = ProviderContainer(overrides: [
       appDatabaseProvider.overrideWith((ref) => db),
       clockProvider.overrideWith((ref) => clock),
+      monotonicClockProvider.overrideWithValue(mono),
       licenseGatewayProvider.overrideWith(
         (ref) => LicenseGateway(MockClient((request) async => serverAnswer())),
       ),
@@ -108,10 +114,44 @@ void main() {
     expect(find.text('Seconds'), findsOneWidget);
     expect(find.text('Confirmed with the license server just now.'), findsOneWidget);
 
-    clock.advance(const Duration(seconds: 1));
+    mono.advance(const Duration(seconds: 1));
     await tester.pump(const Duration(seconds: 1));
     expect(find.text('05'), findsNothing);
     expect(find.text('04'), findsNWidgets(2)); // hours and the seconds that just ticked
+
+    await closeScreen(tester);
+  });
+
+  testWidgets('the countdown is the time left by the server clock when it sends one, whatever the device date says', (tester) async {
+    // The device thinks it is 1 January; the server says 2 January.
+    serverAnswer = () => _verify(
+      valid: true,
+      validUntil: '2026-01-31 04:00:05',
+      serverDate: 'Fri, 02 Jan 2026 00:00:00 GMT',
+    );
+    await openLicenseScreen(tester, savedValidUntil: '2026-01-31T04:00:05.000Z');
+
+    expect(find.text('29'), findsOneWidget);
+    expect(find.text('04'), findsOneWidget);
+    expect(find.text('05'), findsOneWidget);
+
+    await closeScreen(tester);
+  });
+
+  testWidgets('the countdown ignores the device date being wound back or forward', (tester) async {
+    serverAnswer = () => throw const SocketException('no internet');
+    await openLicenseScreen(tester, savedValidUntil: '2026-01-31T04:00:05.000Z');
+    expect(find.text('30'), findsOneWidget);
+
+    clock.advance(const Duration(days: 400)); // the date is wound far forward
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('30'), findsOneWidget);
+    expect(find.text('Active'), findsOneWidget);
+
+    clock.set(DateTime.utc(2020, 1, 1)); // ...and far back
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('30'), findsOneWidget);
+    expect(find.text('Active'), findsOneWidget);
 
     await closeScreen(tester);
   });
@@ -165,7 +205,7 @@ void main() {
     await openLicenseScreen(tester, savedValidUntil: '2026-01-01T00:00:03.000Z');
     expect(find.text('Active'), findsOneWidget);
 
-    clock.advance(const Duration(seconds: 5));
+    mono.advance(const Duration(seconds: 5));
     await tester.pump(const Duration(seconds: 1));
 
     expect(find.text('Expired'), findsOneWidget);

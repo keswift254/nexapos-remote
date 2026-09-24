@@ -47,12 +47,48 @@ class PaystackOfflineException implements Exception {
   const PaystackOfflineException({this.timedOut = false});
 }
 
+const _httpMonths = {
+  'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4, 'May': 5, 'Jun': 6,
+  'Jul': 7, 'Aug': 8, 'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12,
+};
+
+/// Reads an HTTP `Date` header ("Thu, 24 Sep 2026 12:00:00 GMT") as UTC, or
+/// null when it is missing or not in that form. Written by hand rather than
+/// with dart:io's HttpDate, which the browser build cannot use.
+DateTime? parseHttpDate(String? value) {
+  if (value == null) return null;
+  final match = RegExp(
+    r'^\w{3}, (\d{1,2}) (\w{3}) (\d{4}) (\d{2}):(\d{2}):(\d{2}) GMT$',
+  ).firstMatch(value.trim());
+  if (match == null) return null;
+  final month = _httpMonths[match.group(2)];
+  if (month == null) return null;
+  try {
+    return DateTime.utc(
+      int.parse(match.group(3)!),
+      month,
+      int.parse(match.group(1)!),
+      int.parse(match.group(4)!),
+      int.parse(match.group(5)!),
+      int.parse(match.group(6)!),
+    );
+  } catch (_) {
+    return null;
+  }
+}
+
 /// Shared request/error-mapping plumbing for talking to the operator's
 /// payments-platform backend (see paystack_gateway.dart's class doc for
 /// why the phone talks to that backend instead of Paystack directly).
 /// Used by both PaystackGateway (checkout-time) and
 /// PlatformOnboardingGateway (setup-time) so the two stay separate
 /// classes with separate public APIs without duplicating this part.
+///
+/// [onServerTime], when given, is told the server's own clock from the
+/// response's `Date` header - the only source of the real time this device
+/// has that its owner cannot change from the date-and-time settings (see
+/// LicenseService and TrustedTimeService). Not called when the response has
+/// no readable `Date` header (a browser hides it from cross-origin pages).
 Future<Map<String, dynamic>> platformRequest(
   http.Client client,
   String method,
@@ -62,6 +98,7 @@ Future<Map<String, dynamic>> platformRequest(
   Map<String, dynamic>? body,
   Map<String, String>? queryParameters,
   Duration timeout = platformRequestTimeout,
+  void Function(DateTime serverTime)? onServerTime,
 }) async {
   final uri = Uri.parse(baseUrl)
       .replace(queryParameters: {'action': action, ...?queryParameters});
@@ -84,6 +121,11 @@ Future<Map<String, dynamic>> platformRequest(
     throw const PaystackOfflineException();
   } on http.ClientException {
     throw const PaystackOfflineException();
+  }
+
+  if (onServerTime != null) {
+    final serverTime = parseHttpDate(response.headers['date']);
+    if (serverTime != null) onServerTime(serverTime);
   }
 
   // A non-JSON body (an HTML error page from a PHP fatal error, a proxy

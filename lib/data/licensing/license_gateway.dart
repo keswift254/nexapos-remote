@@ -29,17 +29,29 @@ class LicenseOfflineException implements Exception {
 class ActivationResult {
   final String token;
   final DateTime? validUntil;
-  const ActivationResult({required this.token, this.validUntil});
+
+  /// The license server's own clock when it answered (its HTTP `Date`
+  /// header) - real time that does not depend on this device's date.
+  final DateTime? serverTime;
+  const ActivationResult({
+    required this.token,
+    this.validUntil,
+    this.serverTime,
+  });
 }
 
 class VerificationResult {
   final bool valid;
   final DateTime? validUntil;
   final int authenticatorGeneration;
+
+  /// See [ActivationResult.serverTime].
+  final DateTime? serverTime;
   const VerificationResult({
     required this.valid,
     this.validUntil,
     this.authenticatorGeneration = 0,
+    this.serverTime,
   });
 }
 
@@ -71,11 +83,13 @@ class LicenseGateway {
     required String code,
     required String deviceId,
   }) async {
+    DateTime? serverTime;
     final response = await _call(
       'POST',
       'activate',
       baseUrl,
       body: {'code': code, 'device_id': deviceId},
+      onServerTime: (t) => serverTime = t,
     );
     if (response['success'] != true) {
       throw LicenseException(
@@ -94,6 +108,7 @@ class LicenseGateway {
     return ActivationResult(
       token: token,
       validUntil: _parseUtc(response['valid_until']),
+      serverTime: serverTime,
     );
   }
 
@@ -101,11 +116,13 @@ class LicenseGateway {
     required String baseUrl,
     required String activationToken,
   }) async {
+    DateTime? serverTime;
     final response = await _call(
       'POST',
       'verify',
       baseUrl,
       bearerToken: activationToken,
+      onServerTime: (t) => serverTime = t,
     );
     if (response['success'] != true) {
       throw LicenseException(
@@ -118,6 +135,7 @@ class LicenseGateway {
       authenticatorGeneration: response['authenticator_generation'] is int
           ? response['authenticator_generation'] as int
           : 0,
+      serverTime: serverTime,
     );
   }
 
@@ -145,6 +163,7 @@ class LicenseGateway {
     String baseUrl, {
     String? bearerToken,
     Map<String, dynamic>? body,
+    void Function(DateTime serverTime)? onServerTime,
   }) async {
     try {
       return await platformRequest(
@@ -154,6 +173,7 @@ class LicenseGateway {
         baseUrl,
         apiKey: bearerToken,
         body: body,
+        onServerTime: onServerTime,
       );
     } on PaystackOfflineException {
       throw const LicenseOfflineException();

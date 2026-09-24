@@ -9,16 +9,22 @@ import 'package:http/testing.dart';
 import 'package:nexapos_mobile/core/providers.dart';
 import 'package:nexapos_mobile/core/secure_storage_provider.dart';
 import 'package:nexapos_mobile/core/utils/clock.dart';
+import 'package:nexapos_mobile/core/utils/monotonic_clock.dart';
 import 'package:nexapos_mobile/data/licensing/license_gateway.dart';
 import 'package:nexapos_mobile/data/local/database.dart';
 import 'package:nexapos_mobile/domain/services/license_service.dart';
+import '../../support/fake_monotonic_clock.dart';
 import '../../support/fake_secure_storage.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(installFakeSecureStorage);
 
-  ProviderContainer buildContainer({required http.Client licenseClient, required Clock clock}) {
+  ProviderContainer buildContainer({
+    required http.Client licenseClient,
+    required Clock clock,
+    FakeMonotonicClock? mono,
+  }) {
     final container = ProviderContainer(overrides: [
       appDatabaseProvider.overrideWith((ref) {
         final db = AppDatabase(NativeDatabase.memory());
@@ -27,6 +33,7 @@ void main() {
       }),
       licenseGatewayProvider.overrideWith((ref) => LicenseGateway(licenseClient)),
       clockProvider.overrideWith((ref) => clock),
+      if (mono != null) monotonicClockProvider.overrideWithValue(mono),
     ]);
     addTearDown(container.dispose);
     return container;
@@ -113,7 +120,7 @@ void main() {
     expect(await service.hasValidCachedLicense(), isFalse);
   });
 
-  test('backgroundVerify clears the license once locally expired without ever touching the network', () async {
+  test('backgroundVerify clears the license once its count has run out and the server cannot be reached', () async {
     final clock = FixedClock(DateTime.utc(2026, 1, 1));
     var verifyCalls = 0;
     final container = buildContainer(
@@ -126,7 +133,7 @@ void main() {
           );
         }
         verifyCalls++;
-        throw StateError('backgroundVerify must not call verify() once the cached deadline has already passed');
+        throw const SocketException('no internet');
       }),
     );
     final service = container.read(licenseServiceProvider);
@@ -135,8 +142,67 @@ void main() {
     clock.set(DateTime.utc(2026, 2, 1));
     await service.backgroundVerify();
 
-    expect(verifyCalls, 0);
+    expect(verifyCalls, 1, reason: 'the server is asked first, in case only the date was wrong');
     expect(await service.hasValidCachedLicense(), isFalse);
+    expect(
+      await container.read(secureStorageProvider).read(key: 'nexapos.license.activationToken'),
+      isNull,
+      reason: 'offline, a license that has run out must really end',
+    );
+  });
+
+  test('a device whose date jumped far forward gets its license back from the server, not locked out', () async {
+    final clock = FixedClock(DateTime.utc(2026, 1, 1));
+    final container = buildContainer(
+      clock: clock,
+      mono: FakeMonotonicClock(),
+      licenseClient: MockClient((request) async {
+        if (request.url.queryParameters['action'] == 'activate') {
+          return http.Response(
+            jsonEncode({'success': true, 'activation_token': 'a' * 64, 'valid_until': '2026-01-31 00:00:00'}),
+            200,
+          );
+        }
+        // The server's own clock says it is 5 January.
+        return http.Response(
+          jsonEncode({'success': true, 'valid': true, 'valid_until': '2026-01-31 00:00:00'}),
+          200,
+          headers: {'date': 'Mon, 05 Jan 2026 00:00:00 GMT'},
+        );
+      }),
+    );
+    final service = container.read(licenseServiceProvider);
+    await service.activate('CODE1');
+
+    clock.set(DateTime.utc(2030, 6, 1)); // somebody set the date years ahead
+    expect(await service.hasValidCachedLicense(), isFalse);
+    await service.backgroundVerify();
+
+    expect(await service.hasValidCachedLicense(), isTrue);
+    final status = await service.currentStatus(askServer: false);
+    expect(status.state, LicenseState.active);
+    expect(status.remaining, const Duration(days: 26));
+  });
+
+  test('a device whose date is wrong still gets the true time left from the server clock at activation', () async {
+    final clock = FixedClock(DateTime.utc(2027, 1, 1)); // a year ahead of the real date
+    final container = buildContainer(
+      clock: clock,
+      mono: FakeMonotonicClock(),
+      licenseClient: MockClient((request) async {
+        return http.Response(
+          jsonEncode({'success': true, 'activation_token': 'a' * 64, 'valid_until': '2026-01-31 00:00:00'}),
+          200,
+          headers: {'date': 'Thu, 01 Jan 2026 00:00:00 GMT'},
+        );
+      }),
+    );
+    final service = container.read(licenseServiceProvider);
+
+    await service.activate('CODE1');
+
+    expect(await service.hasValidCachedLicense(), isTrue);
+    expect((await service.currentStatus(askServer: false)).remaining, const Duration(days: 30));
   });
 
   test('backgroundVerify refreshes the cached deadline from a reachable server (e.g. a renewal)', () async {
@@ -166,7 +232,7 @@ void main() {
     expect(await service.hasValidCachedLicense(), isTrue);
   });
 
-  test('rolling the device clock back past valid_until is still treated as expired (clock-rollback protection)', () async {
+  test('winding the device clock back after the license ran out does not bring it back', () async {
     final clock = FixedClock(DateTime.utc(2026, 1, 1));
     final container = buildContainer(
       clock: clock,
@@ -179,15 +245,172 @@ void main() {
     );
     final service = container.read(licenseServiceProvider);
     await service.activate('CODE1');
-    clock.set(DateTime.utc(2026, 2, 15)); // genuinely past valid_until - watermark advances to here
+    clock.set(DateTime.utc(2026, 2, 15)); // genuinely past valid_until
     expect(await service.hasValidCachedLicense(), isFalse);
 
-    // Wind the clock back to BEFORE valid_until, as a real attempt to
-    // dodge the expiry would - without the rollback watermark, this
-    // would read as "not expired yet" again since 2026-01-20 < 2026-01-31.
+    // Wind the clock back to BEFORE valid_until, as a real attempt to dodge the
+    // expiry would.
     clock.set(DateTime.utc(2026, 1, 20));
 
     expect(await service.hasValidCachedLicense(), isFalse);
+  });
+
+  group('the time left is counted, so changing the date and time does not change it', () {
+    late FixedClock wall;
+    late FakeMonotonicClock mono;
+    late ProviderContainer container;
+    late LicenseService service;
+
+    void pass(Duration duration) {
+      wall.advance(duration);
+      mono.advance(duration);
+    }
+
+    Future<Duration?> remaining() async => (await service.currentStatus(askServer: false)).remaining;
+
+    setUp(() async {
+      wall = FixedClock(DateTime.utc(2026, 1, 1));
+      mono = FakeMonotonicClock();
+      container = buildContainer(
+        clock: wall,
+        mono: mono,
+        licenseClient: MockClient((request) async {
+          return http.Response(
+            jsonEncode({'success': true, 'activation_token': 'a' * 64, 'valid_until': '2026-01-31 00:00:00'}),
+            200,
+          );
+        }),
+      );
+      service = container.read(licenseServiceProvider);
+      await service.activate('CODE1');
+    });
+
+    test('time passing counts down normally', () async {
+      expect(await remaining(), const Duration(days: 30));
+
+      pass(const Duration(days: 10));
+
+      expect(await remaining(), const Duration(days: 20));
+    });
+
+    test('setting the clock BACK does not give any time back', () async {
+      pass(const Duration(days: 10));
+
+      wall.set(wall.now().subtract(const Duration(days: 30))); // the date is wound back a month
+      pass(const Duration(days: 1));
+
+      expect(await remaining(), const Duration(days: 19));
+      expect(await service.hasValidCachedLicense(), isTrue);
+    });
+
+    test('setting it back and then forward again leaves the count exactly what it should be', () async {
+      pass(const Duration(days: 10));
+      wall.set(wall.now().subtract(const Duration(days: 30)));
+      pass(const Duration(days: 5));
+      wall.set(wall.now().add(const Duration(days: 30)));
+
+      expect(await remaining(), const Duration(days: 15));
+    });
+
+    test('a clock wound back a little is not treated as tampering either', () async {
+      pass(const Duration(days: 10));
+      wall.set(wall.now().subtract(const Duration(minutes: 5))); // an automatic time sync
+
+      expect(await remaining(), const Duration(days: 20));
+    });
+
+    test('a date set forward and put right again while the app runs costs nothing', () async {
+      pass(const Duration(days: 10));
+      wall.set(wall.now().add(const Duration(days: 60)));
+      expect(await service.hasValidCachedLicense(), isFalse, reason: 'while it stays forward it counts');
+      wall.set(wall.now().subtract(const Duration(days: 60)));
+
+      // It ran out while the date was wrong, so it stays out until the server
+      // (or a new activation) says otherwise: nobody gains by trying it.
+      expect(await service.hasValidCachedLicense(), isFalse);
+    });
+
+    test('a clock set back while the app is closed is charged a day, not given as free time', () async {
+      pass(const Duration(days: 10));
+      expect(await remaining(), const Duration(days: 20)); // saved
+
+      // "Restart": a new service reading the same saved data, on a device whose
+      // date was wound back a month while the app was closed.
+      final restartedWall = FixedClock(wall.now().subtract(const Duration(days: 30)));
+      final restarted = buildContainer(
+        clock: restartedWall,
+        mono: FakeMonotonicClock(),
+        licenseClient: MockClient((request) async => http.Response('{}', 500)),
+      ).read(licenseServiceProvider);
+
+      final status = await restarted.currentStatus(askServer: false);
+
+      expect(status.remaining, const Duration(days: 19));
+    });
+
+    test('a restart with the clock moved forward charges the time that seems to have passed', () async {
+      pass(const Duration(days: 10));
+      expect(await remaining(), const Duration(days: 20));
+
+      final restartedWall = FixedClock(wall.now().add(const Duration(days: 7)));
+      final restarted = buildContainer(
+        clock: restartedWall,
+        mono: FakeMonotonicClock(),
+        licenseClient: MockClient((request) async => http.Response('{}', 500)),
+      ).read(licenseServiceProvider);
+
+      expect((await restarted.currentStatus(askServer: false)).remaining, const Duration(days: 13));
+    });
+  });
+
+  test('an extension from the server is carried even when the server sends no clock', () async {
+    final wall = FixedClock(DateTime.utc(2026, 1, 1));
+    final mono = FakeMonotonicClock();
+    var extended = false;
+    final container = buildContainer(
+      clock: wall,
+      mono: mono,
+      licenseClient: MockClient((request) async {
+        if (request.url.queryParameters['action'] == 'activate') {
+          return http.Response(
+            jsonEncode({'success': true, 'activation_token': 'a' * 64, 'valid_until': '2026-01-31 00:00:00'}),
+            200,
+          );
+        }
+        return http.Response(
+          jsonEncode({'success': true, 'valid': true, 'valid_until': extended ? '2026-03-02 00:00:00' : '2026-01-31 00:00:00'}),
+          200,
+        );
+      }),
+    );
+    final service = container.read(licenseServiceProvider);
+    await service.activate('CODE1');
+    wall.advance(const Duration(days: 10));
+    mono.advance(const Duration(days: 10));
+
+    await service.backgroundVerify();
+    expect((await service.currentStatus(askServer: false)).remaining, const Duration(days: 20), reason: 'a routine check with no change leaves the count alone');
+
+    extended = true;
+    await service.backgroundVerify();
+
+    expect((await service.currentStatus(askServer: false)).remaining, const Duration(days: 50));
+  });
+
+  test('a device saved before counting existed starts its count from the saved end date', () async {
+    final wall = FixedClock(DateTime.utc(2026, 1, 15));
+    final container = buildContainer(
+      clock: wall,
+      mono: FakeMonotonicClock(),
+      licenseClient: MockClient((request) async => http.Response('{}', 500)),
+    );
+    final storage = container.read(secureStorageProvider);
+    await storage.write(key: 'nexapos.license.activationToken', value: 'a' * 64);
+    await storage.write(key: 'nexapos.license.validUntil', value: DateTime.utc(2026, 1, 31).toIso8601String());
+    final service = container.read(licenseServiceProvider);
+
+    expect(await service.hasValidCachedLicense(), isTrue);
+    expect((await service.currentStatus(askServer: false)).remaining, const Duration(days: 16));
   });
 
   test('a small clock adjustment within tolerance is not treated as a rollback attempt', () async {
@@ -226,29 +449,6 @@ void main() {
 
     clock.set(DateTime.utc(2026, 1, 5)); // rolled back, but there's no deadline to protect
 
-    expect(await service.hasValidCachedLicense(), isTrue);
-  });
-
-  test('once real time genuinely catches back up past the rollback watermark, the license is trusted again', () async {
-    final clock = FixedClock(DateTime.utc(2026, 1, 1));
-    final container = buildContainer(
-      clock: clock,
-      licenseClient: MockClient((request) async {
-        return http.Response(
-          jsonEncode({'success': true, 'activation_token': 'a' * 64, 'valid_until': '2026-06-01 00:00:00'}),
-          200,
-        );
-      }),
-    );
-    final service = container.read(licenseServiceProvider);
-    await service.activate('CODE1');
-    clock.set(DateTime.utc(2026, 3, 1)); // watermark advances to here
-    await service.hasValidCachedLicense();
-
-    clock.set(DateTime.utc(2026, 2, 1)); // rolled back - flagged
-    expect(await service.hasValidCachedLicense(), isFalse);
-
-    clock.set(DateTime.utc(2026, 3, 15)); // genuinely past the old watermark again, still before valid_until
     expect(await service.hasValidCachedLicense(), isTrue);
   });
 
@@ -537,7 +737,7 @@ void main() {
       expect((await service.endedLicense())!.reason, LicenseEndReason.revoked);
     });
 
-    test('a rolled-back clock is recorded as that, never as a false "expired"', () async {
+    test('a rolled-back clock neither ends the license nor is reported as an ended one', () async {
       await activate(until: '2026-04-01 00:00:00');
       clock.set(DateTime.utc(2026, 3, 15));
       await service.hasValidCachedLicense(); // the device sees March 15th...
@@ -545,9 +745,9 @@ void main() {
 
       await service.backgroundVerify();
 
-      final end = await service.endedLicense();
-      expect(end!.reason, LicenseEndReason.clockSetBack);
-      expect(end.validUntil, DateTime.utc(2026, 4, 1));
+      expect(await service.endedLicense(), isNull);
+      expect(await storedToken(), isNotNull);
+      expect(await service.hasValidCachedLicense(), isTrue);
     });
 
     test('an expired license is already explained BEFORE the background check clears it, and nothing changes', () async {

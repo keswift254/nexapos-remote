@@ -129,16 +129,6 @@ void main() {
     await close(tester);
   });
 
-  testWidgets('a set-back clock is explained as that, not as an expired license', (tester) async {
-    await openActivationScreen(tester, end: const LicenseEnd(reason: LicenseEndReason.clockSetBack));
-
-    expect(find.text("This device's date or time looks wrong"), findsOneWidget);
-    expect(find.textContaining('Correct the date and time'), findsOneWidget);
-    expect(find.text('Your license has expired'), findsNothing);
-
-    await close(tester);
-  });
-
   testWidgets('the notice appears by itself when the app locks while this screen is showing', (tester) async {
     await openActivationScreen(tester);
     expect(find.textContaining('Your license'), findsNothing);
