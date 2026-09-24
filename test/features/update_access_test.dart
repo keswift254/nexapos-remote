@@ -89,6 +89,9 @@ void main() {
         expect(find.text('Payment Settings'), findsNothing);
         expect(find.text('Device Sync'), findsNothing);
         expect(find.text('Backup'), findsNothing);
+        expect(find.text('Region and Time'), findsNothing);
+      } else {
+        expect(find.text('Region and Time'), findsOneWidget);
       }
       // Relative, not absolute, from here on - automatic background
       // checks (dashboard load, app startup) already happened above and
@@ -106,7 +109,7 @@ void main() {
       expect(updates.checks, checksBeforeSecondTap + 1);
       expect(updates.installs, 0);
       if (role != UserRole.admin) {
-        for (final route in ['/users', '/device-sync', '/payment-settings', '/business-settings']) {
+        for (final route in ['/users', '/device-sync', '/payment-settings', '/business-settings', '/region-time']) {
           router.go(route);
           await tester.pumpAndSettle();
           expect(router.routeInformationProvider.value.uri.path, '/');

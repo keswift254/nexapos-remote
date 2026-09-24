@@ -55,6 +55,9 @@ void main() {
         find.widgetWithText(TextFormField, 'Confirm password'),
         'ownerpass',
       );
+      await tester.ensureVisible(
+        find.widgetWithText(FilledButton, 'Create admin account'),
+      );
       await tester.tap(
         find.widgetWithText(FilledButton, 'Create admin account'),
       );

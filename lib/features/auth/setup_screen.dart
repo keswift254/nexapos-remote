@@ -1,8 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../domain/entities/user_role.dart';
+import '../../domain/region/regions.dart';
 import '../../domain/services/auth_service.dart';
+import '../../domain/services/clock_health_service.dart';
+import '../../domain/services/region_settings_service.dart';
 import '../../domain/services/session_service.dart';
+import '../region/region_picker.dart';
 
 /// Shown once, on first launch, when no users exist yet. Unlike PHP's
 /// install SQL (which seeds a known admin@pos.local/admin123 row), a
@@ -23,6 +29,16 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
   final _confirmController = TextEditingController();
   bool _submitting = false;
   String? _error;
+
+  /// Where the shop is. Starts as a guess from the time zone this device is
+  /// already set to (Kenya when nothing matches), which the person confirms or
+  /// changes before creating the account.
+  late RegionSettings _region = _guessRegion();
+
+  RegionSettings _guessRegion() {
+    final guess = suggestRegion(ref.read(deviceUtcOffsetProvider)());
+    return RegionSettings(region: guess.region, zone: guess.zone);
+  }
 
   @override
   void dispose() {
@@ -54,6 +70,15 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
 
     await result.when(
       ok: (_) async {
+        // Best effort, and deliberately not awaited: remembering the region
+        // must never delay or block the account being used - it can be set
+        // later under Settings > Region and Time.
+        unawaited(
+          ref
+              .read(regionSettingsProvider.notifier)
+              .save(_region)
+              .catchError((Object _) {}),
+        );
         final loginResult = await ref.read(sessionProvider.notifier).login(
               _usernameController.text.trim(),
               _passwordController.text,
@@ -115,6 +140,17 @@ class _SetupScreenState extends ConsumerState<SetupScreen> {
                     controller: _confirmController,
                     decoration: const InputDecoration(labelText: 'Confirm password'),
                     obscureText: true,
+                  ),
+                  const SizedBox(height: 24),
+                  Text("Your shop's region", style: Theme.of(context).textTheme.titleSmall),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'NexaPOS uses this to check that this device shows your local time.',
+                  ),
+                  const SizedBox(height: 8),
+                  RegionPicker(
+                    selected: _region,
+                    onChanged: (value) => setState(() => _region = value),
                   ),
                   if (_error != null) ...[
                     const SizedBox(height: 12),

@@ -1,6 +1,7 @@
 package com.nexapos.nexapos_mobile
 
 import android.content.Intent
+import android.provider.Settings
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -24,8 +25,21 @@ class MainActivity : FlutterFragmentActivity() {
         // a delta update, instead of always downloading the whole new APK.
         appInfoChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.nexapos/app_info")
         appInfoChannel?.setMethodCallHandler { call, result ->
-            if (call.method == "getApkPath") result.success(applicationInfo.sourceDir)
-            else result.notImplemented()
+            when (call.method) {
+                "getApkPath" -> result.success(applicationInfo.sourceDir)
+                // An app cannot change the clock, but it can open the system's
+                // Date & time screen for the person to do it (Settings > Region
+                // and Time in NexaPOS). False when this device has no such screen.
+                "openDateSettings" -> {
+                    try {
+                        startActivity(Intent(Settings.ACTION_DATE_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.success(false)
+                    }
+                }
+                else -> result.notImplemented()
+            }
         }
         downloadChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.nexapos/download_service")
         downloadChannel?.setMethodCallHandler { call, result ->

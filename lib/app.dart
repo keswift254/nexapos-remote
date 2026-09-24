@@ -11,6 +11,7 @@ import 'domain/services/session_service.dart';
 import 'domain/services/sync_service.dart';
 import 'domain/services/lan_sync_service.dart';
 import 'domain/services/license_service.dart';
+import 'domain/services/clock_health_service.dart';
 import 'domain/entities/user_role.dart';
 import 'domain/repositories/user_repository.dart';
 import 'data/repositories/user_repository_impl.dart';
@@ -34,6 +35,7 @@ import 'features/settings/device_management_screen.dart'
     show ConnectedDevicesEntryScreen;
 import 'features/settings/device_sync_screen.dart';
 import 'features/settings/license_screen.dart';
+import 'features/settings/region_time_screen.dart';
 import 'features/settings/update_screen.dart';
 import 'features/expenses/expenses_screen.dart';
 import 'features/reports/reports_screen.dart';
@@ -141,6 +143,7 @@ Future<String?> _redirectOrThrow(Ref ref, String location) async {
           location == '/business-settings' ||
           location == '/device-sync' ||
           location == '/connected-devices' ||
+          location == '/region-time' ||
           location == '/backup') &&
       user.role != UserRole.admin) {
     return '/';
@@ -213,6 +216,10 @@ GoRouter router(Ref ref) {
       GoRoute(
         path: '/license',
         builder: (context, state) => const LicenseScreen(),
+      ),
+      GoRoute(
+        path: '/region-time',
+        builder: (context, state) => const RegionTimeScreen(),
       ),
       GoRoute(
         path: '/update',
@@ -407,6 +414,12 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
     _maintaining = true;
     try {
       await ref.read(updateAvailabilityProvider.notifier).check();
+      // Throttled inside (every 30 minutes, sooner after a failed try), so this
+      // is cheap on most ticks. Best-effort: a clock check must never get in
+      // the way of the update check or the backup that follow it.
+      try {
+        await ref.read(clockHealthProvider.notifier).check();
+      } catch (_) {}
       if (ref.read(sessionProvider) != null) {
         final newBackup = await ref
             .read(automaticBackupServiceProvider)

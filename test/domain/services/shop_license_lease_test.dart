@@ -136,6 +136,20 @@ void main() {
       expect(await service.hasAppAccess(), isTrue);
     });
 
+    test('a deliberate correction of the device date does not shorten the shop license', () async {
+      await joinAndFollow(const Duration(days: 180));
+      pass(const Duration(days: 5));
+
+      await service.withClockCorrection(() async {
+        wall.advance(const Duration(days: 200)); // the wrong date is put right
+        mono.advance(const Duration(seconds: 20));
+        expect(await service.hasAppAccess(), isTrue, reason: 'stands still while the correction runs');
+      });
+
+      expect((await service.currentLease())!.remaining, const Duration(days: 175) - const Duration(seconds: 20));
+      expect(await service.hasAppAccess(), isTrue);
+    });
+
     test('setting the date far forward is undone by putting it right', () async {
       await joinAndFollow(const Duration(days: 10));
       pass(const Duration(days: 1));

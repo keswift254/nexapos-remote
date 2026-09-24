@@ -185,6 +185,62 @@ class LicenseService {
   );
   Duration? _lastOwnWrite;
 
+  // While a deliberate change of the device clock is under way (see
+  // [withClockCorrection]) both counts stand still, at what they were when it
+  // began.
+  bool _clockCorrection = false;
+  LicenseLease? _frozenOwn;
+  LicenseLease? _frozenLease;
+
+  /// Runs [correction] - a deliberate, verified change of the device's date
+  /// and time (see WindowsTimeFixService) - without that change being mistaken
+  /// for time passing. The countdowns cannot tell "the date was corrected" from
+  /// "the date was tampered with", and a correction that moves the clock forward
+  /// would otherwise be charged to the license as if that time had gone by.
+  /// So they stand still while [correction] runs and are re-anchored to the new
+  /// clock afterwards, charged only for the time [correction] really took, as
+  /// the monotonic clock (which a date change cannot touch) measured it.
+  Future<T> withClockCorrection<T>(Future<T> Function() correction) async {
+    if (_clockCorrection) return correction();
+    _frozenOwn = await _advanceOwn();
+    _frozenLease = await _advanceLease();
+    final monotonic = _ref.read(monotonicClockProvider);
+    final startedAt = monotonic.elapsed();
+    _clockCorrection = true;
+    try {
+      return await correction();
+    } finally {
+      _clockCorrection = false;
+      final took = monotonic.elapsed() - startedAt;
+      final wall = _ref.read(clockProvider).now();
+      LicenseLease reanchored(LicenseLease held) =>
+          held.neverExpires || held.isExpired
+          ? held.copyWith(accountedAt: wall)
+          : held.copyWith(
+              remaining: _atLeastZero(held.remaining - took),
+              accountedAt: wall,
+            );
+      final own = _frozenOwn;
+      if (own != null) {
+        final next = reanchored(own);
+        await _writeOwn(next);
+        _ownCountdown
+          ..reset()
+          ..advance(next);
+      }
+      final lease = _frozenLease;
+      if (lease != null) {
+        final next = reanchored(lease);
+        await _writeLease(next);
+        _leaseCountdown
+          ..reset()
+          ..advance(next);
+      }
+      _frozenOwn = null;
+      _frozenLease = null;
+    }
+  }
+
   /// A received lease replaces the one already held only when it has more
   /// time left by at least this much - shared counts differ by seconds, and
   /// that must not cause a rewrite on every exchange.
@@ -281,6 +337,7 @@ class LicenseService {
   /// few seconds - the count is rebuilt from what is saved, so a crash costs
   /// nothing but the last few seconds' rounding.
   Future<LicenseLease?> _advanceLease() async {
+    if (_clockCorrection) return _frozenLease;
     final saved = await _readLease();
     if (saved == null) return null;
     final advanced = _leaseCountdown.advance(saved);
@@ -801,6 +858,7 @@ class LicenseService {
     final storage = _ref.read(secureStorageProvider);
     final token = await storage.read(key: _tokenKey);
     if (token == null || token.isEmpty) return null;
+    if (_clockCorrection) return _frozenOwn;
     var saved = await _readOwn();
     if (saved == null) {
       final validUntil = await _savedValidUntil(storage);

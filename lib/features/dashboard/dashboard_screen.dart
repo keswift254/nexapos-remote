@@ -19,6 +19,7 @@ import '../../domain/services/reports_service.dart';
 import '../../domain/services/session_service.dart';
 import '../../domain/services/update_service.dart';
 import '../checkout/cart_notifier.dart';
+import '../settings/clock_health_banner.dart';
 import 'product_search_dialog.dart';
 
 part 'dashboard_screen.g.dart';
@@ -235,6 +236,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                     value: '/backup',
                     child: Text('Backup'),
                   ),
+                if (user.role == UserRole.admin)
+                  const PopupMenuItem(
+                    value: '/region-time',
+                    child: Text('Region and Time'),
+                  ),
                 const PopupMenuItem(
                   value: '/license',
                   child: Text('License'),
@@ -334,6 +340,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                       ),
                     ),
                   ],
+                  const ClockHealthBanner(),
                   if (homeScreenInstall.shouldOffer) ...[
                     const SizedBox(height: 12),
                     Card(

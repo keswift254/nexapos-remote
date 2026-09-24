@@ -74,6 +74,7 @@ void main() {
       find.widgetWithText(TextFormField, 'Confirm password'),
       'secret123',
     );
+    await tester.ensureVisible(find.widgetWithText(FilledButton, 'Create admin account'));
     await tester.tap(find.widgetWithText(FilledButton, 'Create admin account'));
     await tester.pumpAndSettle();
 

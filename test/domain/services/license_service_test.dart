@@ -330,6 +330,46 @@ void main() {
       expect(await service.hasValidCachedLicense(), isFalse);
     });
 
+    test('a deliberate correction of the device date, forward, is not charged to the license', () async {
+      pass(const Duration(days: 10));
+
+      await service.withClockCorrection(() async {
+        wall.set(wall.now().add(const Duration(days: 90))); // the wrong date is put right
+        mono.advance(const Duration(seconds: 30));
+        expect(await service.hasValidCachedLicense(), isTrue, reason: 'the count stands still meanwhile');
+      });
+
+      expect(await remaining(), const Duration(days: 20) - const Duration(seconds: 30));
+      expect(await service.hasValidCachedLicense(), isTrue);
+      pass(const Duration(days: 1)); // and it counts on normally from the new date
+      expect(await remaining(), const Duration(days: 19) - const Duration(seconds: 30));
+    });
+
+    test('a deliberate correction of the device date, backward, gives no time back either', () async {
+      pass(const Duration(days: 10));
+
+      await service.withClockCorrection(() async {
+        wall.set(wall.now().subtract(const Duration(days: 90)));
+        mono.advance(const Duration(seconds: 30));
+      });
+
+      expect(await remaining(), const Duration(days: 20) - const Duration(seconds: 30));
+    });
+
+    test('the count is put back in order even when the correction fails', () async {
+      pass(const Duration(days: 10));
+
+      await expectLater(
+        service.withClockCorrection(() async {
+          wall.set(wall.now().add(const Duration(days: 90)));
+          throw StateError('the helper failed');
+        }),
+        throwsStateError,
+      );
+
+      expect(await remaining(), const Duration(days: 20));
+    });
+
     test('a clock set back while the app is closed is charged a day, not given as free time', () async {
       pass(const Duration(days: 10));
       expect(await remaining(), const Duration(days: 20)); // saved

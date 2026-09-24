@@ -15,6 +15,7 @@ Future<void> _createAdminAndSignIn(WidgetTester tester) async {
   await tester.enterText(find.widgetWithText(TextFormField, 'Username'), 'owner');
   await tester.enterText(find.widgetWithText(TextFormField, 'Password'), 'ownerpass');
   await tester.enterText(find.widgetWithText(TextFormField, 'Confirm password'), 'ownerpass');
+  await tester.ensureVisible(find.widgetWithText(FilledButton, 'Create admin account'));
   await tester.tap(find.widgetWithText(FilledButton, 'Create admin account'));
   await tester.pumpAndSettle();
 }

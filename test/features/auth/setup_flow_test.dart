@@ -7,8 +7,12 @@ import 'package:nexapos_mobile/app.dart';
 import 'package:nexapos_mobile/core/providers.dart';
 import 'package:nexapos_mobile/data/local/database.dart';
 import 'package:nexapos_mobile/domain/entities/paystack_credentials.dart';
+import 'package:nexapos_mobile/domain/services/clock_health_service.dart';
 import 'package:nexapos_mobile/domain/services/license_service.dart';
+import 'package:nexapos_mobile/domain/services/region_settings_service.dart';
 import 'package:nexapos_mobile/features/settings/payment_settings_screen.dart' show currentPaymentCredentialsProvider;
+
+import '../../support/fake_secure_storage.dart';
 
 const _testCredentials =
     PaystackCredentials(baseUrl: 'https://test.example/index.php', apiKey: 'test-api-key', currency: 'KES', defaultEmail: '');
@@ -42,6 +46,7 @@ void main() {
     await tester.enterText(find.widgetWithText(TextFormField, 'Password'), 'secret123');
     await tester.enterText(find.widgetWithText(TextFormField, 'Confirm password'), 'secret123');
 
+    await tester.ensureVisible(find.widgetWithText(FilledButton, 'Create admin account'));
     await tester.tap(find.widgetWithText(FilledButton, 'Create admin account'));
     await tester.pumpAndSettle();
 
@@ -67,6 +72,46 @@ void main() {
     expect(find.text('Felix Owner'), findsOneWidget);
   });
 
+  testWidgets("setup asks for the shop's region, suggests it from the device, and remembers what was confirmed",
+      (tester) async {
+    installFakeSecureStorage();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          appDatabaseProvider.overrideWith((ref) {
+            final db = AppDatabase(NativeDatabase.memory());
+            ref.onDispose(db.close);
+            return db;
+          }),
+          hasCachedLicenseProvider.overrideWith((ref) async => true),
+          currentPaymentCredentialsProvider.overrideWith((ref) async => _testCredentials),
+          // A device set to India time.
+          deviceUtcOffsetProvider.overrideWithValue(() => const Duration(hours: 5, minutes: 30)),
+        ],
+        child: const NexaPosApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text("Your shop's region"), findsOneWidget);
+    expect(find.text('India'), findsOneWidget, reason: "suggested from the device's own time zone");
+    expect(find.text('India Standard Time (UTC+05:30)'), findsOneWidget);
+
+    await tester.enterText(find.widgetWithText(TextFormField, 'Your name'), 'Asha Owner');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Username'), 'asha');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Password'), 'secret123');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Confirm password'), 'secret123');
+    await tester.ensureVisible(find.widgetWithText(FilledButton, 'Create admin account'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Create admin account'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Set up NexaPOS'), findsNothing);
+    final container = ProviderScope.containerOf(tester.element(find.byType(NexaPosApp)));
+    final saved = await tester.runAsync(() => container.read(regionSettingsServiceProvider).load());
+    expect(saved!.region.code, 'IN');
+    expect(saved.zone.windowsId, 'India Standard Time');
+  });
+
   testWidgets('wrong password on an existing account is rejected with a clear message',
       (tester) async {
     await tester.pumpWidget(
@@ -89,6 +134,7 @@ void main() {
     await tester.enterText(find.widgetWithText(TextFormField, 'Username'), 'admin');
     await tester.enterText(find.widgetWithText(TextFormField, 'Password'), 'correcthorse');
     await tester.enterText(find.widgetWithText(TextFormField, 'Confirm password'), 'correcthorse');
+    await tester.ensureVisible(find.widgetWithText(FilledButton, 'Create admin account'));
     await tester.tap(find.widgetWithText(FilledButton, 'Create admin account'));
     await tester.pumpAndSettle();
 
