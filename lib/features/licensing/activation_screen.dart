@@ -98,6 +98,78 @@ class _LicenseEndedBannerState extends ConsumerState<_LicenseEndedBanner> {
       ),
     };
 
+    return _NoticeBox(color: color, icon: icon, title: title, body: body);
+  }
+}
+
+/// For a device that joined a shop and got locked out only because it has not
+/// been able to confirm its shop access online lately. The activation screen
+/// it lands on otherwise looks like a fresh install; this says what is
+/// actually going on, and that nothing has been lost. Nothing to tap: the
+/// app re-checks by itself every few seconds while it runs, and leaves this
+/// screen on its own once a check gets through.
+class _JoinedAccessBanner extends ConsumerStatefulWidget {
+  const _JoinedAccessBanner();
+
+  @override
+  ConsumerState<_JoinedAccessBanner> createState() =>
+      _JoinedAccessBannerState();
+}
+
+class _JoinedAccessBannerState extends ConsumerState<_JoinedAccessBanner> {
+  bool _needsInternet = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    var needsInternet = false;
+    try {
+      needsInternet = await ref
+          .read(licenseServiceProvider)
+          .joinedShopNeedsInternet();
+    } catch (_) {
+      // No notice is better than a broken activation screen.
+    }
+    if (!mounted) return;
+    setState(() => _needsInternet = needsInternet);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref.listen(licenseChangeSignalProvider, (_, _) => _load());
+    if (!_needsInternet) return const SizedBox.shrink();
+    return _NoticeBox(
+      color: Theme.of(context).colorScheme.primary,
+      icon: Icons.wifi_off,
+      title: 'Connect to the internet to confirm your shop access',
+      body:
+          'Your data is safe. This device has to confirm its shop access '
+          'online at least once every ${joinedMembershipGrace.inHours} hours. '
+          'It reopens by itself as soon as it is connected - there is '
+          'nothing to enter.',
+    );
+  }
+}
+
+class _NoticeBox extends StatelessWidget {
+  const _NoticeBox({
+    required this.color,
+    required this.icon,
+    required this.title,
+    required this.body,
+  });
+
+  final Color color;
+  final IconData icon;
+  final String title;
+  final String body;
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
       margin: const EdgeInsets.only(bottom: 24),
       padding: const EdgeInsets.all(16),
@@ -210,6 +282,7 @@ class _ActivationScreenState extends ConsumerState<ActivationScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const _LicenseEndedBanner(),
+                  const _JoinedAccessBanner(),
                   Icon(
                     Icons.vpn_key,
                     size: 48,

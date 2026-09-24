@@ -200,6 +200,21 @@ class LicenseService {
         await _ref.read(syncMetadataProvider).deviceId();
   }
 
+  /// True for a device that joined a shop and is locked out right now only
+  /// because it has not been able to confirm that membership online (more than
+  /// [joinedMembershipGrace] ago, or its clock reads earlier than the last
+  /// confirmation). Nothing was removed: its data is intact and it reopens by
+  /// itself the next time a check gets through, so the activation screen tells
+  /// it to get online instead of looking like a fresh install. Deliberately
+  /// derived from [hasAppAccess], the very rule that locked it, so this notice
+  /// can never disagree with the lock. A confirmed removal is a different
+  /// thing (the membership is gone, [membershipBlocked]) and gets no notice.
+  Future<bool> joinedShopNeedsInternet() async {
+    final membership = await _membership();
+    if (membership == null || membership['blocked'] == true) return false;
+    return !await hasAppAccess();
+  }
+
   /// Called only after a successful invite redemption, never registration alone.
   Future<void> confirmJoinedMembership() async {
     if (await membershipBlocked) {

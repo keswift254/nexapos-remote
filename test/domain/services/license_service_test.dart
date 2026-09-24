@@ -577,4 +577,88 @@ void main() {
       expect(await service.endedLicense(), isNull);
     });
   });
+
+  group('joinedShopNeedsInternet (activation-screen notice for a joined device)', () {
+    late FixedClock clock;
+    late ProviderContainer container;
+    late LicenseService service;
+
+    setUp(() {
+      clock = FixedClock(DateTime.utc(2026, 1, 10, 12));
+      container = buildContainer(
+        clock: clock,
+        licenseClient: MockClient((request) async => http.Response(
+          jsonEncode({'success': true, 'activation_token': 'a' * 64, 'valid_until': null}),
+          200,
+        )),
+      );
+      service = container.read(licenseServiceProvider);
+    });
+
+    Future<void> joined({required DateTime verifiedAt, String? deviceId, bool blocked = false}) async {
+      await container.read(secureStorageProvider).write(
+        key: 'nexapos.license.shopMembership',
+        value: jsonEncode({
+          'shopId': 7,
+          'deviceId': deviceId ?? await container.read(syncMetadataProvider).deviceId(),
+          'verifiedAt': verifiedAt.toIso8601String(),
+          'blocked': blocked,
+        }),
+      );
+    }
+
+    test('a device that never joined a shop has nothing to be told', () async {
+      expect(await service.joinedShopNeedsInternet(), isFalse);
+    });
+
+    test('a membership confirmed within the last 24 hours is fine - the device still has access', () async {
+      await joined(verifiedAt: clock.now().subtract(const Duration(hours: 23, minutes: 59)));
+
+      expect(await service.hasAppAccess(), isTrue);
+      expect(await service.joinedShopNeedsInternet(), isFalse);
+    });
+
+    test('once 24 hours have passed without a confirmation it needs the internet, and that is exactly when it locks', () async {
+      await joined(verifiedAt: clock.now().subtract(const Duration(hours: 24)));
+
+      expect(await service.hasAppAccess(), isFalse);
+      expect(await service.joinedShopNeedsInternet(), isTrue);
+    });
+
+    test('days without a confirmation: still just "needs the internet" - the record is kept', () async {
+      await joined(verifiedAt: clock.now().subtract(const Duration(days: 3)));
+
+      expect(await service.joinedShopNeedsInternet(), isTrue);
+      expect(await container.read(secureStorageProvider).read(key: 'nexapos.license.shopMembership'), isNotNull,
+          reason: 'a network failure must never remove the membership');
+    });
+
+    test('a confirmed removal is not the same thing and gets no "connect" notice', () async {
+      await joined(verifiedAt: clock.now().subtract(const Duration(days: 3)), blocked: true);
+
+      expect(await service.joinedShopNeedsInternet(), isFalse);
+    });
+
+    test('a clock set back before the last confirmation also needs a fresh online check', () async {
+      await joined(verifiedAt: clock.now().add(const Duration(hours: 1)));
+
+      expect(await service.hasAppAccess(), isFalse);
+      expect(await service.joinedShopNeedsInternet(), isTrue);
+    });
+
+    test('a device that also holds its own valid license is not locked, so no notice', () async {
+      await service.activate('CODE1'); // never expires
+      await joined(verifiedAt: clock.now().subtract(const Duration(days: 3)));
+
+      expect(await service.hasAppAccess(), isTrue);
+      expect(await service.joinedShopNeedsInternet(), isFalse);
+    });
+
+    test('a membership recorded for a different device needs a fresh online check too', () async {
+      await joined(verifiedAt: clock.now(), deviceId: 'some-other-device');
+
+      expect(await service.hasAppAccess(), isFalse);
+      expect(await service.joinedShopNeedsInternet(), isTrue);
+    });
+  });
 }
