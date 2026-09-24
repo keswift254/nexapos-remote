@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/secure_storage_provider.dart';
 import '../../data/payments/platform_onboarding_gateway.dart';
 import 'lan_sync_service.dart';
+import 'license_service.dart';
 import 'paystack_credentials_service.dart';
 import 'sync_service.dart';
 
@@ -228,6 +229,15 @@ class NativeLanSyncService implements LanSyncService {
           .map((item) => LanSyncChange.fromJson(item.cast<String, dynamic>()))
           .toList();
       await _ref.read(syncServiceProvider).applyLanChanges(changes);
+      // The peer may also be handing over the shop's license time (this
+      // device is a joined one and the peer is the main device, or another
+      // joined device that already follows it). Never allowed to break sync.
+      try {
+        final offer = LeaseOffer.fromJson(response['lease']);
+        if (offer != null) {
+          await _ref.read(licenseServiceProvider).acceptLease(offer);
+        }
+      } catch (_) {}
     } finally {
       await socket.close();
     }
@@ -261,11 +271,16 @@ class NativeLanSyncService implements LanSyncService {
       final changes = await _ref
           .read(syncServiceProvider)
           .exportLanChanges(known);
+      LeaseOffer? lease;
+      try {
+        lease = await _ref.read(licenseServiceProvider).leaseToShare();
+      } catch (_) {}
       final response = await _encrypt({
         'type': 'changes',
         'sender': credentials.deviceId,
         'timestamp': DateTime.now().toUtc().millisecondsSinceEpoch,
         'changes': changes.map((change) => change.toJson()).toList(),
+        if (lease != null) 'lease': lease.toJson(),
       }, credentials);
       socket.add(utf8.encode('${jsonEncode(response)}\n'));
       await socket.flush();

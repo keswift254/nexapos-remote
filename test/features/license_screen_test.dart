@@ -47,6 +47,8 @@ void main() {
     String? savedValidUntil,
     bool withToken = true,
     Map<String, dynamic>? membership,
+    Duration? shopLicenseLeft,
+    bool shopLicenseNeverExpires = false,
   }) async {
     installFakeSecureStorage();
     clock = FixedClock(DateTime.utc(2026, 1, 1));
@@ -65,6 +67,16 @@ void main() {
     }
     if (membership != null) {
       await storage.write(key: _membershipKey, value: jsonEncode(membership));
+    }
+    if (shopLicenseLeft != null || shopLicenseNeverExpires) {
+      await storage.write(
+        key: 'nexapos.license.lease',
+        value: jsonEncode({
+          'neverExpires': shopLicenseNeverExpires,
+          'remainingMs': (shopLicenseLeft ?? Duration.zero).inMilliseconds,
+          'accountedAt': clock.now().toIso8601String(),
+        }),
+      );
     }
     await tester.pumpWidget(UncontrolledProviderScope(
       container: container,
@@ -183,6 +195,79 @@ void main() {
     expect(find.text('04'), findsOneWidget);
 
     await closeScreen(tester);
+  });
+
+  group('a joined device following the shop\'s license', () {
+    final joined = {
+      'shopId': 7,
+      'deviceId': 'd',
+      // Confirmed online long ago - irrelevant once it follows the shop's license.
+      'verifiedAt': DateTime.utc(2025, 6, 1).toIso8601String(),
+      'blocked': false,
+    };
+
+    testWidgets('sees the shop\'s license countdown, not the 24-hour internet rule', (tester) async {
+      serverAnswer = () => throw StateError('a joined device must not ask the license server');
+      // A little over 30 days, 4 hours, 5 seconds: the slack keeps the seconds
+      // digit steady while the test's real stopwatch runs a few milliseconds.
+      await openLicenseScreen(
+        tester,
+        withToken: false,
+        membership: joined,
+        shopLicenseLeft: const Duration(days: 30, hours: 4, seconds: 5, milliseconds: 900),
+      );
+
+      expect(find.text('Joined device'), findsOneWidget);
+      expect(find.text('Shop license time remaining'), findsOneWidget);
+      expect(find.text('30'), findsOneWidget);
+      expect(find.text('04'), findsOneWidget);
+      expect(find.text('05'), findsOneWidget);
+      expect(find.textContaining('does not depend on this device'), findsOneWidget);
+      expect(find.textContaining('every 24 hours'), findsNothing);
+
+      await closeScreen(tester);
+    });
+
+    testWidgets('the countdown on screen ignores the device\'s date being changed', (tester) async {
+      serverAnswer = () => throw StateError('a joined device must not ask the license server');
+      await openLicenseScreen(
+        tester,
+        withToken: false,
+        membership: joined,
+        shopLicenseLeft: const Duration(days: 30, hours: 4, seconds: 5, milliseconds: 900),
+      );
+      expect(find.text('30'), findsOneWidget);
+
+      clock.advance(const Duration(days: 400)); // the date is wound far forward
+      await tester.pump(const Duration(seconds: 1));
+
+      expect(find.text('30'), findsOneWidget);
+      expect(find.text('Joined device'), findsOneWidget, reason: 'and it has not flipped to expired');
+      expect(find.text('Expired'), findsNothing);
+
+      await closeScreen(tester);
+    });
+
+    testWidgets('a shop license that never expires says so', (tester) async {
+      serverAnswer = () => throw StateError('a joined device must not ask the license server');
+      await openLicenseScreen(tester, withToken: false, membership: joined, shopLicenseNeverExpires: true);
+
+      expect(find.textContaining('which never expires'), findsOneWidget);
+      expect(find.text('Shop license time remaining'), findsNothing);
+
+      await closeScreen(tester);
+    });
+
+    testWidgets('a shop license that has run out is shown as expired, with what to do', (tester) async {
+      serverAnswer = () => throw StateError('a joined device must not ask the license server');
+      await openLicenseScreen(tester, withToken: false, membership: joined, shopLicenseLeft: Duration.zero);
+
+      expect(find.text('Expired'), findsOneWidget);
+      expect(find.textContaining("The shop's license has run out"), findsOneWidget);
+      expect(find.textContaining('renew it'), findsOneWidget);
+
+      await closeScreen(tester);
+    });
   });
 
   testWidgets('shows this device\'s ID, for support and for unrevoking', (tester) async {

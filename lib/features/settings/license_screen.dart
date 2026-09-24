@@ -30,16 +30,46 @@ class _LicenseScreenState extends ConsumerState<LicenseScreen> {
   String? _deviceId;
   bool _checking = true;
   Timer? _ticker;
+  int _ticks = 0;
+
+  /// Time since [_status] was read. The shop-license countdown of a joined
+  /// device is drawn as "time left when read, minus this" - a stopwatch, so
+  /// changing the device's date cannot make the number on screen jump.
+  final Stopwatch _sinceRead = Stopwatch()..start();
+
+  void _setStatus(LicenseStatus status) {
+    _status = status;
+    _sinceRead
+      ..reset()
+      ..start();
+  }
 
   @override
   void initState() {
     super.initState();
-    // Re-reads the clock every second; the countdown itself is computed in
-    // build from the injected clock, never accumulated here.
+    // Redraws every second. An owner device's countdown is computed in build
+    // from the injected clock; a joined device's from [_sinceRead]. Every
+    // 15 seconds a joined device also re-reads what it holds, so a renewal
+    // received over the shop's network appears here without reopening.
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() {});
+      if (!mounted) return;
+      _ticks++;
+      if (_ticks % 15 == 0 && _status?.state == LicenseState.joined) {
+        unawaited(_reloadSaved());
+      }
+      setState(() {});
     });
     _load();
+  }
+
+  Future<void> _reloadSaved() async {
+    try {
+      final saved = await ref
+          .read(licenseServiceProvider)
+          .currentStatus(askServer: false);
+      if (!mounted) return;
+      setState(() => _setStatus(saved));
+    } catch (_) {}
   }
 
   @override
@@ -56,7 +86,7 @@ class _LicenseScreenState extends ConsumerState<LicenseScreen> {
       if (!mounted) return;
       setState(() {
         _deviceId = deviceId;
-        _status = saved;
+        _setStatus(saved);
         _checking = true;
       });
     } catch (_) {
@@ -75,7 +105,7 @@ class _LicenseScreenState extends ConsumerState<LicenseScreen> {
     }
     if (!mounted) return;
     setState(() {
-      _status = live ?? _status;
+      if (live != null) _setStatus(live);
       _checking = false;
     });
   }
@@ -102,6 +132,7 @@ class _LicenseScreenState extends ConsumerState<LicenseScreen> {
                 _StatusCard(
                   status: status,
                   now: ref.read(clockProvider).now(),
+                  sinceRead: _sinceRead.elapsed,
                 ),
                 const SizedBox(height: 12),
                 _SourceNote(status: status, checking: _checking),
@@ -116,10 +147,17 @@ class _LicenseScreenState extends ConsumerState<LicenseScreen> {
 }
 
 class _StatusCard extends StatelessWidget {
-  const _StatusCard({required this.status, required this.now});
+  const _StatusCard({
+    required this.status,
+    required this.now,
+    this.sinceRead = Duration.zero,
+  });
 
   final LicenseStatus status;
   final DateTime now;
+
+  /// How long ago [status] was read, by a clock nobody can change.
+  final Duration sinceRead;
 
   @override
   Widget build(BuildContext context) {
@@ -133,6 +171,18 @@ class _StatusCard extends StatelessWidget {
     if (state == LicenseState.active &&
         validUntil != null &&
         !validUntil.isAfter(now)) {
+      state = LicenseState.expired;
+    }
+    // A joined device following the shop's license: its time left is what it
+    // held when read, minus a stopwatch - never a date compared with the clock.
+    final followsShopLicense =
+        status.sharedRemaining != null || status.sharedNeverExpires;
+    final sharedLeft = status.sharedRemaining == null
+        ? null
+        : status.sharedRemaining! - sinceRead;
+    if (state == LicenseState.joined &&
+        sharedLeft != null &&
+        sharedLeft <= Duration.zero) {
       state = LicenseState.expired;
     }
 
@@ -189,7 +239,11 @@ class _StatusCard extends StatelessWidget {
       case LicenseState.expired:
         children.add(
           Text(
-            validUntil == null
+            followsShopLicense
+                ? "The shop's license has run out. Ask the shop owner to "
+                      'renew it - this device reopens by itself when it '
+                      'receives the renewal.'
+                : validUntil == null
                 ? 'This license has expired. Contact NexaPOS to renew it.'
                 : 'This license ran out on ${_formatDateTime(validUntil)}. '
                       'Contact NexaPOS to renew it.',
@@ -204,14 +258,39 @@ class _StatusCard extends StatelessWidget {
         );
       case LicenseState.joined:
         final verified = status.joinedVerifiedAt;
-        children.add(
-          const Text(
-            'This device has no license of its own - it uses the shop it '
-            'joined. It stays active as long as it can confirm with the shop '
-            'over the internet at least once every 24 hours.',
-          ),
-        );
-        if (verified != null) {
+        if (status.sharedNeverExpires) {
+          children.add(
+            const Text(
+              "This device follows the shop's license, which never expires. "
+              'It works with or without internet.',
+            ),
+          );
+        } else if (sharedLeft != null) {
+          children.addAll([
+            const Text(
+              'This device has no license of its own - it follows the '
+              "shop's license, received from the shop's main device. It works "
+              'with or without internet until that license runs out. The '
+              'countdown does not depend on this device\'s date and time.',
+            ),
+            const SizedBox(height: 16),
+            Text(
+              "Shop license time remaining",
+              style: theme.textTheme.labelLarge,
+            ),
+            const SizedBox(height: 8),
+            _Countdown(remaining: sharedLeft),
+          ]);
+        } else {
+          children.add(
+            const Text(
+              'This device has no license of its own - it uses the shop it '
+              'joined. It stays active as long as it can confirm with the shop '
+              'over the internet at least once every 24 hours.',
+            ),
+          );
+        }
+        if (!followsShopLicense && verified != null) {
           final deadline = verified.add(joinedMembershipGrace);
           children.add(const SizedBox(height: 16));
           if (deadline.isAfter(now)) {

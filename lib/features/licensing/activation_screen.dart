@@ -88,6 +88,15 @@ class _LicenseEndedBannerState extends ConsumerState<_LicenseEndedBanner> {
         scheme.error,
         Icons.block,
       ),
+      LicenseEndReason.shopLicenseExpired => (
+        "This shop's license has expired",
+        "This device follows the shop's license, and it has run out. Ask the "
+            'shop owner to renew it. This device reopens by itself as soon as '
+            "it receives the renewal - over the shop's network, or the "
+            'internet.',
+        Colors.orange.shade800,
+        Icons.event_busy,
+      ),
       LicenseEndReason.clockSetBack => (
         "This device's date or time looks wrong",
         'NexaPOS locked itself because the clock on this device was set '

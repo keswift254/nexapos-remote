@@ -6,15 +6,20 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../core/providers.dart';
 import '../../core/secure_storage_provider.dart';
 import '../../core/result.dart';
+import '../../core/utils/monotonic_clock.dart';
 import '../../data/licensing/license_gateway.dart';
 import '../../data/payments/platform_onboarding_gateway.dart';
 import '../../data/payments/platform_http_client.dart';
+import 'license_lease.dart';
 import 'paystack_credentials_service.dart';
 import 'session_service.dart';
 import 'sync_service.dart';
 
+export 'license_lease.dart' show LeaseOffer, LicenseLease;
+
 part 'license_service.g.dart';
 
+const _leaseKey = 'nexapos.license.lease';
 const _tokenKey = 'nexapos.license.activationToken';
 const _validUntilKey = 'nexapos.license.validUntil';
 const _lastSeenKey = 'nexapos.license.lastSeenAt';
@@ -83,9 +88,16 @@ class LicenseStatus {
     this.validUntil,
     this.joinedVerifiedAt,
     this.checkedWithServer = false,
+    this.sharedRemaining,
+    this.sharedNeverExpires = false,
   });
 
   final LicenseState state;
+
+  /// Joined devices only: time left on the shop's license, as received from
+  /// the shop's main device and counted down here. Null until one was received.
+  final Duration? sharedRemaining;
+  final bool sharedNeverExpires;
 
   /// End of the license window. Null while [state] is [LicenseState.active]
   /// means it never expires.
@@ -107,6 +119,8 @@ enum LicenseEndReason {
   /// This device's clock reads earlier than the device has already seen, so
   /// the license end date cannot be trusted (see the clock-rollback guard).
   clockSetBack,
+  /// A joined device: the license of the shop it follows ran out.
+  shopLicenseExpired,
 }
 
 /// Why the license this device used to hold no longer counts - what the
@@ -157,7 +171,19 @@ const joinedMembershipGrace = Duration(hours: 24);
 class LicenseService {
   final Ref _ref;
 
-  LicenseService(this._ref);
+  LicenseService(this._ref)
+    : _leaseCountdown = LeaseCountdown(
+        _ref.read(clockProvider),
+        _ref.read(monotonicClockProvider),
+      );
+
+  final LeaseCountdown _leaseCountdown;
+  Duration? _lastLeaseWrite;
+
+  /// A received lease replaces the one already held only when it has more
+  /// time left by at least this much - shared counts differ by seconds, and
+  /// that must not cause a rewrite on every exchange.
+  static const _leaseAdoptMargin = Duration(minutes: 1);
 
   Future<Map<String, dynamic>?> _membership() async {
     final raw = await _ref
@@ -187,6 +213,16 @@ class LicenseService {
     if (membership?['blocked'] == true) return false;
     if (await hasValidCachedLicense()) return true;
     if (membership == null) return false;
+    // A joined device that has been given the shop's license lives by it: it
+    // works, online or not, until that license runs out. It is only a device
+    // that never received one (its shop's main device is on an older version,
+    // or they have never been in touch) that still has to re-confirm online.
+    final lease = await _advanceLease();
+    if (lease != null) {
+      if (lease.isExpired) return false;
+      return membership['deviceId'] ==
+          await _ref.read(syncMetadataProvider).deviceId();
+    }
     final verified = DateTime.tryParse(
       membership['verifiedAt'] as String? ?? '',
     );
@@ -212,7 +248,134 @@ class LicenseService {
   Future<bool> joinedShopNeedsInternet() async {
     final membership = await _membership();
     if (membership == null || membership['blocked'] == true) return false;
+    // Following the shop's license, the only way to be locked is for that
+    // license to have run out - a different message, and no internet needed.
+    if (await _readLease() != null) return false;
     return !await hasAppAccess();
+  }
+
+  Future<LicenseLease?> _readLease() async {
+    final raw = await _ref.read(secureStorageProvider).read(key: _leaseKey);
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      return LicenseLease.fromJson(jsonDecode(raw));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _writeLease(LicenseLease lease) async {
+    _lastLeaseWrite = _ref.read(monotonicClockProvider).elapsed();
+    await _ref
+        .read(secureStorageProvider)
+        .write(key: _leaseKey, value: jsonEncode(lease.toJson()));
+  }
+
+  /// The lease this joined device follows, brought up to date with the present
+  /// (see [LeaseCountdown] for exactly how time is counted). Saved at most every
+  /// few seconds - the count is rebuilt from what is saved, so a crash costs
+  /// nothing but the last few seconds' rounding.
+  Future<LicenseLease?> _advanceLease() async {
+    final saved = await _readLease();
+    if (saved == null) return null;
+    final advanced = _leaseCountdown.advance(saved);
+    final last = _lastLeaseWrite;
+    final now = _ref.read(monotonicClockProvider).elapsed();
+    if (last == null ||
+        now - last >= const Duration(seconds: 5) ||
+        (advanced.isExpired && !saved.isExpired)) {
+      await _writeLease(advanced);
+    }
+    return advanced;
+  }
+
+  /// The shop's license as this device currently counts it, or null when this
+  /// device does not follow one. For the Settings screen.
+  Future<LicenseLease?> currentLease() => _advanceLease();
+
+  /// What to hand to another device of the same shop. The shop's main device
+  /// (the one holding the license) offers the time its own license has left;
+  /// a joined device passes on the lease it follows. Null when there is
+  /// nothing worth giving (no license, or an ended one).
+  Future<LeaseOffer?> leaseToShare() async {
+    final storage = _ref.read(secureStorageProvider);
+    final token = await storage.read(key: _tokenKey);
+    if (token != null && token.isNotEmpty) {
+      if (await _isExpired(storage)) return null;
+      final validUntil = await _savedValidUntil(storage);
+      if (validUntil == null) {
+        return const LeaseOffer(remaining: Duration.zero, neverExpires: true);
+      }
+      final left = validUntil.difference(_ref.read(clockProvider).now());
+      return left > Duration.zero ? LeaseOffer(remaining: left) : null;
+    }
+    final lease = await _advanceLease();
+    if (lease == null || lease.isExpired) return null;
+    return LeaseOffer(
+      remaining: lease.remaining,
+      neverExpires: lease.neverExpires,
+    );
+  }
+
+  /// Takes the license time another device of the shop offers. Only a joined
+  /// device follows a lease, and one holding a valid license of its own never
+  /// does. A lease is only ever replaced by one with MORE time left: a shop's
+  /// license can be extended but not shortened, so this both carries a renewal
+  /// to every device and wipes out whatever error a device's own counting has
+  /// picked up (the shop's main device is the reference). Returns whether the
+  /// offer was taken.
+  Future<bool> acceptLease(LeaseOffer offer) async {
+    final membership = await _membership();
+    if (membership == null || membership['blocked'] == true) return false;
+    if (await hasValidCachedLicense()) return false;
+    final current = await _advanceLease();
+    final better = current == null
+        ? true
+        : current.neverExpires
+        ? false
+        : offer.neverExpires ||
+              offer.remaining > current.remaining + _leaseAdoptMargin;
+    if (!better) return false;
+    final storage = _ref.read(secureStorageProvider);
+    final adopted = LicenseLease(
+      remaining: offer.remaining,
+      neverExpires: offer.neverExpires,
+      accountedAt: _ref.read(clockProvider).now(),
+    );
+    await _writeLease(adopted);
+    // Start counting from this very moment (rather than from the next check),
+    // so a date change in the seconds after receiving it is not mistaken for
+    // time the app was closed.
+    _leaseCountdown
+      ..reset()
+      ..advance(adopted);
+    // A renewal ends the "the shop's license expired" notice.
+    await storage.delete(key: _lastEndKey);
+    _notifyAccessChanged();
+    return true;
+  }
+
+  /// Once the shop's license has run out on a device that follows it, say so
+  /// once (the notice on the activation screen) and let the app re-check what
+  /// this device may open. Runs on the app's regular background check.
+  Future<void> _enforceLease() async {
+    final lease = await _advanceLease();
+    if (lease == null || !lease.isExpired) return;
+    final storage = _ref.read(secureStorageProvider);
+    final recorded = await storage.read(key: _lastEndKey);
+    if (recorded != null && recorded.contains(LicenseEndReason.shopLicenseExpired.name)) {
+      return;
+    }
+    await storage.write(
+      key: _lastEndKey,
+      value: jsonEncode(
+        LicenseEnd(
+          reason: LicenseEndReason.shopLicenseExpired,
+          noticedAt: _ref.read(clockProvider).now(),
+        ).toJson(),
+      ),
+    );
+    _notifyAccessChanged();
   }
 
   /// Called only after a successful invite redemption, never registration alone.
@@ -232,13 +395,22 @@ class LicenseService {
     if (status.isOwner || status.shopId <= 0 || status.status == 'disabled') {
       throw StateError('An active invitation to an existing shop is required.');
     }
+    // A new join starts from nothing: it may be a different shop from the one
+    // whose license a previous membership followed, and access now comes from
+    // that shop, so an old "your license ended" notice no longer applies.
+    // (Not done in _writeMembership: that also runs on every routine
+    // re-confirmation, which must not wipe a notice that is still true.)
+    await _dropLease();
+    await _ref.read(secureStorageProvider).delete(key: _lastEndKey);
     await _writeMembership(status.shopId);
   }
 
+  Future<void> _dropLease() async {
+    _leaseCountdown.reset();
+    await _ref.read(secureStorageProvider).delete(key: _leaseKey);
+  }
+
   Future<void> _writeMembership(int shopId) async {
-    // Access now comes from the shop it joined, so an old "license ended"
-    // notice would only confuse if the activation screen ever shows again.
-    await _ref.read(secureStorageProvider).delete(key: _lastEndKey);
     await _ref
         .read(secureStorageProvider)
         .write(
@@ -258,6 +430,7 @@ class LicenseService {
   }
 
   Future<void> clearJoinedMembership() async {
+    await _dropLease();
     await _ref.read(secureStorageProvider).delete(key: _membershipKey);
     _notifyAccessChanged();
   }
@@ -288,6 +461,7 @@ class LicenseService {
   Future<void> _blockMembership(Map<String, dynamic> membership) async {
     await _ref.read(appDatabaseProvider).resetForFreshStart();
     await _ref.read(paystackCredentialsServiceProvider).clearRegistration();
+    await _dropLease();
     await _ref.read(secureStorageProvider).delete(key: _membershipKey);
     await _ref.read(sessionProvider.notifier).logout();
     _notifyAccessChanged();
@@ -442,11 +616,16 @@ class LicenseService {
       if (membership['blocked'] == true) {
         return const LicenseStatus(state: LicenseState.revoked);
       }
+      final lease = await _advanceLease();
       return LicenseStatus(
-        state: LicenseState.joined,
+        state: lease != null && lease.isExpired
+            ? LicenseState.expired
+            : LicenseState.joined,
         joinedVerifiedAt: DateTime.tryParse(
           membership['verifiedAt'] as String? ?? '',
         ),
+        sharedRemaining: lease?.neverExpires == true ? null : lease?.remaining,
+        sharedNeverExpires: lease?.neverExpires ?? false,
       );
     }
 
@@ -499,6 +678,7 @@ class LicenseService {
   /// cached token and locks the app back to the activation screen.
   Future<void> backgroundVerify() async {
     await verifyJoinedMembership();
+    await _enforceLease();
     final storage = _ref.read(secureStorageProvider);
     final token = await storage.read(key: _tokenKey);
     if (token == null || token.isEmpty) return;
@@ -634,6 +814,22 @@ class LicenseService {
     if (token != null && token.isNotEmpty) {
       return await _isExpired(storage) ? _endFromSavedLicense(storage) : null;
     }
+    // A joined device whose shop's license has run out: explained right away,
+    // even before the background check has had a chance to record it.
+    final recorded = await _readLastEnd(storage);
+    final lease = await _advanceLease();
+    if (lease != null && lease.isExpired) {
+      return recorded?.reason == LicenseEndReason.shopLicenseExpired
+          ? recorded
+          : LicenseEnd(
+              reason: LicenseEndReason.shopLicenseExpired,
+              noticedAt: _ref.read(clockProvider).now(),
+            );
+    }
+    return recorded;
+  }
+
+  Future<LicenseEnd?> _readLastEnd(FlutterSecureStorage storage) async {
     final raw = await storage.read(key: _lastEndKey);
     if (raw == null || raw.isEmpty) return null;
     try {

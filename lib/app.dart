@@ -390,6 +390,12 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
           ref.read(syncServiceProvider).runSyncCycle(),
           ref.read(lanSyncServiceProvider).syncNow(),
         ]);
+      } else if (await ref.read(licenseServiceProvider).isJoinedMember) {
+        // A joined device locked because its shop's license ran out must still
+        // be reachable on the shop's network: that is how the shop's main
+        // device hands it the renewal, with no internet involved. (Cloud sync
+        // stays off - there is nothing to sync while the device is locked.)
+        await ref.read(lanSyncServiceProvider).syncNow();
       }
     } finally {
       _syncing = false;

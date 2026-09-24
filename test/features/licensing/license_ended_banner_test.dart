@@ -118,6 +118,17 @@ void main() {
     await close(tester);
   });
 
+  testWidgets('a joined device whose shop license ran out says so, and that the renewal arrives by itself', (tester) async {
+    await openActivationScreen(tester, end: const LicenseEnd(reason: LicenseEndReason.shopLicenseExpired));
+
+    expect(find.text("This shop's license has expired"), findsOneWidget);
+    expect(find.textContaining('Ask the shop owner to renew it'), findsOneWidget);
+    expect(find.textContaining('reopens by itself'), findsOneWidget);
+    expect(find.text('Your license has expired'), findsNothing);
+
+    await close(tester);
+  });
+
   testWidgets('a set-back clock is explained as that, not as an expired license', (tester) async {
     await openActivationScreen(tester, end: const LicenseEnd(reason: LicenseEndReason.clockSetBack));
 
