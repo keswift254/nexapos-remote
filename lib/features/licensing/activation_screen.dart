@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../domain/services/license_service.dart';
@@ -24,6 +25,109 @@ class ActivationScreen extends ConsumerStatefulWidget {
 
   @override
   ConsumerState<ActivationScreen> createState() => _ActivationScreenState();
+}
+
+/// Tells a user who landed here because their license ended WHY (it ran out,
+/// it was revoked, or the device clock looks set back) instead of leaving a
+/// bare "Activate NexaPOS" that reads like a fresh install. Nothing is shown
+/// for a device that was never licensed. Reloads when the license changes,
+/// because the app locks itself onto this screen a moment BEFORE the
+/// reason is recorded in some cases (see LicenseService.endedLicense).
+class _LicenseEndedBanner extends ConsumerStatefulWidget {
+  const _LicenseEndedBanner();
+
+  @override
+  ConsumerState<_LicenseEndedBanner> createState() =>
+      _LicenseEndedBannerState();
+}
+
+class _LicenseEndedBannerState extends ConsumerState<_LicenseEndedBanner> {
+  LicenseEnd? _end;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    LicenseEnd? end;
+    try {
+      end = await ref.read(licenseServiceProvider).endedLicense();
+    } catch (_) {
+      // No notice is better than a broken activation screen.
+    }
+    if (!mounted) return;
+    setState(() => _end = end);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    ref.listen(licenseChangeSignalProvider, (_, _) => _load());
+    final end = _end;
+    if (end == null) return const SizedBox.shrink();
+
+    final scheme = Theme.of(context).colorScheme;
+    final validUntil = end.validUntil;
+    final ranOutOn = validUntil == null
+        ? ''
+        : 'It ran out on '
+              '${DateFormat('d MMM yyyy, HH:mm').format(validUntil.toLocal())}. ';
+    final (title, body, color, icon) = switch (end.reason) {
+      LicenseEndReason.expired => (
+        'Your license has expired',
+        '${ranOutOn}Contact NexaPOS to renew it, then enter your license key '
+            'below to continue.',
+        Colors.orange.shade800,
+        Icons.event_busy,
+      ),
+      LicenseEndReason.revoked => (
+        'Your license was revoked',
+        'Contact NexaPOS support if you think this is a mistake. If it has '
+            'been restored, enter your license key below to continue.',
+        scheme.error,
+        Icons.block,
+      ),
+      LicenseEndReason.clockSetBack => (
+        "This device's date or time looks wrong",
+        'NexaPOS locked itself because the clock on this device was set '
+            "back, so your license's end date can't be trusted. Correct the "
+            'date and time, then enter your license key below to continue.',
+        Colors.orange.shade800,
+        Icons.schedule,
+      ),
+    };
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 24),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        border: Border.all(color: color),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: color),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(color: color, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 4),
+                Text(body),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _ActivationScreenState extends ConsumerState<ActivationScreen> {
@@ -105,6 +209,7 @@ class _ActivationScreenState extends ConsumerState<ActivationScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  const _LicenseEndedBanner(),
                   Icon(
                     Icons.vpn_key,
                     size: 48,

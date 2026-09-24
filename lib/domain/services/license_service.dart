@@ -18,6 +18,7 @@ part 'license_service.g.dart';
 const _tokenKey = 'nexapos.license.activationToken';
 const _validUntilKey = 'nexapos.license.validUntil';
 const _lastSeenKey = 'nexapos.license.lastSeenAt';
+const _lastEndKey = 'nexapos.license.lastEnd';
 const _membershipKey = 'nexapos.license.shopMembership';
 // Small grace for legitimate clock jitter (NTP corrections, DST edge
 // cases) - real rollback attempts to dodge a days/weeks-long expiry
@@ -98,6 +99,51 @@ class LicenseStatus {
   final bool checkedWithServer;
 }
 
+enum LicenseEndReason {
+  /// The validity window ran out.
+  expired,
+  /// The vendor ended it before its time.
+  revoked,
+  /// This device's clock reads earlier than the device has already seen, so
+  /// the license end date cannot be trusted (see the clock-rollback guard).
+  clockSetBack,
+}
+
+/// Why the license this device used to hold no longer counts - what the
+/// activation screen tells the user instead of a bare "Activate NexaPOS".
+/// Written the moment [LicenseService.backgroundVerify] locks the app, and
+/// removed once a license is activated again.
+class LicenseEnd {
+  const LicenseEnd({required this.reason, this.validUntil, this.noticedAt});
+
+  final LicenseEndReason reason;
+
+  /// The license's end date, when it had one.
+  final DateTime? validUntil;
+
+  /// When this device found out.
+  final DateTime? noticedAt;
+
+  Map<String, dynamic> toJson() => {
+    'reason': reason.name,
+    'validUntil': validUntil?.toUtc().toIso8601String(),
+    'noticedAt': noticedAt?.toUtc().toIso8601String(),
+  };
+
+  static LicenseEnd? fromJson(Object? decoded) {
+    if (decoded is! Map) return null;
+    final reason = LicenseEndReason.values
+        .where((r) => r.name == decoded['reason'])
+        .firstOrNull;
+    if (reason == null) return null;
+    return LicenseEnd(
+      reason: reason,
+      validUntil: DateTime.tryParse(decoded['validUntil'] as String? ?? ''),
+      noticedAt: DateTime.tryParse(decoded['noticedAt'] as String? ?? ''),
+    );
+  }
+}
+
 /// How long a joined device may go without confirming its membership online
 /// before it locks - the same 24 hours [LicenseService.hasAppAccess] enforces.
 const joinedMembershipGrace = Duration(hours: 24);
@@ -175,6 +221,9 @@ class LicenseService {
   }
 
   Future<void> _writeMembership(int shopId) async {
+    // Access now comes from the shop it joined, so an old "license ended"
+    // notice would only confuse if the activation screen ever shows again.
+    await _ref.read(secureStorageProvider).delete(key: _lastEndKey);
     await _ref
         .read(secureStorageProvider)
         .write(
@@ -330,6 +379,8 @@ class LicenseService {
       final storage = _ref.read(secureStorageProvider);
       await storage.write(key: _tokenKey, value: result.token);
       await _writeValidUntil(storage, result.validUntil);
+      // Licensed again - the "your license ended" notice no longer applies.
+      await storage.delete(key: _lastEndKey);
       _ref.invalidate(hasCachedLicenseProvider);
       _ref.read(licenseChangeSignalProvider.notifier).bump();
       return const Result.ok(null);
@@ -385,10 +436,7 @@ class LicenseService {
     }
 
     final expiredLocally = await _isExpired(storage);
-    final savedRaw = await storage.read(key: _validUntilKey);
-    final savedValidUntil = savedRaw == null || savedRaw.isEmpty
-        ? null
-        : DateTime.tryParse(savedRaw);
+    final savedValidUntil = await _savedValidUntil(storage);
 
     if (askServer) {
       try {
@@ -397,10 +445,10 @@ class LicenseService {
             .verify(baseUrl: licenseServerBaseUrl, activationToken: token);
         final now = _ref.read(clockProvider).now();
         if (!result.valid) {
-          final ranOut =
-              result.validUntil != null && !result.validUntil!.isAfter(now);
           return LicenseStatus(
-            state: ranOut ? LicenseState.expired : LicenseState.revoked,
+            state: _ranOut(result.validUntil, now)
+                ? LicenseState.expired
+                : LicenseState.revoked,
             validUntil: result.validUntil ?? savedValidUntil,
             checkedWithServer: true,
           );
@@ -441,7 +489,7 @@ class LicenseService {
     if (token == null || token.isEmpty) return;
 
     if (await _isExpired(storage)) {
-      await _clearLicense(storage);
+      await _clearLicense(storage, end: await _endFromSavedLicense(storage));
       return;
     }
 
@@ -450,7 +498,18 @@ class LicenseService {
           .read(licenseGatewayProvider)
           .verify(baseUrl: licenseServerBaseUrl, activationToken: token);
       if (!result.valid) {
-        await _clearLicense(storage);
+        final now = _ref.read(clockProvider).now();
+        final saved = await _savedValidUntil(storage);
+        await _clearLicense(
+          storage,
+          end: LicenseEnd(
+            reason: _ranOut(result.validUntil, now)
+                ? LicenseEndReason.expired
+                : LicenseEndReason.revoked,
+            validUntil: result.validUntil ?? saved,
+            noticedAt: now,
+          ),
+        );
         return;
       }
       // Keeps the locally-cached deadline in sync with the server's -
@@ -524,10 +583,62 @@ class LicenseService {
     }
   }
 
+  /// True when [validUntil] is a real end date that has already passed.
+  bool _ranOut(DateTime? validUntil, DateTime now) =>
+      validUntil != null && !validUntil.isAfter(now);
+
+  Future<DateTime?> _savedValidUntil(FlutterSecureStorage storage) async {
+    final raw = await storage.read(key: _validUntilKey);
+    return raw == null || raw.isEmpty ? null : DateTime.tryParse(raw);
+  }
+
+  /// Why the license saved on this device counts as ended right now, judged
+  /// only from what is saved (no network): an end date that has passed means
+  /// it ran out; a locally-expired license whose end date is still ahead can
+  /// only be the clock-rollback guard firing.
+  Future<LicenseEnd> _endFromSavedLicense(FlutterSecureStorage storage) async {
+    final now = _ref.read(clockProvider).now();
+    final validUntil = await _savedValidUntil(storage);
+    return LicenseEnd(
+      reason: _ranOut(validUntil, now)
+          ? LicenseEndReason.expired
+          : LicenseEndReason.clockSetBack,
+      validUntil: validUntil,
+      noticedAt: now,
+    );
+  }
+
+  /// What the activation screen shows about a license that stopped counting,
+  /// or null when there is nothing to say (never licensed, or licensed and
+  /// well). Works in the short gap before [backgroundVerify] has cleared an
+  /// expired license too - the app is already on the activation screen then,
+  /// and this answers from what is saved without changing anything.
+  Future<LicenseEnd?> endedLicense() async {
+    final storage = _ref.read(secureStorageProvider);
+    final token = await storage.read(key: _tokenKey);
+    if (token != null && token.isNotEmpty) {
+      return await _isExpired(storage) ? _endFromSavedLicense(storage) : null;
+    }
+    final raw = await storage.read(key: _lastEndKey);
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      return LicenseEnd.fromJson(jsonDecode(raw));
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Deliberately does NOT delete _lastSeenKey - see
   /// _trackClockAndDetectRollback's doc for why that watermark must
-  /// outlive any single license.
-  Future<void> _clearLicense(FlutterSecureStorage storage) async {
+  /// outlive any single license. [end] is written FIRST, so the activation
+  /// screen it is about to lock the app onto already has something to say.
+  Future<void> _clearLicense(
+    FlutterSecureStorage storage, {
+    LicenseEnd? end,
+  }) async {
+    if (end != null) {
+      await storage.write(key: _lastEndKey, value: jsonEncode(end.toJson()));
+    }
     await storage.delete(key: _tokenKey);
     await storage.delete(key: _validUntilKey);
     _ref.invalidate(hasCachedLicenseProvider);

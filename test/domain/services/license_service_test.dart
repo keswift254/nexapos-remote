@@ -452,4 +452,129 @@ void main() {
       expect((await service.currentStatus()).state, LicenseState.revoked);
     });
   });
+
+  group('endedLicense (why the app locked - shown on the activation screen)', () {
+    late FixedClock clock;
+    late http.Response Function() verifyAnswer;
+    late String? activationUntil;
+    late ProviderContainer container;
+    late LicenseService service;
+
+    Future<String?> storedToken() =>
+        container.read(secureStorageProvider).read(key: 'nexapos.license.activationToken');
+
+    Future<void> activate({String? until = '2026-01-31 00:00:00'}) async {
+      activationUntil = until;
+      await service.activate('CODE1');
+    }
+
+    http.Response invalid(String? validUntil) =>
+        http.Response(jsonEncode({'success': true, 'valid': false, 'valid_until': validUntil}), 200);
+
+    setUp(() {
+      clock = FixedClock(DateTime.utc(2026, 1, 1));
+      activationUntil = '2026-01-31 00:00:00';
+      verifyAnswer = () => http.Response(
+        jsonEncode({'success': true, 'valid': true, 'valid_until': activationUntil}),
+        200,
+      );
+      container = buildContainer(
+        clock: clock,
+        licenseClient: MockClient((request) async {
+          if (request.url.queryParameters['action'] == 'verify') return verifyAnswer();
+          return http.Response(
+            jsonEncode({'success': true, 'activation_token': 'a' * 64, 'valid_until': activationUntil}),
+            200,
+          );
+        }),
+      );
+      service = container.read(licenseServiceProvider);
+    });
+
+    test('a device that was never licensed has nothing to report', () async {
+      expect(await service.endedLicense(), isNull);
+    });
+
+    test('a licensed, healthy device has nothing to report', () async {
+      await activate();
+      await service.backgroundVerify();
+
+      expect(await service.endedLicense(), isNull);
+    });
+
+    test('running out is recorded when the app locks, and survives the token being cleared', () async {
+      await activate();
+      clock.set(DateTime.utc(2026, 2, 5));
+
+      await service.backgroundVerify();
+
+      expect(await storedToken(), isNull, reason: 'the license really was cleared');
+      final end = await service.endedLicense();
+      expect(end!.reason, LicenseEndReason.expired);
+      expect(end.validUntil, DateTime.utc(2026, 1, 31));
+      expect(end.noticedAt, DateTime.utc(2026, 2, 5));
+    });
+
+    test('the server reporting an end date already past is recorded as expired', () async {
+      await activate();
+      clock.set(DateTime.utc(2026, 1, 15)); // saved end date (31 Jan) is still ahead locally
+      verifyAnswer = () => invalid('2026-01-10 00:00:00');
+
+      await service.backgroundVerify();
+
+      final end = await service.endedLicense();
+      expect(end!.reason, LicenseEndReason.expired);
+      expect(end.validUntil, DateTime.utc(2026, 1, 10));
+    });
+
+    test('the server ending a license that still had time left is recorded as revoked', () async {
+      await activate();
+      verifyAnswer = () => invalid('2026-01-31 00:00:00');
+
+      await service.backgroundVerify();
+
+      expect(await storedToken(), isNull);
+      expect((await service.endedLicense())!.reason, LicenseEndReason.revoked);
+    });
+
+    test('a rolled-back clock is recorded as that, never as a false "expired"', () async {
+      await activate(until: '2026-04-01 00:00:00');
+      clock.set(DateTime.utc(2026, 3, 15));
+      await service.hasValidCachedLicense(); // the device sees March 15th...
+      clock.set(DateTime.utc(2026, 2, 1)); // ...then its clock is wound back
+
+      await service.backgroundVerify();
+
+      final end = await service.endedLicense();
+      expect(end!.reason, LicenseEndReason.clockSetBack);
+      expect(end.validUntil, DateTime.utc(2026, 4, 1));
+    });
+
+    test('an expired license is already explained BEFORE the background check clears it, and nothing changes', () async {
+      await activate();
+      clock.set(DateTime.utc(2026, 2, 5));
+
+      final end = await service.endedLicense();
+
+      expect(end!.reason, LicenseEndReason.expired);
+      expect(await storedToken(), isNotNull, reason: 'asking must not clear the license');
+    });
+
+    test('activating again removes the notice', () async {
+      await activate();
+      clock.set(DateTime.utc(2026, 2, 5));
+      await service.backgroundVerify();
+      expect(await service.endedLicense(), isNotNull);
+
+      await activate(until: '2026-03-01 00:00:00'); // renewed
+
+      expect(await service.endedLicense(), isNull);
+    });
+
+    test('an unreadable saved record is ignored rather than breaking the screen', () async {
+      await container.read(secureStorageProvider).write(key: 'nexapos.license.lastEnd', value: '{not json');
+
+      expect(await service.endedLicense(), isNull);
+    });
+  });
 }
