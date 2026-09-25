@@ -288,10 +288,18 @@ class _PurchaseSectionState extends ConsumerState<PurchaseSection> {
         ),
       );
     } else {
-      // "Best value" is judged among the ordinary month plans only: a token-price
-      // test plan (KSh 5 for a day) would otherwise always win the comparison.
+      // "Best value" is judged among the ordinary plans only: a token-price test plan
+      // (KSh 5 for a day) would otherwise always win the comparison. A lifetime plan
+      // cannot be compared per month, and pay-once is the deal that lasts longest, so
+      // when there is exactly one - and something else to choose instead - it is the
+      // one marked; otherwise it is the cheapest month by month.
+      final lifetimePlans = catalog.plans
+          .where((p) => p.lifetime && !p.isTest)
+          .toList();
+      final ordinary = catalog.plans.where((p) => !p.isTest).toList();
+      final lifetimeIsBest = lifetimePlans.length == 1 && ordinary.length > 1;
       final comparable = catalog.plans
-          .where((p) => !p.isTest && p.months > 0)
+          .where((p) => !p.isTest && !p.lifetime && p.months > 0)
           .toList();
       final cheapestPerMonth = comparable.isEmpty
           ? null
@@ -307,9 +315,11 @@ class _PurchaseSectionState extends ConsumerState<PurchaseSection> {
         children.add(
           _PlanCard(
             plan: plan,
-            bestValue: comparable.length > 1 &&
-                cheapest.length == 1 &&
-                cheapest.single.id == plan.id,
+            bestValue: lifetimeIsBest
+                ? plan.id == lifetimePlans.single.id
+                : comparable.length > 1 &&
+                      cheapest.length == 1 &&
+                      cheapest.single.id == plan.id,
             starting: _startingPlanId == plan.id,
             enabled: canPay,
             onTap: () => _buy(plan),
@@ -352,6 +362,7 @@ class _PurchaseSectionState extends ConsumerState<PurchaseSection> {
 /// The small line under a plan's name: the monthly cost for an ordinary plan, and
 /// how long it lasts for a test or other short one.
 String _subtitle(PurchasePlan plan) {
+  if (plan.lifetime && !plan.isTest) return 'Pay once - never expires';
   if (plan.isTest) return 'To try paying - valid for ${_length(plan)}';
   if (plan.months > 0) {
     return '${_shillings((plan.amountKes / plan.months).round())} a month';
@@ -361,6 +372,7 @@ String _subtitle(PurchasePlan plan) {
 
 /// "3 months", "1 day", "1 month + 2 days".
 String _length(PurchasePlan plan) {
+  if (plan.lifetime) return 'a lifetime';
   final parts = <String>[
     if (plan.months > 0) '${plan.months} ${plan.months == 1 ? 'month' : 'months'}',
     if (plan.days > 0) '${plan.days} ${plan.days == 1 ? 'day' : 'days'}',

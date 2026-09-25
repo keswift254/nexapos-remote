@@ -243,6 +243,61 @@ void main() {
     });
   });
 
+  group('a lifetime plan', () {
+    LicenseGateway serving(List<Map<String, dynamic>> plans) => LicenseGateway(MockClient((request) async =>
+        http.Response(jsonEncode({'success': true, 'purchasing_enabled': true, 'plans': plans}), 200)));
+
+    test('is read: no months, no days, marked lifetime', () async {
+      final catalog = await serving([
+        {'id': 'lifetime', 'label': 'Lifetime', 'months': 0, 'days': 0, 'lifetime': true, 'amount_kes': 4800, 'test': false},
+      ]).fetchPlans(baseUrl: _baseUrl);
+
+      final plan = catalog.plans.single;
+      expect(plan.lifetime, isTrue);
+      expect(plan.months, 0);
+      expect(plan.days, 0);
+      expect(plan.amountKes, 4800);
+      expect(plan.isTest, isFalse);
+    });
+
+    test('is read even if the server leaves the month count out', () async {
+      final catalog = await serving([
+        {'id': 'lifetime', 'label': 'Lifetime', 'lifetime': true, 'amount_kes': 4800},
+      ]).fetchPlans(baseUrl: _baseUrl);
+
+      expect(catalog.plans.single.lifetime, isTrue);
+    });
+
+    test('an ordinary plan with no length is still left out - only lifetime may have none', () async {
+      final catalog = await serving([
+        {'id': 'none', 'label': 'None', 'months': 0, 'days': 0, 'lifetime': false, 'amount_kes': 500},
+        {'id': 'ok', 'label': 'Fine', 'months': 6, 'days': 0, 'lifetime': false, 'amount_kes': 1500},
+      ]).fetchPlans(baseUrl: _baseUrl);
+
+      expect(catalog.plans.map((p) => p.id), ['ok']);
+      expect(catalog.plans.single.lifetime, isFalse);
+    });
+
+    test('a lifetime plan with a nonsense length or price is left out', () async {
+      final catalog = await serving([
+        {'id': 'a', 'label': 'A', 'months': -1, 'lifetime': true, 'amount_kes': 500},
+        {'id': 'b', 'label': 'B', 'days': -3, 'lifetime': true, 'amount_kes': 500},
+        {'id': 'c', 'label': 'C', 'lifetime': true, 'amount_kes': 0},
+      ]).fetchPlans(baseUrl: _baseUrl);
+
+      expect(catalog.plans, isEmpty);
+    });
+
+    test('only an explicit true makes a plan lifetime', () async {
+      final catalog = await serving([
+        {'id': 'a', 'label': 'A', 'months': 1, 'lifetime': 'yes', 'amount_kes': 500},
+        {'id': 'b', 'label': 'B', 'months': 1, 'lifetime': 1, 'amount_kes': 500},
+      ]).fetchPlans(baseUrl: _baseUrl);
+
+      expect(catalog.plans.map((p) => p.lifetime), [false, false]);
+    });
+  });
+
   group('restoreStart', () {
     test('asks for a code for this device and email, and returns the server\'s words', () async {
       late Map<String, dynamic> sent;

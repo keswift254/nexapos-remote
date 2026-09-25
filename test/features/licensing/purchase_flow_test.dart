@@ -497,6 +497,109 @@ void main() {
     });
   });
 
+  group('a lifetime plan', () {
+    // What the server ships: 6 months, Lifetime, and the temporary test plan.
+    const shipped = [
+      {'id': 'm6', 'label': '6 months', 'months': 6, 'days': 0, 'lifetime': false, 'amount_kes': 1500, 'test': false},
+      {'id': 'lifetime', 'label': 'Lifetime', 'months': 0, 'days': 0, 'lifetime': true, 'amount_kes': 4800, 'test': false},
+      {'id': 'test', 'label': 'Test plan', 'months': 0, 'days': 1, 'lifetime': false, 'amount_kes': 5, 'test': true},
+    ];
+
+    testWidgets('is shown as "Pay once - never expires", with its price', (tester) async {
+      server.plans = [...shipped];
+      await openScreen(tester);
+
+      expect(find.text('Lifetime'), findsOneWidget);
+      expect(find.text('Pay once - never expires'), findsOneWidget);
+      expect(find.widgetWithText(FilledButton, 'KSh 4,800'), findsOneWidget);
+      expect(find.text('KSh 250 a month'), findsOneWidget, reason: 'the 6-month plan keeps its monthly cost');
+      // Never described as a monthly price or as having a length.
+      expect(find.textContaining('KSh 0 a month'), findsNothing);
+      expect(find.textContaining('KSh 4,800 a month'), findsNothing);
+
+      await close(tester);
+    });
+
+    testWidgets('is the "Best value" when there is something else to choose, and nothing else is', (tester) async {
+      server.plans = [...shipped];
+      await openScreen(tester);
+
+      expect(find.text('Best value'), findsOneWidget);
+      expect(find.descendant(of: find.byKey(const Key('plan-lifetime')), matching: find.text('Best value')), findsOneWidget);
+      expect(find.descendant(of: find.byKey(const Key('plan-m6')), matching: find.text('Best value')), findsNothing);
+      expect(find.descendant(of: find.byKey(const Key('plan-test')), matching: find.text('Best value')), findsNothing);
+
+      await close(tester);
+    });
+
+    testWidgets('alone it is not called best value (nothing to compare with)', (tester) async {
+      server.plans = [shipped[1]];
+      await openScreen(tester);
+
+      expect(find.byKey(const Key('plan-lifetime')), findsOneWidget);
+      expect(find.text('Best value'), findsNothing);
+
+      await close(tester);
+    });
+
+    testWidgets('with the old year plan still on sale next to it, lifetime is still the one marked', (tester) async {
+      server.plans = [
+        {'id': 'm12', 'label': '1 year', 'months': 12, 'days': 0, 'lifetime': false, 'amount_kes': 4800, 'test': false},
+        shipped[1],
+      ];
+      await openScreen(tester);
+
+      expect(find.descendant(of: find.byKey(const Key('plan-lifetime')), matching: find.text('Best value')), findsOneWidget);
+      expect(find.text('Best value'), findsOneWidget);
+
+      await close(tester);
+    });
+
+    testWidgets('buying it: the server is asked for the lifetime plan (never an amount), and the device activates when paid', (tester) async {
+      server.plans = [...shipped];
+      server.statusScript = [
+        {'success': true, 'status': 'pending'},
+        {'success': true, 'status': 'pending'},
+        {'success': true, 'status': 'issued', 'code': FakeLicenseServer.licenseCode},
+      ];
+      await openScreen(tester);
+
+      await buy(tester, 'lifetime', email: 'forever@example.com');
+
+      expect(server.lastStart, {'device_id': 'test-device', 'plan_id': 'lifetime', 'email': 'forever@example.com'});
+      expect(find.text('KSh 4,800 - Lifetime'), findsOneWidget);
+      await pass(tester, const Duration(seconds: 7));
+      await tester.pumpAndSettle();
+      expect(server.activatedCodes, [FakeLicenseServer.licenseCode]);
+
+      await close(tester);
+    });
+
+    testWidgets('the email prompt names it and its price', (tester) async {
+      server.plans = [...shipped];
+      await openScreen(tester);
+
+      await tester.tap(find.byKey(const Key('pay-lifetime')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Lifetime - KSh 4,800'), findsOneWidget);
+
+      await close(tester);
+    });
+
+    for (final width in [320.0, 360.0]) {
+      testWidgets('all three fit a ${width.toInt()}-pixel-wide phone', (tester) async {
+        server.plans = [...shipped];
+        await openScreen(tester, size: Size(width, 2600));
+
+        expect(find.byKey(const Key('plan-lifetime')), findsOneWidget);
+        expect(tester.takeException(), isNull);
+
+        await close(tester);
+      });
+    }
+  });
+
   group('the KSh 5 test plan', () {
     const testPlan = {'id': 'test', 'label': 'Test plan', 'months': 0, 'days': 1, 'amount_kes': 5, 'test': true};
 

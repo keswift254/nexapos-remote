@@ -70,6 +70,9 @@ class PurchasePlan {
   /// A temporary plan for trying the payment flow with a token amount. Shown with
   /// a "Test" mark and kept out of the "best value" comparison.
   final bool isTest;
+
+  /// Pay once, never expires: no months or days at all.
+  final bool lifetime;
   const PurchasePlan({
     required this.id,
     required this.label,
@@ -77,6 +80,7 @@ class PurchasePlan {
     this.days = 0,
     required this.amountKes,
     this.isTest = false,
+    this.lifetime = false,
   });
 
   static PurchasePlan? fromJson(Object? decoded) {
@@ -88,17 +92,20 @@ class PurchasePlan {
     final amount = decoded['amount_kes'];
     if (id is! String || id.isEmpty || label is! String) return null;
     final days = rawDays is num ? rawDays.toInt() : 0;
-    if (months is! num || months < 0 || days < 0 || (months < 1 && days < 1)) {
-      return null;
-    }
+    final lifetime = decoded['lifetime'] == true;
+    final monthCount = months is num ? months.toInt() : (lifetime ? 0 : null);
+    if (monthCount == null || monthCount < 0 || days < 0) return null;
+    // A plan lasts some months and/or days - or, if it is a lifetime plan, has no length.
+    if (!lifetime && monthCount < 1 && days < 1) return null;
     if (amount is! num || amount < 1) return null;
     return PurchasePlan(
       id: id,
       label: label,
-      months: months.toInt(),
+      months: monthCount,
       days: days,
       amountKes: amount.toInt(),
       isTest: decoded['test'] == true,
+      lifetime: lifetime,
     );
   }
 }
