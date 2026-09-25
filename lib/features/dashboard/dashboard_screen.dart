@@ -25,6 +25,11 @@ import 'product_search_dialog.dart';
 part 'dashboard_screen.g.dart';
 
 class DashboardData {
+  /// The local calendar day these figures were worked out for. When the day
+  /// changes (midnight, or the date being changed) the dashboard recomputes -
+  /// see _DashboardScreenState._refreshIfNewDay. Null only where a figure set is
+  /// built by hand (tests).
+  final DateTime? day;
   final DailyStats today;
   final PercentChange salesChange;
   final PercentChange netProfitChange;
@@ -33,6 +38,7 @@ class DashboardData {
   final Money stockValue;
 
   const DashboardData({
+    this.day,
     required this.today,
     required this.salesChange,
     required this.netProfitChange,
@@ -94,6 +100,7 @@ Future<DashboardData> dashboardData(Ref ref) async {
   );
 
   return DashboardData(
+    day: today,
     today: todayStats,
     salesChange: PercentChange.compare(
       todayStats.salesTotal,
@@ -116,10 +123,22 @@ class DashboardScreen extends ConsumerStatefulWidget {
   ConsumerState<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends ConsumerState<DashboardScreen> {
+class _DashboardScreenState extends ConsumerState<DashboardScreen>
+    with WidgetsBindingObserver {
+  /// How often the day is compared with the one the figures were computed for.
+  /// Cheap (one date comparison); short so the figures turn over within moments
+  /// of midnight.
+  static const _dayCheckEvery = Duration(seconds: 15);
+  Timer? _dayTimer;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _dayTimer = Timer.periodic(_dayCheckEvery, (_) => _refreshIfNewDay());
+    // Coming back to the dashboard after midnight (it keeps its figures while
+    // other screens are open) must show the new day at once.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _refreshIfNewDay());
     // Landing on the dashboard - app cold start, or navigating back to
     // it - is the moment an admin actually looks for "did my
     // generator.html publish show up yet", so it gets its own check
@@ -129,6 +148,34 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     // swallows its own errors, so a slow/cold platform host just means
     // the banner updates a little later, not a stuck spinner anywhere.
     unawaited(ref.read(updateAvailabilityProvider.notifier).check());
+  }
+
+  @override
+  void dispose() {
+    _dayTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // A PC that slept through midnight fires no timers meanwhile.
+    if (state == AppLifecycleState.resumed) _refreshIfNewDay();
+  }
+
+  /// The dashboard's figures are kept (and refreshed on every write), so nothing
+  /// used to make them notice that the DAY changed: after midnight "today" still
+  /// showed yesterday's sales until something happened to be written. Recompute
+  /// as soon as the local date is no longer the one the figures are for.
+  void _refreshIfNewDay() {
+    if (!mounted) return;
+    final shown = ref
+        .read(dashboardDataProvider)
+        .maybeWhen(data: (data) => data.day, orElse: () => null);
+    if (shown == null) return;
+    if (shown != ref.read(reportsServiceProvider).today) {
+      ref.invalidate(dashboardDataProvider);
+    }
   }
 
   void _handleSettingsAction(String action) {
