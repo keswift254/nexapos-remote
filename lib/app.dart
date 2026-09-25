@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import 'core/providers.dart';
+import 'core/utils/monotonic_clock.dart';
 import 'domain/services/session_service.dart';
 import 'domain/services/sync_service.dart';
 import 'domain/services/lan_sync_service.dart';
@@ -251,6 +252,17 @@ GoRouter router(Ref ref) {
 
 const _syncInterval = Duration(seconds: 15);
 const _maintenanceInterval = Duration(minutes: 2);
+
+// How often this device tells the others on its network what it holds, so a
+// sale made on one till shows up on the rest within a couple of seconds. Its own
+// timer, deliberately NOT part of the cloud sync cycle above: that cycle first
+// waits on internet requests, and with no internet (a shop working on its LAN
+// alone) it can spend a minute doing so before it gets round to the LAN.
+const _lanInterval = Duration(seconds: 2);
+
+// How long a "this device may take part in LAN sync" answer is kept before it is
+// worked out again (licence checks read secure storage - not every 2 seconds).
+const _lanAccessRecheck = Duration(seconds: 30);
 // A shared shop terminal left logged in indefinitely is a real handoff
 // risk (one cashier's actions attributed to another, or anyone walking
 // up gets a logged-in admin session) - checked on its own, more frequent
@@ -288,10 +300,14 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
   Timer? _syncTimer;
   Timer? _maintenanceTimer;
   Timer? _inactivityTimer;
+  Timer? _lanTimer;
   DateTime? _lastActivity;
   DateTime? _backgroundedAt;
   bool _syncing = false;
   bool _maintaining = false;
+  bool _lanTicking = false;
+  bool _lanAllowed = false;
+  Duration? _lanAccessCheckedAt;
 
   @override
   void initState() {
@@ -311,6 +327,7 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
       _inactivityCheckInterval,
       (_) => _checkInactivity(),
     );
+    _lanTimer = Timer.periodic(_lanInterval, (_) => _runLanTick());
     HardwareKeyboard.instance.addHandler(_onKeyEvent);
   }
 
@@ -321,6 +338,7 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
     _syncTimer?.cancel();
     _maintenanceTimer?.cancel();
     _inactivityTimer?.cancel();
+    _lanTimer?.cancel();
     super.dispose();
   }
 
@@ -406,6 +424,32 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
       }
     } finally {
       _syncing = false;
+    }
+  }
+
+  /// The 2-second LAN heartbeat: announce to the shop's other devices (they pull
+  /// only if this one holds something they do not - see LanPullPolicy). Same rule
+  /// as the LAN part of _runSync for who may take part: a device with access, or a
+  /// joined device that is locked (a renewal reaches it this way with no internet).
+  Future<void> _runLanTick() async {
+    if (_lanTicking) return;
+    _lanTicking = true;
+    try {
+      final now = ref.read(monotonicClockProvider).elapsed();
+      final checkedAt = _lanAccessCheckedAt;
+      if (checkedAt == null || now - checkedAt >= _lanAccessRecheck) {
+        _lanAccessCheckedAt = now;
+        _lanAllowed =
+            await ref.read(hasCachedLicenseProvider.future) ||
+            await ref.read(licenseServiceProvider).isJoinedMember;
+      }
+      if (_lanAllowed && mounted) {
+        await ref.read(lanSyncServiceProvider).syncNow();
+      }
+    } catch (_) {
+      // A missed heartbeat is made up for by the next one.
+    } finally {
+      _lanTicking = false;
     }
   }
 

@@ -10,6 +10,7 @@ import '../../core/providers.dart';
 import '../../data/local/database.dart';
 import '../../data/local/sync_metadata.dart';
 import '../../data/sync/platform_sync_gateway.dart';
+import '../../data/sync/server_reachability.dart';
 import '../../data/sync/sync_table_registry.dart';
 import '../../data/payments/platform_onboarding_gateway.dart';
 import 'paystack_credentials_service.dart';
@@ -34,6 +35,7 @@ SyncService syncService(Ref ref) {
     ref.watch(platformSyncGatewayProvider),
     ref.watch(paystackCredentialsServiceProvider),
     canSync: () => ref.read(licenseServiceProvider).hasAppAccess(),
+    isReachable: serverReachable,
   );
 }
 
@@ -114,6 +116,11 @@ class SyncService {
   final PlatformOnboardingGateway _onboarding;
   final Future<bool> Function()? canSync;
 
+  /// Asked before a cloud cycle takes its place in the exclusive queue: can the
+  /// server be reached at all right now? (See serverReachable for why.) Null =
+  /// never ask, which is what the tests want.
+  final Future<bool> Function(String baseUrl)? isReachable;
+
   SyncService(
     this._db,
     this._syncMeta,
@@ -121,6 +128,7 @@ class SyncService {
     this._credentials, {
     PlatformOnboardingGateway? onboarding,
     this.canSync,
+    this.isReachable,
   }) : _onboarding = onboarding ?? PlatformOnboardingGateway();
 
   Future<void> _tail = Future.value();
@@ -251,9 +259,24 @@ class SyncService {
 
   Future<void>? _syncInFlight;
 
-  Future<void> runSyncCycle() => _syncInFlight ??= _runSyncCycle().whenComplete(
-    () => _syncInFlight = null,
-  );
+  Future<void> runSyncCycle() => _syncInFlight ??= _reachableSyncCycle()
+      .whenComplete(() => _syncInFlight = null);
+
+  /// A cloud cycle that cannot possibly work (no route to the server) is not
+  /// started: it would hold the exclusive queue - which changes arriving over the
+  /// LAN also wait in - for as long as its request took to fail.
+  Future<void> _reachableSyncCycle() async {
+    final reachable = isReachable;
+    if (reachable != null) {
+      final credentials = await _credentials.load();
+      if (credentials.isConfigured && !await reachable(credentials.baseUrl)) {
+        lastError =
+            'Offline. Changes remain on this device until the next successful sync.';
+        return;
+      }
+    }
+    await _runSyncCycle();
+  }
 
   Future<void> _runSyncCycle() => exclusive(() async {
     if (canSync != null && !await canSync!()) {

@@ -5,8 +5,11 @@ import 'dart:io';
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/providers.dart';
 import '../../core/secure_storage_provider.dart';
 import '../../data/payments/platform_onboarding_gateway.dart';
+import 'lan_cursor_cache.dart';
+import 'lan_pull_policy.dart';
 import 'lan_sync_service.dart';
 import 'license_service.dart';
 import 'paystack_credentials_service.dart';
@@ -39,6 +42,21 @@ class NativeLanSyncService implements LanSyncService {
   final Set<String> _connecting = {};
   final Set<String> _seenNonces = {};
 
+  // Announcements go out every couple of seconds (see app.dart), so what a
+  // device holds is summarised in each one and peers only pull when it is ahead
+  // of them (see LanPullPolicy). The summary is kept until the database changes.
+  late final LanCursorCache _cursorCache = LanCursorCache(
+    () => _ref.read(syncServiceProvider).lanRevisionCursors(),
+  );
+  final LanPullPolicy _policy = LanPullPolicy();
+  final Stopwatch _monotonic = Stopwatch()..start();
+  bool _watchingDatabase = false;
+
+  /// More sources than this and the summary would push an announcement past what
+  /// one UDP packet carries reliably, so it is left out (peers then pull every
+  /// time, as they always did).
+  static const _maxSummarySources = 12;
+
   NativeLanSyncService(this._ref);
 
   @override
@@ -52,11 +70,19 @@ class NativeLanSyncService implements LanSyncService {
     final server = _server;
     final udp = _udp;
     if (server == null || udp == null) return;
+    Map<String, int>? summary;
+    try {
+      final held = await _cursorCache.get();
+      if (held.length <= _maxSummarySources) summary = held;
+    } catch (_) {
+      // No summary: peers just pull, as they did before summaries existed.
+    }
     final announcement = await _encrypt({
       'type': 'announce',
       'sender': credentials.deviceId,
       'port': server.port,
       'timestamp': DateTime.now().toUtc().millisecondsSinceEpoch,
+      'cursors': ?summary,
     }, credentials);
     udp.send(
       utf8.encode(jsonEncode(announcement)),
@@ -89,43 +115,55 @@ class NativeLanSyncService implements LanSyncService {
     if (_lastCredentialRefresh == null ||
         now.difference(_lastCredentialRefresh!) >= const Duration(minutes: 2)) {
       _lastCredentialRefresh = now;
-      try {
-        final platform = await _ref
-            .read(paystackCredentialsServiceProvider)
-            .load();
-        if (platform.isConfigured) {
-          final fresh = await _ref
-              .read(platformOnboardingGatewayProvider)
-              .getLanSyncCredentials(
-                baseUrl: platform.baseUrl,
-                apiKey: platform.apiKey,
-              );
-          final secret = base64Decode(fresh.secret);
-          if (fresh.shopId > 0 &&
-              fresh.deviceId.isNotEmpty &&
-              secret.length == 32) {
-            _credentials = _Credentials(fresh.shopId, fresh.deviceId, secret);
-            await _ref
-                .read(secureStorageProvider)
-                .write(
-                  key: _credentialStorageKey,
-                  value: jsonEncode({
-                    'shopId': fresh.shopId,
-                    'deviceId': fresh.deviceId,
-                    'secret': fresh.secret,
-                  }),
-                );
-          }
-        }
-      } catch (_) {
-        // Offline is the exact case LAN sync exists for; retain the last
-        // server-issued key already protected by OS secure storage.
+      final refresh = _refreshCredentials();
+      // With a key already in hand, never make the announcement wait for the
+      // server: offline, that wait can last many seconds and is exactly the
+      // case LAN sync exists for.
+      if (_credentials == null) {
+        await refresh;
+      } else {
+        unawaited(refresh);
       }
     }
     return _credentials;
   }
 
+  Future<void> _refreshCredentials() async {
+    try {
+      final platform = await _ref.read(paystackCredentialsServiceProvider).load();
+      if (platform.isConfigured) {
+        final fresh = await _ref
+            .read(platformOnboardingGatewayProvider)
+            .getLanSyncCredentials(
+              baseUrl: platform.baseUrl,
+              apiKey: platform.apiKey,
+            );
+        final secret = base64Decode(fresh.secret);
+        if (fresh.shopId > 0 && fresh.deviceId.isNotEmpty && secret.length == 32) {
+          _credentials = _Credentials(fresh.shopId, fresh.deviceId, secret);
+          await _ref
+              .read(secureStorageProvider)
+              .write(
+                key: _credentialStorageKey,
+                value: jsonEncode({
+                  'shopId': fresh.shopId,
+                  'deviceId': fresh.deviceId,
+                  'secret': fresh.secret,
+                }),
+              );
+        }
+      }
+    } catch (_) {
+      // Offline is the exact case LAN sync exists for; retain the last
+      // server-issued key already protected by OS secure storage.
+    }
+  }
+
   Future<void> _ensureListening() async {
+    if (!_watchingDatabase) {
+      _watchingDatabase = true;
+      _cursorCache.attach(_ref.read(appDatabaseProvider).tableUpdates());
+    }
     if (_server == null) {
       _server = await ServerSocket.bind(
         InternetAddress.anyIPv4,
@@ -181,14 +219,56 @@ class NativeLanSyncService implements LanSyncService {
       final peer = '${datagram.address.address}:$port:$sender';
       if (!_connecting.add(peer)) return;
       try {
-        await _pullFromPeer(datagram.address, port, sender, credentials);
+        final announced = _summaryOf(message['cursors']);
+        Map<String, int> mine;
+        try {
+          mine = await _cursorCache.get();
+        } catch (_) {
+          mine = const {};
+        }
+        if (!_policy.shouldPull(
+          peer: sender,
+          announced: announced,
+          mine: mine,
+          now: _monotonic.elapsed,
+        )) {
+          return;
+        }
+        final done = await _pullFromPeer(
+          datagram.address,
+          port,
+          sender,
+          credentials,
+        );
+        if (done) {
+          _policy.pulled(
+            peer: sender,
+            announced: announced,
+            now: _monotonic.elapsed,
+          );
+        }
       } finally {
         _connecting.remove(peer);
       }
     } catch (_) {}
   }
 
-  Future<void> _pullFromPeer(
+  /// The revision summary an announcement carried, or null when it carried none
+  /// (an older version of the app) or it is not what it should be.
+  Map<String, int>? _summaryOf(Object? raw) {
+    if (raw is! Map) return null;
+    final result = <String, int>{};
+    for (final entry in raw.entries) {
+      final key = entry.key;
+      final value = entry.value;
+      if (key is! String || value is! num) return null;
+      result[key] = value.toInt();
+    }
+    return result;
+  }
+
+  /// True when the peer answered properly (whether or not it had anything).
+  Future<bool> _pullFromPeer(
     InternetAddress address,
     int port,
     String expectedSender,
@@ -204,7 +284,7 @@ class NativeLanSyncService implements LanSyncService {
         'type': 'pull',
         'sender': credentials.deviceId,
         'timestamp': DateTime.now().toUtc().millisecondsSinceEpoch,
-        'known': await _ref.read(syncServiceProvider).lanRevisionCursors(),
+        'known': await _cursorCache.get(),
       }, credentials);
       socket.add(utf8.encode('${jsonEncode(request)}\n'));
       await socket.flush();
@@ -221,7 +301,7 @@ class NativeLanSyncService implements LanSyncService {
       if (response['type'] != 'changes' ||
           response['sender'] != expectedSender ||
           !_fresh(response['timestamp'])) {
-        return;
+        return false;
       }
       final raw = response['changes'] as List? ?? const [];
       final changes = raw
@@ -238,6 +318,7 @@ class NativeLanSyncService implements LanSyncService {
           await _ref.read(licenseServiceProvider).acceptLease(offer);
         }
       } catch (_) {}
+      return true;
     } finally {
       await socket.close();
     }
@@ -349,6 +430,7 @@ class NativeLanSyncService implements LanSyncService {
 
   @override
   Future<void> dispose() async {
+    await _cursorCache.dispose();
     await _udpSubscription?.cancel();
     await _serverSubscription?.cancel();
     _udp?.close();
