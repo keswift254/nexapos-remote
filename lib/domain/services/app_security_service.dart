@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/providers.dart' show clockProvider;
 import '../../core/secure_storage_provider.dart';
 import '../entities/user.dart';
 import '../../data/repositories/user_repository_impl.dart';
@@ -10,6 +11,14 @@ import 'device_authentication_gateway_native.dart'
     as device_auth;
 
 const _biometricUserKey = 'nexapos.security.biometricUserId';
+
+/// How long a dismissed "set up quick sign in" reminder stays away.
+const biometricReminderEvery = Duration(hours: 72);
+
+/// One reminder clock per user, so one person dismissing it does not silence it
+/// for the next.
+String _biometricRemindKey(User user) =>
+    'nexapos.security.biometricRemindAfter.${user.id}';
 
 final deviceAuthenticationGatewayProvider =
     Provider<DeviceAuthenticationGateway>(
@@ -51,6 +60,39 @@ class AppSecurityService {
         .read(secureStorageProvider)
         .write(key: _biometricUserKey, value: user.id);
   }
+
+  /// Whether to nudge [user] to set up quick sign in (fingerprint, face or
+  /// Windows Hello): this device can do it, nobody has set it up on this device
+  /// yet (there is one such sign-in per device, so a second person is not invited
+  /// to take it over), and this user has not dismissed the reminder within the
+  /// last [biometricReminderEvery]. Any doubt means no reminder.
+  Future<bool> shouldRemindBiometricSetup(User user) async {
+    try {
+      if (!await _ref.read(deviceAuthenticationGatewayProvider).isSupported()) {
+        return false;
+      }
+      final storage = _ref.read(secureStorageProvider);
+      if (await storage.read(key: _biometricUserKey) != null) return false;
+      final raw = await storage.read(key: _biometricRemindKey(user));
+      final remindAfter = raw == null ? null : DateTime.tryParse(raw);
+      return remindAfter == null ||
+          !_ref.read(clockProvider).now().isBefore(remindAfter);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// "Dismiss": the reminder comes back for [user] after [biometricReminderEvery].
+  Future<void> dismissBiometricReminder(User user) =>
+      _ref.read(secureStorageProvider).write(
+        key: _biometricRemindKey(user),
+        value: _ref
+            .read(clockProvider)
+            .now()
+            .add(biometricReminderEvery)
+            .toUtc()
+            .toIso8601String(),
+      );
 
   Future<void> disable() =>
       _ref.read(secureStorageProvider).delete(key: _biometricUserKey);

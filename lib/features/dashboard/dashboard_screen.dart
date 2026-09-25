@@ -19,6 +19,7 @@ import '../../domain/services/reports_service.dart';
 import '../../domain/services/session_service.dart';
 import '../../domain/services/update_service.dart';
 import '../checkout/cart_notifier.dart';
+import '../settings/biometric_setup_banner.dart';
 import '../settings/clock_health_banner.dart';
 import 'product_search_dialog.dart';
 
@@ -388,6 +389,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                     ),
                   ],
                   const ClockHealthBanner(),
+                  const BiometricSetupBanner(),
                   if (homeScreenInstall.shouldOffer) ...[
                     const SizedBox(height: 12),
                     Card(
