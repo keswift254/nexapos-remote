@@ -264,17 +264,26 @@ class _PurchaseSectionState extends ConsumerState<PurchaseSection> {
         ),
       );
     } else {
-      final cheapestPerMonth = catalog.plans
-          .map((p) => p.amountKes / p.months)
-          .reduce((a, b) => a < b ? a : b);
-      final cheapest = catalog.plans
-          .where((p) => p.amountKes / p.months == cheapestPerMonth)
+      // "Best value" is judged among the ordinary month plans only: a token-price
+      // test plan (KSh 5 for a day) would otherwise always win the comparison.
+      final comparable = catalog.plans
+          .where((p) => !p.isTest && p.months > 0)
           .toList();
+      final cheapestPerMonth = comparable.isEmpty
+          ? null
+          : comparable
+                .map((p) => p.amountKes / p.months)
+                .reduce((a, b) => a < b ? a : b);
+      final cheapest = cheapestPerMonth == null
+          ? const <PurchasePlan>[]
+          : comparable
+                .where((p) => p.amountKes / p.months == cheapestPerMonth)
+                .toList();
       for (final plan in catalog.plans) {
         children.add(
           _PlanCard(
             plan: plan,
-            bestValue: catalog.plans.length > 1 &&
+            bestValue: comparable.length > 1 &&
                 cheapest.length == 1 &&
                 cheapest.single.id == plan.id,
             starting: _startingPlanId == plan.id,
@@ -316,6 +325,25 @@ class _PurchaseSectionState extends ConsumerState<PurchaseSection> {
   }
 }
 
+/// The small line under a plan's name: the monthly cost for an ordinary plan, and
+/// how long it lasts for a test or other short one.
+String _subtitle(PurchasePlan plan) {
+  if (plan.isTest) return 'To try paying - valid for ${_length(plan)}';
+  if (plan.months > 0) {
+    return '${_shillings((plan.amountKes / plan.months).round())} a month';
+  }
+  return 'Valid for ${_length(plan)}';
+}
+
+/// "3 months", "1 day", "1 month + 2 days".
+String _length(PurchasePlan plan) {
+  final parts = <String>[
+    if (plan.months > 0) '${plan.months} ${plan.months == 1 ? 'month' : 'months'}',
+    if (plan.days > 0) '${plan.days} ${plan.days == 1 ? 'day' : 'days'}',
+  ];
+  return parts.join(' + ');
+}
+
 class _PlanCard extends StatelessWidget {
   const _PlanCard({
     required this.plan,
@@ -334,7 +362,6 @@ class _PlanCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final perMonth = (plan.amountKes / plan.months).round();
     return Card(
       key: Key('plan-${plan.id}'),
       margin: EdgeInsets.zero,
@@ -362,6 +389,27 @@ class _PlanCard extends StatelessWidget {
                             fontWeight: FontWeight.bold,
                           ),
                         ),
+                        if (plan.isTest) ...[
+                          Container(
+                            key: Key('test-mark-${plan.id}'),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.shade100,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              'Test',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.orange.shade900,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
                         if (bestValue) ...[
                           Container(
                             padding: const EdgeInsets.symmetric(
@@ -385,7 +433,8 @@ class _PlanCard extends StatelessWidget {
                       ],
                     ),
                     Text(
-                      '${_shillings(perMonth)} a month',
+                      _subtitle(plan),
+                      key: Key('plan-note-${plan.id}'),
                       style: theme.textTheme.bodySmall,
                     ),
                   ],

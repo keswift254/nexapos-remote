@@ -406,6 +406,129 @@ void main() {
     });
   }
 
+  group('the KSh 5 test plan', () {
+    const testPlan = {'id': 'test', 'label': 'Test plan', 'months': 0, 'days': 1, 'amount_kes': 5, 'test': true};
+
+    List<Map<String, dynamic>> withTestPlan() => [...server.plans, testPlan];
+
+    testWidgets('shows after the real plans, marked as a test, one day, KSh 5', (tester) async {
+      server.plans = withTestPlan();
+      await openScreen(tester);
+
+      expect(find.text('Test plan'), findsOneWidget);
+      expect(find.widgetWithText(FilledButton, 'KSh 5'), findsOneWidget);
+      expect(find.byKey(const Key('test-mark-test')), findsOneWidget);
+      expect(find.text('Test'), findsOneWidget);
+      expect(find.text('To try paying - valid for 1 day'), findsOneWidget);
+      // Below the real ones, not among them.
+      final testY = tester.getTopLeft(find.byKey(const Key('plan-test'))).dy;
+      final yearY = tester.getTopLeft(find.byKey(const Key('plan-m12'))).dy;
+      expect(testY, greaterThan(yearY));
+
+      await close(tester);
+    });
+
+    testWidgets('does not take "Best value" from the real plans, and is not one itself', (tester) async {
+      server.plans = withTestPlan();
+      await openScreen(tester);
+
+      expect(find.text('Best value'), findsOneWidget);
+      expect(find.descendant(of: find.byKey(const Key('plan-m12')), matching: find.text('Best value')), findsOneWidget);
+      expect(find.descendant(of: find.byKey(const Key('plan-test')), matching: find.text('Best value')), findsNothing);
+      // The real plans keep their per-month cost; the test plan has none.
+      expect(find.text('KSh 500 a month'), findsNWidgets(2));
+      expect(find.text('KSh 400 a month'), findsOneWidget);
+      expect(find.text('KSh 5 a month'), findsNothing);
+
+      await close(tester);
+    });
+
+    testWidgets('even a test plan priced per month (so it would be the cheapest) is never called best value', (tester) async {
+      server.plans = [
+        ...server.plans,
+        {'id': 'test', 'label': 'Test plan', 'months': 1, 'days': 0, 'amount_kes': 5, 'test': true},
+      ];
+      await openScreen(tester);
+
+      expect(find.descendant(of: find.byKey(const Key('plan-test')), matching: find.text('Best value')), findsNothing);
+      expect(find.descendant(of: find.byKey(const Key('plan-m12')), matching: find.text('Best value')), findsOneWidget);
+      expect(find.text('To try paying - valid for 1 month'), findsOneWidget, reason: 'it says it is a test, not "KSh 5 a month"');
+
+      await close(tester);
+    });
+
+    testWidgets('alone (the real plans gone) it is still listed and nothing is called best value', (tester) async {
+      server.plans = [testPlan];
+      await openScreen(tester);
+
+      expect(find.byKey(const Key('pay-test')), findsOneWidget);
+      expect(find.text('Best value'), findsNothing);
+
+      await close(tester);
+    });
+
+    testWidgets('paying for it: the server is asked for the test plan, and the device activates when it is paid', (tester) async {
+      server.plans = withTestPlan();
+      server.statusScript = [
+        {'success': true, 'status': 'pending'},
+        {'success': true, 'status': 'issued', 'code': FakeLicenseServer.licenseCode},
+      ];
+      await openScreen(tester);
+
+      await buy(tester, 'test', email: 'felix@example.com');
+
+      // Only the plan id and the email are sent - never an amount.
+      expect(server.lastStart, {'device_id': 'test-device', 'plan_id': 'test', 'email': 'felix@example.com'});
+      expect(find.text('KSh 5 - Test plan'), findsOneWidget);
+      await pass(tester, const Duration(seconds: 6));
+      await tester.pumpAndSettle();
+      expect(server.activatedCodes, [FakeLicenseServer.licenseCode]);
+      expect(await container.read(licenseServiceProvider).hasValidCachedLicense(), isTrue);
+
+      await close(tester);
+    });
+
+    testWidgets('the email prompt names the plan and its price', (tester) async {
+      server.plans = withTestPlan();
+      await openScreen(tester);
+
+      await tester.tap(find.byKey(const Key('pay-test')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Test plan - KSh 5'), findsOneWidget);
+
+      await close(tester);
+    });
+
+    testWidgets('the server refusing it (already used on this device) is shown in its words', (tester) async {
+      server.plans = withTestPlan();
+      server.startAnswer = http.Response(
+        jsonEncode({'success': false, 'message': 'The test plan has already been used on this device.'}),
+        422,
+      );
+      await openScreen(tester);
+
+      await buy(tester, 'test');
+
+      expect(find.textContaining('already been used on this device'), findsOneWidget);
+      expect(find.byKey(const Key('payment-dialog')), findsNothing);
+
+      await close(tester);
+    });
+
+    for (final width in [320.0, 360.0]) {
+      testWidgets('fits a ${width.toInt()}-pixel-wide phone next to the real plans', (tester) async {
+        server.plans = withTestPlan();
+        await openScreen(tester, size: Size(width, 2600));
+
+        expect(find.byKey(const Key('plan-test')), findsOneWidget);
+        expect(tester.takeException(), isNull);
+
+        await close(tester);
+      });
+    }
+  });
+
   group('restoring after a reinstall', () {
     Future<void> openRestore(WidgetTester tester) async {
       await tester.ensureVisible(find.byKey(const Key('restore-open')));

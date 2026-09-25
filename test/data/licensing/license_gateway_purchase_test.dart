@@ -13,6 +13,7 @@ void main() {
     test('reads the plans the server lists, in its order', () async {
       final gateway = LicenseGateway(MockClient((request) async {
         expect(request.url.queryParameters['action'], 'plans');
+        expect(request.url.queryParameters['v'], '2', reason: 'asks for the format that carries days and the test mark');
         expect(request.method, 'GET');
         return http.Response(jsonEncode({
           'success': true,
@@ -188,6 +189,57 @@ void main() {
         () => ask(answering({'success': false, 'message': 'Unknown payment.'}, 404)),
         throwsA(isA<LicenseException>().having((e) => e.message, 'message', 'Unknown payment.')),
       );
+    });
+  });
+
+  group('a short test plan (days, marked test)', () {
+    LicenseGateway serving(List<Map<String, dynamic>> plans) => LicenseGateway(MockClient((request) async =>
+        http.Response(jsonEncode({'success': true, 'purchasing_enabled': true, 'plans': plans}), 200)));
+
+    test('is read: no months, one day, marked as a test', () async {
+      final catalog = await serving([
+        {'id': 'm3', 'label': '3 months', 'months': 3, 'days': 0, 'amount_kes': 1500, 'test': false},
+        {'id': 'test', 'label': 'Test plan', 'months': 0, 'days': 1, 'amount_kes': 5, 'test': true},
+      ]).fetchPlans(baseUrl: _baseUrl);
+
+      expect(catalog.plans.map((p) => p.id), ['m3', 'test']);
+      final test = catalog.plans.last;
+      expect(test.label, 'Test plan');
+      expect(test.months, 0);
+      expect(test.days, 1);
+      expect(test.amountKes, 5);
+      expect(test.isTest, isTrue);
+      expect(catalog.plans.first.isTest, isFalse);
+      expect(catalog.plans.first.days, 0);
+    });
+
+    test('a plan from before days and test existed reads as an ordinary month plan', () async {
+      final catalog = await serving([
+        {'id': 'm6', 'label': '6 months', 'months': 6, 'amount_kes': 3000},
+      ]).fetchPlans(baseUrl: _baseUrl);
+
+      expect(catalog.plans.single.days, 0);
+      expect(catalog.plans.single.isTest, isFalse);
+    });
+
+    test('only an explicit true marks a plan as a test', () async {
+      final catalog = await serving([
+        {'id': 'a', 'label': 'A', 'months': 1, 'amount_kes': 500, 'test': 'yes'},
+        {'id': 'b', 'label': 'B', 'months': 1, 'amount_kes': 500, 'test': 1},
+      ]).fetchPlans(baseUrl: _baseUrl);
+
+      expect(catalog.plans.map((p) => p.isTest), [false, false]);
+    });
+
+    test('a plan with neither months nor days, or a negative one, is still left out', () async {
+      final catalog = await serving([
+        {'id': 'none', 'label': 'None', 'months': 0, 'days': 0, 'amount_kes': 500},
+        {'id': 'neg', 'label': 'Negative', 'months': 0, 'days': -1, 'amount_kes': 500},
+        {'id': 'negm', 'label': 'Negative months', 'months': -1, 'days': 2, 'amount_kes': 500},
+        {'id': 'ok', 'label': 'Fine', 'months': 0, 'days': 2, 'amount_kes': 500},
+      ]).fetchPlans(baseUrl: _baseUrl);
+
+      expect(catalog.plans.map((p) => p.id), ['ok']);
     });
   });
 

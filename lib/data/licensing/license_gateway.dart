@@ -62,12 +62,21 @@ class PurchasePlan {
   final String id;
   final String label;
   final int months;
+
+  /// Days on top of [months] - a short plan has 0 months and some days.
+  final int days;
   final int amountKes;
+
+  /// A temporary plan for trying the payment flow with a token amount. Shown with
+  /// a "Test" mark and kept out of the "best value" comparison.
+  final bool isTest;
   const PurchasePlan({
     required this.id,
     required this.label,
     required this.months,
+    this.days = 0,
     required this.amountKes,
+    this.isTest = false,
   });
 
   static PurchasePlan? fromJson(Object? decoded) {
@@ -75,16 +84,21 @@ class PurchasePlan {
     final id = decoded['id'];
     final label = decoded['label'];
     final months = decoded['months'];
+    final rawDays = decoded['days'];
     final amount = decoded['amount_kes'];
     if (id is! String || id.isEmpty || label is! String) return null;
-    if (months is! num || months < 1 || amount is! num || amount < 1) {
+    final days = rawDays is num ? rawDays.toInt() : 0;
+    if (months is! num || months < 0 || days < 0 || (months < 1 && days < 1)) {
       return null;
     }
+    if (amount is! num || amount < 1) return null;
     return PurchasePlan(
       id: id,
       label: label,
       months: months.toInt(),
+      days: days,
       amountKes: amount.toInt(),
+      isTest: decoded['test'] == true,
     );
   }
 }
@@ -205,9 +219,17 @@ class LicenseGateway {
     );
   }
 
-  /// What is for sale. Public and read-only; needs no device or key.
+  /// What is for sale. Public and read-only; needs no device or key. Asks for
+  /// format 2 (`v=2`): plans that last days rather than months, and the mark on a
+  /// test plan. Without it the server describes such a plan the way an older app
+  /// understands it.
   Future<PlanCatalog> fetchPlans({required String baseUrl}) async {
-    final response = await _call('GET', 'plans', baseUrl);
+    final response = await _call(
+      'GET',
+      'plans',
+      baseUrl,
+      queryParameters: const {'v': '2'},
+    );
     if (response['success'] != true) {
       throw LicenseException(
         platformResponseMessage(response, 'Could not load the plans.'),
@@ -367,6 +389,7 @@ class LicenseGateway {
     String baseUrl, {
     String? bearerToken,
     Map<String, dynamic>? body,
+    Map<String, String>? queryParameters,
     void Function(DateTime serverTime)? onServerTime,
   }) async {
     try {
@@ -377,6 +400,7 @@ class LicenseGateway {
         baseUrl,
         apiKey: bearerToken,
         body: body,
+        queryParameters: queryParameters,
         onServerTime: onServerTime,
       );
     } on PaystackOfflineException {

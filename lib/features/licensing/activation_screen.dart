@@ -12,6 +12,7 @@ import '../../data/payments/platform_http_client.dart';
 import '../../data/payments/platform_onboarding_gateway.dart';
 import '../../domain/entities/paystack_credentials.dart';
 import '../../domain/services/paystack_credentials_service.dart';
+import 'activation_update_notice.dart';
 import 'purchase_section.dart';
 import 'restore_dialog.dart';
 
@@ -321,6 +322,9 @@ class _ActivationScreenState extends ConsumerState<ActivationScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  // First, because it may be what unblocks this device: an old build
+                  // can lack the way to pay, and the update brings it.
+                  const ActivationUpdateNotice(),
                   const _LicenseEndedBanner(),
                   const _JoinedAccessBanner(),
                   Icon(
