@@ -90,7 +90,7 @@ void main() {
     expect(find.text('Your license has expired'), findsOneWidget);
     expect(find.textContaining('It ran out on'), findsOneWidget);
     expect(find.textContaining('2025'), findsOneWidget);
-    expect(find.textContaining('enter your license key below'), findsOneWidget);
+    expect(find.textContaining('Choose a plan below to renew'), findsOneWidget);
     // The way back in is still right there.
     expect(find.text('Activate NexaPOS'), findsOneWidget);
     expect(find.widgetWithText(FilledButton, 'Activate'), findsOneWidget);
@@ -103,7 +103,7 @@ void main() {
 
     expect(find.text('Your license has expired'), findsOneWidget);
     expect(find.textContaining('It ran out on'), findsNothing);
-    expect(find.textContaining('Contact NexaPOS to renew it'), findsOneWidget);
+    expect(find.textContaining('Choose a plan below to renew'), findsOneWidget);
 
     await close(tester);
   });

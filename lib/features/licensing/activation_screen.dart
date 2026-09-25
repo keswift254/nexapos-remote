@@ -12,6 +12,7 @@ import '../../data/payments/platform_http_client.dart';
 import '../../data/payments/platform_onboarding_gateway.dart';
 import '../../domain/entities/paystack_credentials.dart';
 import '../../domain/services/paystack_credentials_service.dart';
+import 'purchase_section.dart';
 
 const _whatsappSupportUrl = 'https://wa.me/message/M5SGWZ664XJ4C1';
 
@@ -76,8 +77,8 @@ class _LicenseEndedBannerState extends ConsumerState<_LicenseEndedBanner> {
     final (title, body, color, icon) = switch (end.reason) {
       LicenseEndReason.expired => (
         'Your license has expired',
-        '${ranOutOn}Contact NexaPOS to renew it, then enter your license key '
-            'below to continue.',
+        '${ranOutOn}Choose a plan below to renew, or enter a license key you '
+            'already have.',
         Colors.orange.shade800,
         Icons.event_busy,
       ),
@@ -152,6 +153,35 @@ class _JoinedAccessBannerState extends ConsumerState<_JoinedAccessBanner> {
           'online at least once every ${joinedMembershipGrace.inHours} hours. '
           'It reopens by itself as soon as it is connected - there is '
           'nothing to enter.',
+    );
+  }
+}
+
+class _OrDivider extends StatelessWidget {
+  const _OrDivider(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        const Expanded(child: Divider()),
+        // Flexible so the words shrink to fit (and wrap) on a very narrow
+        // screen rather than running past the edge.
+        Flexible(
+          flex: 3,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Text(
+              text,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+        ),
+        const Expanded(child: Divider()),
+      ],
     );
   }
 }
@@ -295,12 +325,20 @@ class _ActivationScreenState extends ConsumerState<ActivationScreen> {
                     style: Theme.of(context).textTheme.headlineSmall,
                     textAlign: TextAlign.center,
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 16),
+                  // Buy a license right here: pay on Paystack and this device
+                  // activates by itself. Never in the way of the key below.
+                  PurchaseSection(
+                    onActivated: () => unawaited(_registerPrimaryDevice()),
+                  ),
+                  const SizedBox(height: 16),
+                  const _OrDivider('or enter a license key'),
+                  const SizedBox(height: 12),
                   const Text(
                     'Enter the license key you received after purchase.',
                     textAlign: TextAlign.center,
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 16),
                   TextFormField(
                     controller: _codeController,
                     decoration: const InputDecoration(labelText: 'License key'),
