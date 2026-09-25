@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:drift/drift.dart' hide isNotNull;
+import 'package:drift/drift.dart' hide isNotNull, isNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -200,18 +200,69 @@ void main() {
       expect(requests, greaterThan(0));
     });
 
-    test('a slow server that IS reachable still holds the queue - the known limit of this fix', () async {
-      // Documented rather than fixed: a route that exists but answers slowly (a
-      // server waking up) is a real wait, and LAN changes queue behind it.
+    test('a slow server that IS reachable no longer holds a LAN change: the waiting cloud request steps aside', () async {
+      // A route that exists but answers slowly (a server waking up). The change from
+      // the till next to this one must not wait for it.
       final service = build(isReachable: (_) async => true);
       final changes = await changeFromAnotherTill();
 
       final cycle = service.runSyncCycle();
-      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(requests, greaterThan(0), reason: 'the cloud cycle is out waiting on the server');
+
       var applied = false;
       final apply = service.applyLanChanges(changes).then((_) => applied = true);
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-      expect(applied, isFalse, reason: 'queued behind the slow cloud request');
+      await apply.timeout(const Duration(seconds: 2)); // the server has NOT answered
+      expect(applied, isTrue);
+      expect((await db.select(db.categories).get()).any((r) => r.id == 'from-till-2'), isTrue);
+
+      await cycle.timeout(const Duration(seconds: 2)); // and the cycle itself ended, not left hanging
+      expect(service.lastError, isNull, reason: 'setting aside for a nearby device is not "offline"');
+      expect(service.progress.value.message, isNot(contains('Offline')));
+      expect(service.progress.value.busy, isFalse);
+    });
+
+    test('after a LAN change took priority the next cloud cycle works normally', () async {
+      final service = build(isReachable: (_) async => true);
+      final changes = await changeFromAnotherTill();
+      final cycle = service.runSyncCycle();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await service.applyLanChanges(changes).timeout(const Duration(seconds: 2));
+      await cycle.timeout(const Duration(seconds: 2));
+
+      serverAnswers.complete();
+      final before = requests;
+      await service.runSyncCycle().timeout(const Duration(seconds: 5));
+
+      expect(requests, greaterThan(before), reason: 'requests are allowed again once the change is in');
+      expect(service.lastError, isNull);
+      expect(service.lastSuccess, isNotNull);
+    });
+
+    test('a LAN change with nothing in it does not disturb a cloud cycle', () async {
+      final service = build(isReachable: (_) async => true);
+      final cycle = service.runSyncCycle();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+
+      await service.applyLanChanges(const []).timeout(const Duration(milliseconds: 500));
+      serverAnswers.complete();
+      await cycle.timeout(const Duration(seconds: 5));
+
+      expect(service.lastSuccess, isNotNull, reason: 'the cycle was not set aside for a no-op');
+    });
+
+    test('joining a shop and its first download are NOT set aside - a LAN change waits for them', () async {
+      await db.customStatement("INSERT INTO local_safety_state(id, value) VALUES('shop_hydration', 'pending')");
+      final service = build(isReachable: (_) async => true);
+      final changes = await changeFromAnotherTill();
+
+      final cycle = service.runSyncCycle();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(requests, greaterThan(0), reason: 'the first download is out waiting on the server');
+      var applied = false;
+      final apply = service.applyLanChanges(changes).then((_) => applied = true);
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      expect(applied, isFalse, reason: 'the first download runs to the end before anything else');
 
       serverAnswers.complete();
       await cycle;

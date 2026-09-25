@@ -259,6 +259,10 @@ class SyncService {
 
   Future<void>? _syncInFlight;
 
+  /// True only while the routine push/pull of a cycle is running (not while
+  /// joining or downloading a shop's first snapshot).
+  bool _steadyStateNetwork = false;
+
   Future<void> runSyncCycle() => _syncInFlight ??= _reachableSyncCycle()
       .whenComplete(() => _syncInFlight = null);
 
@@ -302,6 +306,7 @@ class SyncService {
     if (!credentials.isConfigured) return;
 
     lastError = null;
+    var setAside = false;
     // A device still catching up on its very first shop download retries this
     // whole cycle every hydratingSyncRetryInterval (see app.dart's
     // _scheduleNextSync) until it finishes. Emitting this generic message here
@@ -357,10 +362,23 @@ class SyncService {
           "DELETE FROM local_safety_state WHERE id='shop_hydration'",
         );
       }
-      await pushLocalChanges(credentials.baseUrl, credentials.apiKey);
-      await pullRemoteChanges(credentials.baseUrl, credentials.apiKey);
+      // The steady-state exchange. Only THIS part may be set aside for a LAN change
+      // (see applyLanChanges): joining a shop and the first download must run to
+      // the end, so they never count.
+      _steadyStateNetwork = true;
+      try {
+        await pushLocalChanges(credentials.baseUrl, credentials.apiKey);
+        await pullRemoteChanges(credentials.baseUrl, credentials.apiKey);
+      } finally {
+        _steadyStateNetwork = false;
+      }
       lastError = null;
       lastSuccess = DateTime.now();
+    } on SyncRequestAbandoned {
+      // A change from another device on the LAN took priority. Not an error and
+      // not "offline": the cycle just runs again on its next turn.
+      lastError = null;
+      setAside = true;
     } on PaystackOfflineException catch (e) {
       lastError = e.timedOut
           ? 'The server is slow to answer right now, so this is taking longer. '
@@ -377,7 +395,7 @@ class SyncService {
       lastError = 'Sync could not complete. Local data is retained; retry from Device Sync.';
     } finally {
       _progress(
-        lastError ?? 'Sync complete',
+        lastError ?? (setAside ? 'Sync will continue in a moment' : 'Sync complete'),
         completed: progress.value.completed,
         total: progress.value.total,
         busy: false,
@@ -750,7 +768,21 @@ class SyncService {
     return result;
   }
 
-  Future<void> applyLanChanges(List<LanSyncChange> changes) => exclusive(
+  Future<void> applyLanChanges(List<LanSyncChange> changes) {
+    // Nothing to apply needs no place in the queue (a pull that found the peer
+    // had nothing new used to wait behind a cloud cycle just to do nothing).
+    if (changes.isEmpty) return Future<void>.value();
+    // A cloud cycle that is waiting on the server would keep this change
+    // queued behind it for as long as the request lasts (up to a minute on a slow
+    // route). Ask it to step aside instead - it runs again on its next turn.
+    final setAside = _steadyStateNetwork;
+    if (setAside) _gateway.holdRequests();
+    return _applyLanChanges(changes).whenComplete(() {
+      if (setAside) _gateway.releaseRequests();
+    });
+  }
+
+  Future<void> _applyLanChanges(List<LanSyncChange> changes) => exclusive(
     () async {
       if (changes.isEmpty) return;
       await _ensureLanTables();

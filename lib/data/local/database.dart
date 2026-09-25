@@ -160,6 +160,20 @@ class AppDatabase extends _$AppDatabase {
                 BEGIN SELECT RAISE(ABORT, 'Resolve the shop change before editing data'); END''');
             }
           }
+          // The LAN sync asks "what is the newest revision each device made" and
+          // "what came after revision N from device X" of every synced table,
+          // both after every write and on every pull. With no index on those
+          // columns each such question reads the whole table - fine for a small
+          // shop, seconds for one with a few years of sales. Idempotent.
+          for (final table in allTables) {
+            final columns = table.$columns.map((c) => c.$name).toSet();
+            if (columns.contains('created_by_device_id') && columns.contains('local_rev')) {
+              final name = table.actualTableName;
+              await customStatement(
+                'CREATE INDEX IF NOT EXISTS idx_${name}_source_rev ON "$name"(created_by_device_id, local_rev)',
+              );
+            }
+          }
           // WAL mode so report/list screens can keep reading while a
           // checkout transaction commits - native only. WAL needs
           // shared-memory-backed locking (a `-shm` file alongside the

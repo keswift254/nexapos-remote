@@ -8,6 +8,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/providers.dart';
 import '../../core/secure_storage_provider.dart';
 import '../../data/payments/platform_onboarding_gateway.dart';
+import '../../data/sync/sync_table_registry.dart';
+import 'lan_announce_scheduler.dart';
 import 'lan_cursor_cache.dart';
 import 'lan_pull_policy.dart';
 import 'lan_sync_service.dart';
@@ -52,6 +54,18 @@ class NativeLanSyncService implements LanSyncService {
   final Stopwatch _monotonic = Stopwatch()..start();
   bool _watchingDatabase = false;
 
+  // Something changed on THIS device: tell the others now, not at the next tick
+  // of the 2-second heartbeat.
+  late final LanAnnounceScheduler _scheduler = LanAnnounceScheduler(
+    _announceFresh,
+  );
+  StreamSubscription<Set<dynamic>>? _changeSubscription;
+
+  // Which addresses an announcement goes to (see lanBroadcastTargets); the
+  // adapters rarely change, so the list is kept for a little while.
+  List<InternetAddress>? _targets;
+  Duration? _targetsAt;
+
   /// More sources than this and the summary would push an announcement past what
   /// one UDP packet carries reliably, so it is left out (peers then pull every
   /// time, as they always did).
@@ -62,6 +76,41 @@ class NativeLanSyncService implements LanSyncService {
   @override
   Future<void> syncNow() =>
       _inFlight ??= _syncNow().whenComplete(() => _inFlight = null);
+
+  /// An announcement that is certain to include the newest change: one already
+  /// being built may have been assembled before it, so wait for that one and send
+  /// another.
+  Future<void> _announceFresh() async {
+    final building = _inFlight;
+    if (building != null) {
+      try {
+        await building;
+      } catch (_) {}
+    }
+    await syncNow();
+  }
+
+  Future<List<InternetAddress>> _broadcastTargets() async {
+    final now = _monotonic.elapsed;
+    final cached = _targets;
+    final at = _targetsAt;
+    if (cached != null && at != null && now - at < const Duration(seconds: 15)) {
+      return cached;
+    }
+    var found = <InternetAddress>[];
+    try {
+      final interfaces = await NetworkInterface.list(
+        type: InternetAddressType.IPv4,
+        includeLoopback: false,
+      );
+      found = [for (final i in interfaces) ...i.addresses];
+    } catch (_) {
+      // No list: the limited broadcast alone, as before.
+    }
+    _targets = lanBroadcastTargets(found);
+    _targetsAt = now;
+    return _targets!;
+  }
 
   Future<void> _syncNow() async {
     final credentials = await _loadCredentials();
@@ -84,11 +133,17 @@ class NativeLanSyncService implements LanSyncService {
       'timestamp': DateTime.now().toUtc().millisecondsSinceEpoch,
       'cursors': ?summary,
     }, credentials);
-    udp.send(
-      utf8.encode(jsonEncode(announcement)),
-      InternetAddress('255.255.255.255'),
-      _discoveryPort,
-    );
+    final bytes = utf8.encode(jsonEncode(announcement));
+    // Out of every network adapter, not just the one the system picks for the
+    // limited broadcast. A receiver that hears the same packet twice ignores the
+    // copy (its nonce has been seen).
+    for (final target in await _broadcastTargets()) {
+      try {
+        udp.send(bytes, target, _discoveryPort);
+      } catch (_) {
+        // An adapter that cannot send right now must not stop the others.
+      }
+    }
   }
 
   Future<_Credentials?> _loadCredentials() async {
@@ -162,7 +217,13 @@ class NativeLanSyncService implements LanSyncService {
   Future<void> _ensureListening() async {
     if (!_watchingDatabase) {
       _watchingDatabase = true;
-      _cursorCache.attach(_ref.read(appDatabaseProvider).tableUpdates());
+      final database = _ref.read(appDatabaseProvider);
+      _cursorCache.attach(database.tableUpdates());
+      _changeSubscription = database.tableUpdates().listen((updates) {
+        if (updates.any((u) => syncTableAdapters.containsKey(u.table))) {
+          _scheduler.changed();
+        }
+      });
     }
     if (_server == null) {
       _server = await ServerSocket.bind(
@@ -430,6 +491,8 @@ class NativeLanSyncService implements LanSyncService {
 
   @override
   Future<void> dispose() async {
+    _scheduler.dispose();
+    await _changeSubscription?.cancel();
     await _cursorCache.dispose();
     await _udpSubscription?.cancel();
     await _serverSubscription?.cancel();

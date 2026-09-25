@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:http/http.dart' as http;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
@@ -10,6 +12,15 @@ part 'platform_sync_gateway.g.dart';
 
 @Riverpod(keepAlive: true)
 PlatformSyncGateway platformSyncGateway(Ref ref) => PlatformSyncGateway();
+
+/// A routine cloud request that was given up on because a change from another
+/// device on the LAN needed to be applied (see [PlatformSyncGateway.holdRequests]).
+class SyncRequestAbandoned implements Exception {
+  const SyncRequestAbandoned();
+
+  @override
+  String toString() => 'The request was set aside for a nearby device.';
+}
 
 class PulledChange {
   final int id;
@@ -82,6 +93,40 @@ class PlatformSyncGateway {
   PlatformSyncGateway([http.Client? client])
     : _client = client ?? http.Client();
 
+  // A cloud sync that is waiting on the server must not keep a change that
+  // arrived from the till next to it (over the LAN) waiting too: those two
+  // devices are a metre apart and the server may be a slow internet route away.
+  // While a LAN change is being applied ([holdRequests]) the routine push/pull
+  // requests give up at once - and a request already waiting is abandoned - so
+  // the cloud cycle ends and the change goes in immediately. The cycle simply
+  // runs again on its next turn; nothing is lost, because a request that was
+  // abandoned is treated exactly like one that timed out (both are retried).
+  final Set<Completer<Never>> _waiting = {};
+  int _holds = 0;
+
+  /// Stops the routine push/pull requests (abandoning any that are waiting)
+  /// until the matching [releaseRequests].
+  void holdRequests() {
+    _holds++;
+    for (final waiting in _waiting.toList()) {
+      if (!waiting.isCompleted) waiting.completeError(const SyncRequestAbandoned());
+    }
+    _waiting.clear();
+  }
+
+  void releaseRequests() {
+    if (_holds > 0) _holds--;
+  }
+
+  /// Sends the request unless requests are being held (then it is never sent),
+  /// and gives up waiting for it if they become held while it is out.
+  Future<T> _abandonable<T>(Future<T> Function() send) {
+    if (_holds > 0) return Future<T>.error(const SyncRequestAbandoned());
+    final abandon = Completer<Never>();
+    _waiting.add(abandon);
+    return Future.any<T>([send(), abandon.future]).whenComplete(() => _waiting.remove(abandon));
+  }
+
   Future<SyncSnapshotPage> startSnapshot(String baseUrl, String apiKey) async =>
       SyncSnapshotPage.fromJson(
         await platformRequest(
@@ -137,7 +182,7 @@ class PlatformSyncGateway {
     required List<Map<String, dynamic>> changes,
   }) async {
     if (changes.isEmpty) return;
-    final response = await platformRequest(
+    final response = await _abandonable(() => platformRequest(
       _client,
       'POST',
       'push_changes',
@@ -145,7 +190,7 @@ class PlatformSyncGateway {
       apiKey: apiKey,
       body: {'changes': changes},
       timeout: platformSyncRequestTimeout,
-    );
+    ));
     if (response['success'] != true) {
       throw PaystackException(
         platformResponseMessage(response, 'Could not push changes.'),
@@ -158,7 +203,7 @@ class PlatformSyncGateway {
     required String apiKey,
     required int since,
   }) async {
-    final response = await platformRequest(
+    final response = await _abandonable(() => platformRequest(
       _client,
       'GET',
       'pull_changes',
@@ -166,7 +211,7 @@ class PlatformSyncGateway {
       apiKey: apiKey,
       queryParameters: {'since': '$since'},
       timeout: platformSyncRequestTimeout,
-    );
+    ));
     if (response['success'] != true) {
       throw PaystackException(
         platformResponseMessage(response, 'Could not pull changes.'),
