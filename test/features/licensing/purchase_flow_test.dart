@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -23,6 +24,12 @@ class _FixedDevice extends SyncMetadataService {
   _FixedDevice(super.db);
   @override
   Future<String> deviceId() async => 'test-device';
+}
+
+class _LongDevice extends SyncMetadataService {
+  _LongDevice(super.db);
+  @override
+  Future<String> deviceId() async => '3f2b8c1e-9d4a-4e6b-a7c3-1f5e8d2b9a04';
 }
 
 void main() {
@@ -398,6 +405,294 @@ void main() {
       await close(tester);
     });
   }
+
+  group('restoring after a reinstall', () {
+    Future<void> openRestore(WidgetTester tester) async {
+      await tester.ensureVisible(find.byKey(const Key('restore-open')));
+      await tester.tap(find.byKey(const Key('restore-open')));
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> sendCode(WidgetTester tester, {String email = 'me@shop.co.ke'}) async {
+      await tester.enterText(find.byKey(const Key('restore-email')), email);
+      await tester.tap(find.byKey(const Key('restore-send-code')));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('is offered on the activation screen, next to the plans', (tester) async {
+      await openScreen(tester);
+
+      expect(find.byKey(const Key('restore-open')), findsOneWidget);
+      expect(find.text('Already paid? Restore my license'), findsOneWidget);
+      expect(find.byKey(const Key('restore-dialog')), findsNothing);
+
+      await close(tester);
+    });
+
+    testWidgets('asks for the email first, checking it, and says what it does and does not bring back', (tester) async {
+      await openScreen(tester);
+      await openRestore(tester);
+
+      expect(find.byKey(const Key('restore-dialog')), findsOneWidget);
+      expect(find.textContaining('Reinstalled NexaPOS or changed phone?'), findsOneWidget);
+      expect(find.textContaining('Your shop data is not part of it'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('restore-send-code')));
+      await tester.pumpAndSettle();
+      expect(find.text('Enter the email address you paid with.'), findsOneWidget);
+      await tester.enterText(find.byKey(const Key('restore-email')), 'not-an-email');
+      await tester.tap(find.byKey(const Key('restore-send-code')));
+      await tester.pumpAndSettle();
+      expect(find.text('Enter the email address you paid with.'), findsOneWidget);
+      expect(server.restoreStartCalls, 0, reason: 'nothing is sent until the email looks right');
+
+      await close(tester);
+    });
+
+    testWidgets('the whole trip: email, emailed code, and this device is licensed', (tester) async {
+      await openScreen(tester);
+      await openRestore(tester);
+
+      await sendCode(tester);
+
+      expect(server.lastRestoreStart, {'device_id': 'test-device', 'email': 'me@shop.co.ke'});
+      expect(find.byKey(const Key('restore-info')), findsOneWidget);
+      expect(find.textContaining('6-digit code is on its way'), findsOneWidget);
+      expect(find.textContaining('Sent to me@shop.co.ke'), findsOneWidget);
+      expect(find.byKey(const Key('restore-code')), findsOneWidget);
+      expect(server.activateCalls, 0);
+
+      await tester.enterText(find.byKey(const Key('restore-code')), '123456');
+      await tester.tap(find.byKey(const Key('restore-confirm')));
+      await tester.pumpAndSettle();
+
+      expect(server.lastRestoreConfirm, {'device_id': 'test-device', 'email': 'me@shop.co.ke', 'code': '123456'});
+      expect(server.activatedCodes, [FakeLicenseServer.restoredLicenseCode]);
+      expect(find.byKey(const Key('restore-dialog')), findsNothing);
+      expect(await container.read(licenseServiceProvider).hasValidCachedLicense(), isTrue);
+
+      await close(tester);
+    });
+
+    testWidgets('a wrong code is explained and can be retried; nothing is activated', (tester) async {
+      await openScreen(tester);
+      await openRestore(tester);
+      await sendCode(tester);
+
+      await tester.enterText(find.byKey(const Key('restore-code')), '999999');
+      await tester.tap(find.byKey(const Key('restore-confirm')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('restore-error')), findsOneWidget);
+      expect(find.textContaining('not right'), findsOneWidget);
+      expect(find.byKey(const Key('restore-dialog')), findsOneWidget, reason: 'stays open to try again');
+      expect(server.activateCalls, 0);
+
+      await tester.enterText(find.byKey(const Key('restore-code')), '123456');
+      await tester.tap(find.byKey(const Key('restore-confirm')));
+      await tester.pumpAndSettle();
+      expect(server.activatedCodes, [FakeLicenseServer.restoredLicenseCode]);
+
+      await close(tester);
+    });
+
+    testWidgets('a code that is not 6 digits is not sent', (tester) async {
+      await openScreen(tester);
+      await openRestore(tester);
+      await sendCode(tester);
+
+      await tester.enterText(find.byKey(const Key('restore-code')), '12');
+      await tester.tap(find.byKey(const Key('restore-confirm')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Enter the 6-digit code from the email.'), findsOneWidget);
+      expect(server.restoreConfirmCalls, 0);
+
+      await close(tester);
+    });
+
+    testWidgets('only digits can be typed into the code box', (tester) async {
+      await openScreen(tester);
+      await openRestore(tester);
+      await sendCode(tester);
+
+      await tester.enterText(find.byKey(const Key('restore-code')), '1a2b3c4d5e6f7');
+
+      expect(tester.widget<TextField>(find.byKey(const Key('restore-code'))).controller!.text, '123456');
+
+      await close(tester);
+    });
+
+    testWidgets('a new code can be asked for, and a different email tried', (tester) async {
+      await openScreen(tester);
+      await openRestore(tester);
+      await sendCode(tester);
+      expect(server.restoreStartCalls, 1);
+
+      await tester.tap(find.byKey(const Key('restore-resend')));
+      await tester.pumpAndSettle();
+      expect(server.restoreStartCalls, 2);
+
+      await tester.tap(find.byKey(const Key('restore-other-email')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('restore-email')), findsOneWidget);
+      await sendCode(tester, email: 'other@shop.co.ke');
+      expect(server.lastRestoreStart, {'device_id': 'test-device', 'email': 'other@shop.co.ke'});
+
+      await close(tester);
+    });
+
+    testWidgets('the server refusing (too many tries) is shown in its words', (tester) async {
+      server.restoreStartAnswer = http.Response(
+        jsonEncode({'success': false, 'message': 'Too many attempts. Wait a little while, then try again.'}),
+        429,
+      );
+      await openScreen(tester);
+      await openRestore(tester);
+
+      await sendCode(tester);
+
+      expect(find.textContaining('Too many attempts'), findsOneWidget);
+      expect(find.byKey(const Key('restore-code')), findsNothing, reason: 'no code was sent, so no code box');
+
+      await close(tester);
+    });
+
+    testWidgets('no internet says so', (tester) async {
+      await openScreen(tester);
+      await openRestore(tester);
+      server.offline = true;
+
+      await sendCode(tester);
+
+      expect(find.textContaining('Could not reach the server'), findsOneWidget);
+
+      await close(tester);
+    });
+
+    testWidgets('cancelling changes nothing', (tester) async {
+      await openScreen(tester);
+      await openRestore(tester);
+
+      await tester.tap(find.byKey(const Key('restore-cancel')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('restore-dialog')), findsNothing);
+      expect(server.restoreStartCalls, 0);
+      expect(server.activateCalls, 0);
+
+      await close(tester);
+    });
+
+    testWidgets('offers the email last used', (tester) async {
+      await openScreen(tester, beforeOpen: () async {
+        await container.read(secureStorageProvider).write(key: 'nexapos.purchase.email', value: 'me@shop.co.ke');
+      });
+      await openRestore(tester);
+
+      expect(find.widgetWithText(TextField, 'me@shop.co.ke'), findsOneWidget);
+
+      await close(tester);
+    });
+
+    testWidgets('a typed key that "belongs to another device" points the customer at Restore', (tester) async {
+      server.activateAnswer = http.Response(
+        jsonEncode({'success': false, 'message': 'This license belongs to another device. Contact support with your device ID.'}),
+        422,
+      );
+      await openScreen(tester);
+
+      await tester.enterText(find.widgetWithText(TextFormField, 'License key'), 'ABCDE23456');
+      await tester.tap(find.widgetWithText(FilledButton, 'Activate'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('belongs to another device'), findsOneWidget);
+      expect(find.textContaining('Restore my license'), findsWidgets);
+      expect(find.textContaining('Reinstalled or changed phone?'), findsOneWidget);
+
+      await close(tester);
+    });
+
+    for (final width in [320.0, 360.0]) {
+      testWidgets('fits a ${width.toInt()}-pixel-wide phone, both steps', (tester) async {
+        await openScreen(tester, size: Size(width, 2400));
+        expect(tester.takeException(), isNull, reason: 'no overflow on the activation screen');
+
+        await openRestore(tester);
+        expect(tester.takeException(), isNull, reason: 'no overflow asking for the email');
+
+        await sendCode(tester);
+        expect(find.byKey(const Key('restore-code')), findsOneWidget);
+        expect(tester.takeException(), isNull, reason: 'no overflow asking for the code');
+
+        await tester.enterText(find.byKey(const Key('restore-code')), '999999');
+        await tester.tap(find.byKey(const Key('restore-confirm')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('restore-error')), findsOneWidget);
+        expect(tester.takeException(), isNull, reason: 'no overflow with an error showing');
+
+        await close(tester);
+      });
+    }
+  });
+
+  group('the device ID on the activation screen', () {
+    testWidgets('is shown, so a customer can give it to support', (tester) async {
+      await openScreen(tester);
+
+      expect(find.byKey(const Key('device-id')), findsOneWidget);
+      expect(find.text('test-device'), findsOneWidget);
+      expect(find.textContaining('Give support this device ID'), findsOneWidget);
+
+      await close(tester);
+    });
+
+    testWidgets('can be copied', (tester) async {
+      String? copied;
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied = (call.arguments as Map)['text'] as String?;
+        }
+        return null;
+      });
+      addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
+      await openScreen(tester);
+
+      await tester.ensureVisible(find.byKey(const Key('copy-device-id')));
+      await tester.tap(find.byKey(const Key('copy-device-id')));
+      await tester.pump();
+
+      expect(copied, 'test-device');
+      expect(find.text('Device ID copied'), findsOneWidget);
+      await tester.pumpAndSettle(const Duration(seconds: 5));
+
+      await close(tester);
+    });
+
+    for (final width in [320.0, 360.0]) {
+      testWidgets('a long ID still fits a ${width.toInt()}-pixel-wide phone', (tester) async {
+        tester.view.physicalSize = Size(width, 2400);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        db = AppDatabase(NativeDatabase.memory());
+        container = ProviderContainer(overrides: [
+          appDatabaseProvider.overrideWith((ref) => db),
+          syncMetadataProvider.overrideWithValue(_LongDevice(db)),
+          licenseGatewayProvider.overrideWith((ref) => LicenseGateway(server.client)),
+        ]);
+        await tester.pumpWidget(UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: ActivationScreen()),
+        ));
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('device-id')), findsOneWidget);
+        expect(tester.takeException(), isNull);
+
+        await close(tester);
+      });
+    }
+  });
 
   testWidgets('the email last used is offered next time', (tester) async {
     await openScreen(tester, beforeOpen: () async {

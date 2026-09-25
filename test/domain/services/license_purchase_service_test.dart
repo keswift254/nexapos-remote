@@ -254,6 +254,77 @@ void main() {
     });
   });
 
+  group('restoring a license', () {
+    test('asking for a code sends this device and the email, and remembers the email', () async {
+      final outcome = await service().requestRestoreCode(' me@shop.co.ke ');
+
+      expect(outcome.ok, isTrue);
+      expect(outcome.message, contains('6-digit code'));
+      expect(server.lastRestoreStart, {'device_id': 'test-device', 'email': 'me@shop.co.ke'});
+      expect(await service().lastEmail(), 'me@shop.co.ke', reason: 'offered next time, also when buying');
+    });
+
+    test('a refusal is a message, not an exception, and remembers nothing', () async {
+      server.restoreStartAnswer = http.Response(
+        jsonEncode({'success': false, 'message': 'Too many attempts. Wait a little while, then try again.'}),
+        429,
+      );
+
+      final outcome = await service().requestRestoreCode('me@shop.co.ke');
+
+      expect(outcome.ok, isFalse);
+      expect(outcome.message, contains('Too many attempts'));
+      expect(await service().lastEmail(), isNull);
+    });
+
+    test('no internet while asking for a code says so', () async {
+      server.offline = true;
+
+      final outcome = await service().requestRestoreCode('me@shop.co.ke');
+
+      expect(outcome.ok, isFalse);
+      expect(outcome.message, contains('Could not reach the server'));
+    });
+
+    test('the right code brings the license to this device and activates it', () async {
+      final outcome = await service().restore(' me@shop.co.ke ', '123456');
+
+      expect(outcome.ok, isTrue);
+      expect(server.lastRestoreConfirm, {'device_id': 'test-device', 'email': 'me@shop.co.ke', 'code': '123456'});
+      expect(server.activatedCodes, [FakeLicenseServer.restoredLicenseCode]);
+      expect(await container.read(licenseServiceProvider).hasValidCachedLicense(), isTrue);
+    });
+
+    test('a wrong code is refused in the server\'s words and activates nothing', () async {
+      final outcome = await service().restore('me@shop.co.ke', '000000');
+
+      expect(outcome.ok, isFalse);
+      expect(outcome.message, contains('not right'));
+      expect(server.activateCalls, 0);
+      expect(await container.read(licenseServiceProvider).hasValidCachedLicense(), isFalse);
+    });
+
+    test('no internet while confirming says so and activates nothing', () async {
+      server.offline = true;
+
+      final outcome = await service().restore('me@shop.co.ke', '123456');
+
+      expect(outcome.ok, isFalse);
+      expect(outcome.message, contains('Could not reach the server'));
+      expect(server.activateCalls, 0);
+    });
+
+    test('a license the server restored but this device could not take yet is reported, not hidden', () async {
+      server.activateAnswer = http.Response(jsonEncode({'success': false, 'message': 'This license has expired. Ask support to extend it first.'}), 422);
+
+      final outcome = await service().restore('me@shop.co.ke', '123456');
+
+      expect(outcome.ok, isFalse);
+      expect(outcome.message, contains('expired'));
+      expect(await container.read(licenseServiceProvider).hasValidCachedLicense(), isFalse);
+    });
+  });
+
   test('cancel forgets the purchase on this device', () async {
     await service().start(_m6, 'buyer@example.com');
 

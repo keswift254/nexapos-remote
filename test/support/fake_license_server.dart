@@ -5,7 +5,8 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 /// A scripted stand-in for the license server's buy-a-license actions (plans,
-/// checkout_start, checkout_status) plus activate, for tests. What each call
+/// checkout_start, checkout_status), restoring a license (restore_start,
+/// restore_confirm) plus activate, for tests. What each call
 /// answers is set by the test; every call is counted and recorded.
 class FakeLicenseServer {
   bool offline = false;
@@ -30,7 +31,23 @@ class FakeLicenseServer {
   /// Overrides the answer to activate (default: success).
   http.Response? activateAnswer;
 
+  /// Overrides the answer to restore_start (e.g. a 429 or 502).
+  http.Response? restoreStartAnswer;
+
+  /// The one code restore_confirm accepts; anything else is "not right".
+  String restoreCode = '123456';
+
+  /// Overrides the answer to restore_confirm (beats [restoreCode]).
+  http.Response? restoreConfirmAnswer;
+
+  /// The key restore_confirm hands back when the code is right.
+  static const restoredLicenseCode = 'REST234567';
+
   int plansCalls = 0;
+  int restoreStartCalls = 0;
+  int restoreConfirmCalls = 0;
+  Map<String, dynamic>? lastRestoreStart;
+  Map<String, dynamic>? lastRestoreConfirm;
   int startCalls = 0;
   int statusCalls = 0;
   int activateCalls = 0;
@@ -66,6 +83,23 @@ class FakeLicenseServer {
         if (next is Exception) throw next;
         if (next is http.Response) return next;
         return _json(next as Map<String, dynamic>);
+      case 'restore_start':
+        restoreStartCalls++;
+        lastRestoreStart = body;
+        return restoreStartAnswer ??
+            _json({
+              'success': true,
+              'message': 'If a NexaPOS purchase was made with this email, a 6-digit code is on its way. Check your spam folder too.',
+            });
+      case 'restore_confirm':
+        restoreConfirmCalls++;
+        lastRestoreConfirm = body;
+        final restoreAnswer = restoreConfirmAnswer;
+        if (restoreAnswer != null) return restoreAnswer;
+        if (body['code'] != restoreCode) {
+          return _json({'success': false, 'message': 'That code is not right, or it has expired. Ask for a new one.'}, 422);
+        }
+        return _json({'success': true, 'code': restoredLicenseCode, 'moved': 2, 'claimed': 0, 'message': 'Your license is on this device.'});
       case 'activate':
         activateCalls++;
         activatedCodes.add(body['code'] as String? ?? '');

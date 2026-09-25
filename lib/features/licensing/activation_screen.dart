@@ -13,6 +13,7 @@ import '../../data/payments/platform_onboarding_gateway.dart';
 import '../../domain/entities/paystack_credentials.dart';
 import '../../domain/services/paystack_credentials_service.dart';
 import 'purchase_section.dart';
+import 'restore_dialog.dart';
 
 const _whatsappSupportUrl = 'https://wa.me/message/M5SGWZ664XJ4C1';
 
@@ -259,9 +260,17 @@ class _ActivationScreenState extends ConsumerState<ActivationScreen> {
       ok: (_) => unawaited(_registerPrimaryDevice()),
       failure: (message) => setState(() {
         _submitting = false;
-        _error = message;
+        _error = message.contains('another device')
+            ? '$message\n\nReinstalled or changed phone? Tap "Already paid? '
+                  'Restore my license" above to move it to this device.'
+            : message;
       }),
     );
+  }
+
+  Future<void> _restore() async {
+    final restored = await showRestoreDialog(context);
+    if (restored == true) unawaited(_registerPrimaryDevice());
   }
 
   Future<void> _registerPrimaryDevice() async {
@@ -331,7 +340,16 @@ class _ActivationScreenState extends ConsumerState<ActivationScreen> {
                   PurchaseSection(
                     onActivated: () => unawaited(_registerPrimaryDevice()),
                   ),
-                  const SizedBox(height: 16),
+                  // A customer who reinstalled or changed phone has already
+                  // paid: this brings their license to the new device.
+                  const SizedBox(height: 4),
+                  TextButton.icon(
+                    key: const Key('restore-open'),
+                    onPressed: _submitting ? null : _restore,
+                    icon: const Icon(Icons.restore, size: 18),
+                    label: const Text('Already paid? Restore my license'),
+                  ),
+                  const SizedBox(height: 8),
                   const _OrDivider('or enter a license key'),
                   const SizedBox(height: 12),
                   const Text(
@@ -402,6 +420,10 @@ class _ActivationScreenState extends ConsumerState<ActivationScreen> {
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: const StadiumBorder(),
                     ),
+                  ),
+                  const SizedBox(height: 16),
+                  DeviceIdTile(
+                    load: () => ref.read(syncMetadataProvider).deviceId(),
                   ),
                 ],
               ),

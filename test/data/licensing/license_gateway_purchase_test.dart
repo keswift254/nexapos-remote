@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io' show SocketException;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -186,6 +187,86 @@ void main() {
       expect(
         () => ask(answering({'success': false, 'message': 'Unknown payment.'}, 404)),
         throwsA(isA<LicenseException>().having((e) => e.message, 'message', 'Unknown payment.')),
+      );
+    });
+  });
+
+  group('restoreStart', () {
+    test('asks for a code for this device and email, and returns the server\'s words', () async {
+      late Map<String, dynamic> sent;
+      final gateway = LicenseGateway(MockClient((request) async {
+        expect(request.url.queryParameters['action'], 'restore_start');
+        expect(request.method, 'POST');
+        sent = (jsonDecode(request.body) as Map).cast<String, dynamic>();
+        return http.Response(jsonEncode({'success': true, 'message': 'A code is on its way.'}), 200);
+      }));
+
+      final message = await gateway.restoreStart(baseUrl: _baseUrl, deviceId: 'dev-1', email: 'me@shop.co.ke');
+
+      expect(sent, {'device_id': 'dev-1', 'email': 'me@shop.co.ke'});
+      expect(message, 'A code is on its way.');
+    });
+
+    test('a refusal throws the server\'s own words', () async {
+      final gateway = LicenseGateway(MockClient((request) async =>
+          http.Response(jsonEncode({'success': false, 'message': 'Too many attempts. Wait a little while, then try again.'}), 429)));
+
+      expect(
+        () => gateway.restoreStart(baseUrl: _baseUrl, deviceId: 'd', email: 'a@b.co'),
+        throwsA(isA<LicenseException>().having((e) => e.message, 'message', contains('Too many attempts'))),
+      );
+    });
+
+    test('no connection is an offline error', () async {
+      final gateway = LicenseGateway(MockClient((request) async => throw const SocketException('no internet')));
+
+      expect(
+        () => gateway.restoreStart(baseUrl: _baseUrl, deviceId: 'd', email: 'a@b.co'),
+        throwsA(isA<LicenseOfflineException>()),
+      );
+    });
+  });
+
+  group('restoreConfirm', () {
+    test('sends the code with the device and email, and returns the license key', () async {
+      late Map<String, dynamic> sent;
+      final gateway = LicenseGateway(MockClient((request) async {
+        expect(request.url.queryParameters['action'], 'restore_confirm');
+        sent = (jsonDecode(request.body) as Map).cast<String, dynamic>();
+        return http.Response(jsonEncode({'success': true, 'code': 'ABCDE23456', 'moved': 2}), 200);
+      }));
+
+      final key = await gateway.restoreConfirm(baseUrl: _baseUrl, deviceId: 'dev-1', email: 'me@shop.co.ke', code: '123456');
+
+      expect(sent, {'device_id': 'dev-1', 'email': 'me@shop.co.ke', 'code': '123456'});
+      expect(key, 'ABCDE23456');
+    });
+
+    test('a wrong code throws the server\'s words', () async {
+      final gateway = LicenseGateway(MockClient((request) async =>
+          http.Response(jsonEncode({'success': false, 'message': 'That code is not right, or it has expired. Ask for a new one.'}), 422)));
+
+      expect(
+        () => gateway.restoreConfirm(baseUrl: _baseUrl, deviceId: 'd', email: 'a@b.co', code: '000000'),
+        throwsA(isA<LicenseException>().having((e) => e.message, 'message', contains('not right'))),
+      );
+    });
+
+    test('a success with no key is an error, not a success', () async {
+      final gateway = LicenseGateway(MockClient((request) async => http.Response(jsonEncode({'success': true}), 200)));
+
+      expect(
+        () => gateway.restoreConfirm(baseUrl: _baseUrl, deviceId: 'd', email: 'a@b.co', code: '123456'),
+        throwsA(isA<LicenseException>()),
+      );
+    });
+
+    test('no connection is an offline error', () async {
+      final gateway = LicenseGateway(MockClient((request) async => throw const SocketException('no internet')));
+
+      expect(
+        () => gateway.restoreConfirm(baseUrl: _baseUrl, deviceId: 'd', email: 'a@b.co', code: '123456'),
+        throwsA(isA<LicenseOfflineException>()),
       );
     });
   });

@@ -10,6 +10,8 @@ import 'license_service.dart';
 
 const _pendingKey = 'nexapos.purchase.pending';
 const _emailKey = 'nexapos.purchase.email';
+const _offlineMessage =
+    'Could not reach the server. Check your internet connection and try again.';
 
 /// A payment that was started and not yet settled either way is remembered this
 /// long, so closing the app (or the phone dying) between paying and getting the
@@ -101,6 +103,16 @@ class PurchaseCheck {
   const PurchaseCheck(this.kind, [this.message]);
 
   final PurchaseCheckKind kind;
+  final String? message;
+}
+
+/// How a step of restoring a license went, in words fit to show. Restoring never
+/// throws at the screen: every way it can go wrong is a message.
+class RestoreOutcome {
+  const RestoreOutcome.ok([this.message]) : ok = true;
+  const RestoreOutcome.failed(String this.message) : ok = false;
+
+  final bool ok;
   final String? message;
 }
 
@@ -240,6 +252,59 @@ class LicensePurchaseService {
               PurchaseCheck(PurchaseCheckKind.problem, message),
         );
     }
+  }
+
+  /// Restoring a license after a reinstall or a new phone. The license is bound
+  /// to the device it was first used on, and a fresh install is a new device, so
+  /// the customer proves they own the email they paid with: the server emails a
+  /// code to it, and entering the code moves the license to this device.
+  ///
+  /// Step 1. The reply is deliberately the same whether or not that email ever
+  /// bought anything.
+  Future<RestoreOutcome> requestRestoreCode(String email) async {
+    final trimmed = email.trim();
+    try {
+      final deviceId = await _ref.read(syncMetadataProvider).deviceId();
+      final message = await _ref
+          .read(licenseGatewayProvider)
+          .restoreStart(
+            baseUrl: licenseServerBaseUrl,
+            deviceId: deviceId,
+            email: trimmed,
+          );
+      await _ref.read(secureStorageProvider).write(key: _emailKey, value: trimmed);
+      return RestoreOutcome.ok(message.isEmpty ? null : message);
+    } on LicenseOfflineException {
+      return const RestoreOutcome.failed(_offlineMessage);
+    } on LicenseException catch (e) {
+      return RestoreOutcome.failed(e.message);
+    }
+  }
+
+  /// Step 2. When the code is right the license arrives on this device and is
+  /// activated here, so a caller only has to react to [RestoreOutcome.ok].
+  Future<RestoreOutcome> restore(String email, String code) async {
+    final String license;
+    try {
+      final deviceId = await _ref.read(syncMetadataProvider).deviceId();
+      license = await _ref
+          .read(licenseGatewayProvider)
+          .restoreConfirm(
+            baseUrl: licenseServerBaseUrl,
+            deviceId: deviceId,
+            email: email.trim(),
+            code: code.trim(),
+          );
+    } on LicenseOfflineException {
+      return const RestoreOutcome.failed(_offlineMessage);
+    } on LicenseException catch (e) {
+      return RestoreOutcome.failed(e.message);
+    }
+    final activated = await _ref.read(licenseServiceProvider).activate(license);
+    return activated.when(
+      ok: (_) => const RestoreOutcome.ok(),
+      failure: RestoreOutcome.failed,
+    );
   }
 
   /// Forgets the purchase on this device. Does not undo a payment already made:

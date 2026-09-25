@@ -294,6 +294,55 @@ class LicenseGateway {
     }
   }
 
+  /// Restoring after a reinstall, step 1: the server emails a 6-digit code to the
+  /// address the license was bought with. Returns the server's own words - the same
+  /// whether or not that address ever bought anything, on purpose.
+  Future<String> restoreStart({
+    required String baseUrl,
+    required String deviceId,
+    required String email,
+  }) async {
+    final response = await _call(
+      'POST',
+      'restore_start',
+      baseUrl,
+      body: {'device_id': deviceId, 'email': email},
+    );
+    if (response['success'] != true) {
+      throw LicenseException(
+        platformResponseMessage(response, 'Could not send the code.'),
+      );
+    }
+    return (response['message'] as String? ?? '').trim();
+  }
+
+  /// Step 2: the code from the email. When it is right the server moves the
+  /// license bought with that email onto this device and returns its key, which
+  /// the caller then activates the ordinary way.
+  Future<String> restoreConfirm({
+    required String baseUrl,
+    required String deviceId,
+    required String email,
+    required String code,
+  }) async {
+    final response = await _call(
+      'POST',
+      'restore_confirm',
+      baseUrl,
+      body: {'device_id': deviceId, 'email': email, 'code': code},
+    );
+    if (response['success'] != true) {
+      throw LicenseException(
+        platformResponseMessage(response, 'Could not restore your license.'),
+      );
+    }
+    final license = (response['code'] as String? ?? '').trim();
+    if (license.isEmpty) {
+      throw const LicenseException('The server did not send the license key.');
+    }
+    return license;
+  }
+
   Future<void> redeemSupport({
     required String baseUrl,
     required String activationToken,
