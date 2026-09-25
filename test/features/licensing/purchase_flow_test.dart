@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:drift/drift.dart' show driftRuntimeOptions;
@@ -24,6 +25,20 @@ class _FixedDevice extends SyncMetadataService {
   _FixedDevice(super.db);
   @override
   Future<String> deviceId() async => 'test-device';
+}
+
+/// A payment start that fails in a way nobody planned for.
+class _Explodes extends LicensePurchaseService {
+  _Explodes(super.ref);
+  @override
+  Future<PendingPurchase> start(PurchasePlan plan, String email) async => throw StateError('the storage exploded');
+}
+
+/// A payment start that never finishes.
+class _NeverFinishes extends LicensePurchaseService {
+  _NeverFinishes(super.ref);
+  @override
+  Future<PendingPurchase> start(PurchasePlan plan, String email) => Completer<PendingPurchase>().future;
 }
 
 class _LongDevice extends SyncMetadataService {
@@ -405,6 +420,82 @@ void main() {
       await close(tester);
     });
   }
+
+  group('a payment that cannot start never leaves the screen spinning', () {
+    Future<void> openWith(WidgetTester tester, LicensePurchaseService Function(Ref) make) async {
+      tester.view.physicalSize = const Size(1000, 3000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      db = AppDatabase(NativeDatabase.memory());
+      container = ProviderContainer(overrides: [
+        appDatabaseProvider.overrideWith((ref) => db),
+        syncMetadataProvider.overrideWithValue(_FixedDevice(db)),
+        licenseGatewayProvider.overrideWith((ref) => LicenseGateway(server.client)),
+        licensePurchaseServiceProvider.overrideWith(make),
+      ]);
+      await tester.pumpWidget(UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: ActivationScreen()),
+      ));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('an unexpected error ends the spinner with a message that says what it was, and the plans work again', (tester) async {
+      await openWith(tester, _Explodes.new);
+
+      await buy(tester, 'm6');
+
+      expect(find.byKey(const Key('purchase-error')), findsOneWidget);
+      expect(find.textContaining('Could not start the payment'), findsOneWidget);
+      expect(find.textContaining('the storage exploded'), findsOneWidget);
+      expect(find.textContaining('nothing has been charged'), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsNothing, reason: 'no spinner left on any plan');
+      expect(tester.widget<FilledButton>(find.byKey(const Key('pay-m6'))).onPressed, isNotNull, reason: 'can try again');
+
+      await close(tester);
+    });
+
+    testWidgets('a start that never finishes ends after a minute, in words', (tester) async {
+      await openWith(tester, _NeverFinishes.new);
+
+      await tester.tap(find.byKey(const Key('pay-m6')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('purchase-email')), 'buyer@example.com');
+      await tester.tap(find.byKey(const Key('purchase-continue')));
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.byType(CircularProgressIndicator), findsOneWidget, reason: 'working, as it should be');
+
+      await tester.pump(const Duration(seconds: 61));
+      await tester.pump();
+
+      expect(find.textContaining('This is taking too long'), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(tester.widget<FilledButton>(find.byKey(const Key('pay-m6'))).onPressed, isNotNull);
+
+      await close(tester);
+    });
+
+    testWidgets('a long error still fits a 320-pixel-wide phone', (tester) async {
+      tester.view.physicalSize = const Size(320, 2400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      db = AppDatabase(NativeDatabase.memory());
+      container = ProviderContainer(overrides: [
+        appDatabaseProvider.overrideWith((ref) => db),
+        syncMetadataProvider.overrideWithValue(_FixedDevice(db)),
+        licenseGatewayProvider.overrideWith((ref) => LicenseGateway(server.client)),
+        licensePurchaseServiceProvider.overrideWith(_Explodes.new),
+      ]);
+      await tester.pumpWidget(UncontrolledProviderScope(container: container, child: const MaterialApp(home: ActivationScreen())));
+      await tester.pumpAndSettle();
+
+      await buy(tester, 'm6');
+
+      expect(find.byKey(const Key('purchase-error')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await close(tester);
+    });
+  });
 
   group('the KSh 5 test plan', () {
     const testPlan = {'id': 'test', 'label': 'Test plan', 'months': 0, 'days': 1, 'amount_kes': 5, 'test': true};

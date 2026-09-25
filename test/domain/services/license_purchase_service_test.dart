@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show SocketException;
 
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:drift/native.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -23,6 +25,21 @@ class _FixedDevice extends SyncMetadataService {
   @override
   Future<String> deviceId() async => 'test-device';
 }
+
+/// A device that never says who it is (a stalled browser database).
+class _SilentDevice extends SyncMetadataService {
+  _SilentDevice(super.db);
+  @override
+  Future<String> deviceId() => Completer<String>().future;
+}
+
+class _BrokenDevice extends SyncMetadataService {
+  _BrokenDevice(super.db);
+  @override
+  Future<String> deviceId() async => throw StateError('database is locked');
+}
+
+const _storageChannel = MethodChannel('plugins.it_nomads.com/flutter_secure_storage');
 
 const _m6 = PurchasePlan(id: 'm6', label: '6 months', months: 6, amountKes: 3000);
 const _pendingKey = 'nexapos.purchase.pending';
@@ -322,6 +339,112 @@ void main() {
       expect(outcome.ok, isFalse);
       expect(outcome.message, contains('expired'));
       expect(await container.read(licenseServiceProvider).hasValidCachedLicense(), isFalse);
+    });
+  });
+
+  group('a stalled or failing browser (the payment screen must never spin without end)', () {
+    ProviderContainer build({SyncMetadataService? device}) {
+      container.dispose();
+      container = ProviderContainer(overrides: [
+        appDatabaseProvider.overrideWith((ref) => db),
+        syncMetadataProvider.overrideWithValue(device ?? _FixedDevice(db)),
+        licenseGatewayProvider.overrideWith((ref) => LicenseGateway(server.client)),
+        urlOpenerProvider.overrideWithValue((uri) async => true),
+        licensePurchaseServiceProvider.overrideWith(
+          (ref) => LicensePurchaseService(
+            ref,
+            identityTimeout: const Duration(milliseconds: 80),
+            storageTimeout: const Duration(milliseconds: 80),
+          ),
+        ),
+      ]);
+      return container;
+    }
+
+    void storageBehaves(Future<Object?> Function(MethodCall call) handler) {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(_storageChannel, handler);
+    }
+
+    tearDown(() => installFakeSecureStorage());
+
+    test('a device that never says who it is: a clear message after the timeout, and nothing was charged', () async {
+      build(device: _SilentDevice(db));
+
+      await expectLater(
+        service().start(_m6, 'buyer@example.com'),
+        throwsA(isA<LicenseException>().having((e) => e.message, 'message', contains('did not answer in time'))),
+      );
+      expect(server.startCalls, 0, reason: 'no checkout is started for a device that cannot be identified');
+    });
+
+    test('a device that fails to identify itself: the message says why, in a line', () async {
+      build(device: _BrokenDevice(db));
+
+      await expectLater(
+        service().start(_m6, 'buyer@example.com'),
+        throwsA(isA<LicenseException>().having((e) => e.message, 'message', allOf(contains('could not be identified'), contains('database is locked')))),
+      );
+    });
+
+    test('storage that never answers a write does not stop the payment', () async {
+      build();
+      storageBehaves((call) => Completer<Object?>().future);
+
+      final purchase = await service().start(_m6, 'buyer@example.com').timeout(const Duration(seconds: 5));
+
+      expect(purchase.reference, 'nxl-test0001', reason: 'the payment page is still handed over');
+      expect(server.startCalls, 1);
+    });
+
+    test('storage that throws on a write does not stop the payment either', () async {
+      build();
+      storageBehaves((call) async => throw PlatformException(code: 'crypto', message: 'The operation failed'));
+
+      final purchase = await service().start(_m6, 'buyer@example.com');
+
+      expect(purchase.paymentUrl, 'https://checkout.paystack.com/test0001');
+    });
+
+    test('storage that never answers a read: no remembered email, no remembered payment, no hang', () async {
+      build();
+      storageBehaves((call) => Completer<Object?>().future);
+
+      expect(await service().lastEmail().timeout(const Duration(seconds: 5)), isNull);
+      expect(await service().pending().timeout(const Duration(seconds: 5)), isNull);
+    });
+
+    test('checking a payment when the device cannot be identified is a message to retry, never an exception', () async {
+      // Started while the device was fine...
+      await service().start(_m6, 'buyer@example.com');
+      // ...and then it stalls.
+      build(device: _SilentDevice(db));
+      storageBehaves((call) async => null); // nothing stored on this fresh container's storage
+
+      final check = await service().check();
+
+      expect(check.kind, PurchaseCheckKind.none, reason: 'nothing remembered, nothing to check');
+    });
+
+    test('an unexpected error while checking a payment is reported as "safe, trying again"', () async {
+      await service().start(_m6, 'buyer@example.com');
+      server.statusScript = [Exception('a browser oddity')];
+
+      final check = await service().check();
+
+      expect(check.kind, PurchaseCheckKind.problem);
+      expect(check.message, allOf(contains('Your payment is safe'), contains('a browser oddity')));
+    });
+
+    test('restoring a license on a device that cannot be identified is a message, not a hang', () async {
+      build(device: _SilentDevice(db));
+
+      final ask = await service().requestRestoreCode('me@shop.co.ke');
+      final confirm = await service().restore('me@shop.co.ke', '123456');
+
+      expect(ask.ok, isFalse);
+      expect(ask.message, contains('did not answer in time'));
+      expect(confirm.ok, isFalse);
+      expect(server.restoreStartCalls + server.restoreConfirmCalls, 0);
     });
   });
 

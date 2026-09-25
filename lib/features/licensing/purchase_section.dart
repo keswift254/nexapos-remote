@@ -31,6 +31,10 @@ class PurchaseSection extends ConsumerStatefulWidget {
 }
 
 class _PurchaseSectionState extends ConsumerState<PurchaseSection> {
+  /// The longest starting a payment may take (one server call plus this device
+  /// identifying itself) before the person is told and can try again.
+  static const _startTimeout = Duration(seconds: 60);
+
   PlanCatalog? _catalog;
   bool _loadingPlans = true;
   String? _plansError;
@@ -98,7 +102,10 @@ class _PurchaseSectionState extends ConsumerState<PurchaseSection> {
       _error = null;
     });
     try {
-      final purchase = await service.start(plan, email);
+      // Bounded as a whole as well: whatever stalls, the spinner ends in words.
+      final purchase = await service
+          .start(plan, email)
+          .timeout(_startTimeout);
       if (!mounted) return;
       setState(() {
         _startingPlanId = null;
@@ -118,6 +125,23 @@ class _PurchaseSectionState extends ConsumerState<PurchaseSection> {
       setState(() {
         _startingPlanId = null;
         _error = e.message;
+      });
+    } on TimeoutException {
+      if (!mounted) return;
+      setState(() {
+        _startingPlanId = null;
+        _error =
+            'This is taking too long. Check your internet connection and try '
+            'again - nothing has been charged.';
+      });
+    } catch (error) {
+      // Anything unexpected must still end the spinner, and say what it was.
+      if (!mounted) return;
+      setState(() {
+        _startingPlanId = null;
+        _error =
+            'Could not start the payment (${'$error'.replaceAll(RegExp(r'\s+'), ' ').trim()}). '
+            'Try again - nothing has been charged.';
       });
     }
   }
@@ -488,7 +512,7 @@ class _EmailDialogState extends State<_EmailDialog> {
     widget.lastEmail.then((email) {
       if (!mounted || email == null || _controller.text.isNotEmpty) return;
       _controller.text = email;
-    });
+    }).catchError((Object _) {});
   }
 
   @override

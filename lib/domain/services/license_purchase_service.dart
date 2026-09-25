@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -129,21 +130,84 @@ final urlOpenerProvider = Provider<Future<bool> Function(Uri)>(
 /// really happened, the license itself) is decided by the license server - see
 /// its Purchases service. This just carries the customer through it.
 class LicensePurchaseService {
-  LicensePurchaseService(this._ref);
+  LicensePurchaseService(
+    this._ref, {
+    this.identityTimeout = const Duration(seconds: 15),
+    this.storageTimeout = const Duration(seconds: 8),
+  });
 
   final Ref _ref;
+
+  /// How long to wait for this device to say who it is, and for its storage to
+  /// answer, before giving up with a message instead of waiting for ever. (A
+  /// browser's storage or database can stall - a private window, a tab that was
+  /// left open across an update - and a payment screen that spins without end,
+  /// with no words, is the worst way to find out.)
+  final Duration identityTimeout;
+  final Duration storageTimeout;
+
+  /// This device's id, or a [LicenseException] that says what to do - never a hang
+  /// and never a raw error.
+  Future<String> _deviceId() async {
+    try {
+      return await _ref
+          .read(syncMetadataProvider)
+          .deviceId()
+          .timeout(identityTimeout);
+    } on TimeoutException {
+      throw const LicenseException(
+        'This device did not answer in time. Close NexaPOS (or reload the page) and '
+        'open it again, then try again.',
+      );
+    } catch (error) {
+      throw LicenseException(
+        'This device could not be identified (${_short(error)}). Close NexaPOS '
+        '(or reload the page), open it again, and try again.',
+      );
+    }
+  }
+
+  static String _short(Object error) {
+    final text = '$error'.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return text.length <= 120 ? text : '${text.substring(0, 117)}...';
+  }
+
+  /// Writes to storage, but never lets a stalled or failing write get in the way
+  /// of what the person is doing: remembering a payment across a restart is a
+  /// courtesy, paying is the point.
+  Future<void> _remember(String key, String value) async {
+    try {
+      await _ref
+          .read(secureStorageProvider)
+          .write(key: key, value: value)
+          .timeout(storageTimeout);
+    } catch (_) {}
+  }
 
   Future<PlanCatalog> loadPlans() => _ref
       .read(licenseGatewayProvider)
       .fetchPlans(baseUrl: licenseServerBaseUrl);
 
   /// The email last paid with, to save typing it again.
-  Future<String?> lastEmail() =>
-      _ref.read(secureStorageProvider).read(key: _emailKey);
+  Future<String?> lastEmail() async {
+    try {
+      return await _ref
+          .read(secureStorageProvider)
+          .read(key: _emailKey)
+          .timeout(storageTimeout);
+    } catch (_) {
+      return null; // a convenience, not worth a message
+    }
+  }
 
   Future<PendingPurchase?> pending() async {
     final storage = _ref.read(secureStorageProvider);
-    final raw = await storage.read(key: _pendingKey);
+    final String? raw;
+    try {
+      raw = await storage.read(key: _pendingKey).timeout(storageTimeout);
+    } catch (_) {
+      return null;
+    }
     if (raw == null || raw.isEmpty) return null;
     PendingPurchase? purchase;
     try {
@@ -162,7 +226,7 @@ class LicensePurchaseService {
   /// [LicenseException] (the server's own words, fit to show) or
   /// [LicenseOfflineException].
   Future<PendingPurchase> start(PurchasePlan plan, String email) async {
-    final deviceId = await _ref.read(syncMetadataProvider).deviceId();
+    final deviceId = await _deviceId();
     final checkout = await _ref
         .read(licenseGatewayProvider)
         .startCheckout(
@@ -179,9 +243,8 @@ class LicensePurchaseService {
       paymentUrl: checkout.paymentUrl.toString(),
       startedAt: DateTime.now().toUtc(),
     );
-    final storage = _ref.read(secureStorageProvider);
-    await storage.write(key: _pendingKey, value: jsonEncode(purchase.toJson()));
-    await storage.write(key: _emailKey, value: email.trim());
+    await _remember(_pendingKey, jsonEncode(purchase.toJson()));
+    await _remember(_emailKey, email.trim());
     return purchase;
   }
 
@@ -200,9 +263,9 @@ class LicensePurchaseService {
     final purchase = await pending();
     if (purchase == null) return const PurchaseCheck(PurchaseCheckKind.none);
 
-    final deviceId = await _ref.read(syncMetadataProvider).deviceId();
     final PurchaseStatus status;
     try {
+      final deviceId = await _deviceId();
       status = await _ref
           .read(licenseGatewayProvider)
           .checkoutStatus(
@@ -226,6 +289,14 @@ class LicensePurchaseService {
         );
       }
       return PurchaseCheck(PurchaseCheckKind.problem, e.message);
+    } catch (error) {
+      // Anything unexpected: the payment is safe on the server - say so and keep
+      // trying, instead of a waiting box that never says anything.
+      return PurchaseCheck(
+        PurchaseCheckKind.problem,
+        'Could not check the payment just now (${_short(error)}). Your payment '
+        'is safe - trying again.',
+      );
     }
 
     switch (status.state) {
@@ -264,7 +335,7 @@ class LicensePurchaseService {
   Future<RestoreOutcome> requestRestoreCode(String email) async {
     final trimmed = email.trim();
     try {
-      final deviceId = await _ref.read(syncMetadataProvider).deviceId();
+      final deviceId = await _deviceId();
       final message = await _ref
           .read(licenseGatewayProvider)
           .restoreStart(
@@ -272,7 +343,7 @@ class LicensePurchaseService {
             deviceId: deviceId,
             email: trimmed,
           );
-      await _ref.read(secureStorageProvider).write(key: _emailKey, value: trimmed);
+      await _remember(_emailKey, trimmed);
       return RestoreOutcome.ok(message.isEmpty ? null : message);
     } on LicenseOfflineException {
       return const RestoreOutcome.failed(_offlineMessage);
@@ -286,7 +357,7 @@ class LicensePurchaseService {
   Future<RestoreOutcome> restore(String email, String code) async {
     final String license;
     try {
-      final deviceId = await _ref.read(syncMetadataProvider).deviceId();
+      final deviceId = await _deviceId();
       license = await _ref
           .read(licenseGatewayProvider)
           .restoreConfirm(
