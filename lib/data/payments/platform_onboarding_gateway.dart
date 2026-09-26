@@ -60,6 +60,43 @@ class SettlementResult {
   });
 }
 
+/// What the shop's main device last told the platform about the shop's license -
+/// see LicenseService.reportShopLicense. Every device of the shop sees it in
+/// [ClientStatus.license], which is how a joined device follows the main device's
+/// license over the internet.
+class ShopLicense {
+  const ShopLicense({
+    required this.state,
+    this.validUntil,
+    this.neverExpires = false,
+    this.checkedAt,
+  });
+
+  /// 'active', 'expired' or 'revoked'.
+  final String state;
+
+  /// End of the license (UTC); null with [neverExpires], or when it has ended.
+  final DateTime? validUntil;
+  final bool neverExpires;
+
+  /// When the license server last vouched for this state (ms since 1970, by its
+  /// clock): what puts two reports in order.
+  final int? checkedAt;
+
+  static ShopLicense? fromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final state = raw['state'];
+    if (state is! String || state.isEmpty) return null;
+    final checkedAt = raw['checked_at'];
+    return ShopLicense(
+      state: state,
+      validUntil: DateTime.tryParse(raw['valid_until'] as String? ?? ''),
+      neverExpires: raw['never_expires'] == true,
+      checkedAt: checkedAt is num ? checkedAt.toInt() : null,
+    );
+  }
+}
+
 class ClientStatus {
   final int shopId;
   final String status;
@@ -79,6 +116,14 @@ class ClientStatus {
   // device filling it in and only then hitting a 403).
   final bool isOwner;
 
+  /// The shop's license as its main device reported it; null when it never has
+  /// (or the server predates this).
+  final ShopLicense? license;
+
+  /// The platform's own clock when it answered - what [license]'s end date is
+  /// counted against, so this device's date and time do not matter.
+  final DateTime? serverTime;
+
   const ClientStatus({
     this.shopId = 0,
     required this.status,
@@ -90,6 +135,8 @@ class ClientStatus {
     required this.subaccountCode,
     required this.isVerified,
     required this.isOwner,
+    this.license,
+    this.serverTime,
   });
 
   bool get isSettled => subaccountCode.isNotEmpty;
@@ -405,7 +452,38 @@ class PlatformOnboardingGateway {
       // settlement) rather than silently locking out real shops on an
       // old backend that hasn't deployed the is_owner column yet.
       isOwner: response['is_owner'] == null || response['is_owner'] == true,
+      license: ShopLicense.fromJson(response['license']),
+      serverTime: DateTime.tryParse(response['server_time'] as String? ?? ''),
     );
+  }
+
+  /// The shop's main device tells the platform what its license is, so the
+  /// shop's other devices can follow it. Refused (403) for any other device.
+  /// [checkedAt] is when the license server vouched for this, by its own clock.
+  Future<void> reportShopLicense({
+    required String baseUrl,
+    required String apiKey,
+    required String state,
+    DateTime? validUntil,
+    int? checkedAt,
+  }) async {
+    final response = await platformRequest(
+      _client,
+      'POST',
+      'report_shop_license',
+      baseUrl,
+      apiKey: apiKey,
+      body: {
+        'state': state,
+        'valid_until': validUntil?.toUtc().toIso8601String(),
+        'checked_at': ?checkedAt,
+      },
+    );
+    if (response['success'] != true) {
+      throw PaystackException(
+        platformResponseMessage(response, 'Could not report the license.'),
+      );
+    }
   }
 
   /// Owner-only server-side (see save_settlement_details' sibling check

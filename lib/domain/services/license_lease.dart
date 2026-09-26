@@ -23,6 +23,7 @@ class LicenseLease {
     required this.remaining,
     required this.accountedAt,
     this.neverExpires = false,
+    this.stamp,
   });
 
   /// Trusted time left as of [accountedAt].
@@ -35,6 +36,14 @@ class LicenseLease {
 
   final bool neverExpires;
 
+  /// The moment (ms since 1970, by the LICENSE SERVER's clock) the shop's main
+  /// device last had the license server vouch for this state. It is what puts two
+  /// statements about the shop's license in order: the one with the later stamp is
+  /// the newer word from the main device, so it wins - whether it gives the shop
+  /// more time or less (an expiry, a revoke). Null on a lease that came from a
+  /// version that did not stamp it; such a lease can only ever be extended.
+  final int? stamp;
+
   bool get isExpired => !neverExpires && remaining <= Duration.zero;
 
   LicenseLease copyWith({Duration? remaining, DateTime? accountedAt}) =>
@@ -42,47 +51,67 @@ class LicenseLease {
         remaining: remaining ?? this.remaining,
         accountedAt: accountedAt ?? this.accountedAt,
         neverExpires: neverExpires,
+        stamp: stamp,
       );
 
   Map<String, dynamic> toJson() => {
     'neverExpires': neverExpires,
     'remainingMs': remaining.inMilliseconds,
     'accountedAt': accountedAt.toUtc().toIso8601String(),
+    if (stamp != null) 'stamp': stamp,
   };
 
   static LicenseLease? fromJson(Object? decoded) {
     if (decoded is! Map) return null;
-    final accountedAt = DateTime.tryParse(decoded['accountedAt'] as String? ?? '');
+    final accountedAt = DateTime.tryParse(
+      decoded['accountedAt'] as String? ?? '',
+    );
     final remainingMs = decoded['remainingMs'];
     if (accountedAt == null || remainingMs is! num) return null;
+    final stamp = decoded['stamp'];
     return LicenseLease(
       remaining: Duration(milliseconds: remainingMs.toInt()),
       accountedAt: accountedAt,
       neverExpires: decoded['neverExpires'] == true,
+      stamp: stamp is num ? stamp.toInt() : null,
     );
   }
 }
 
 /// A lease as sent between devices (over the shop's network): just the time
-/// left, in the sender's own trusted count. No date crosses the wire.
+/// left, in the sender's own trusted count, and the [stamp] that says how recent
+/// the main device's word behind it is. No date crosses the wire.
+///
+/// A zero [remaining] means "the shop's license has ended" - said on purpose so
+/// that devices holding some time left are told, not just left to count it down.
 class LeaseOffer {
-  const LeaseOffer({required this.remaining, this.neverExpires = false});
+  const LeaseOffer({
+    required this.remaining,
+    this.neverExpires = false,
+    this.stamp,
+  });
 
   final Duration remaining;
   final bool neverExpires;
 
+  /// See [LicenseLease.stamp].
+  final int? stamp;
+
   Map<String, dynamic> toJson() => {
     'neverExpires': neverExpires,
     'remainingMs': remaining.inMilliseconds,
+    if (stamp != null) 'stamp': stamp,
   };
 
   static LeaseOffer? fromJson(Object? decoded) {
     if (decoded is! Map) return null;
     final remainingMs = decoded['remainingMs'];
     if (remainingMs is! num) return null;
+    final stamp = decoded['stamp'];
     return LeaseOffer(
       remaining: Duration(milliseconds: remainingMs.toInt()),
       neverExpires: decoded['neverExpires'] == true,
+      stamp: stamp is num ? stamp.toInt() : null,
     );
   }
 }
@@ -151,7 +180,8 @@ class LeaseCountdown {
     } else {
       final byMonotonic = monotonicNow - _anchorMonotonic!;
       final byWall = wallNow.difference(_anchorWall!);
-      remaining = _anchorRemaining! - (byWall > byMonotonic ? byWall : byMonotonic);
+      remaining =
+          _anchorRemaining! - (byWall > byMonotonic ? byWall : byMonotonic);
     }
     if (remaining.isNegative) remaining = Duration.zero;
     return lease.copyWith(remaining: remaining, accountedAt: wallNow);

@@ -415,11 +415,14 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
           ref.read(syncServiceProvider).runSyncCycle(),
           ref.read(lanSyncServiceProvider).syncNow(),
         ]);
-      } else if (await ref.read(licenseServiceProvider).isJoinedMember) {
+      } else if (await ref.read(licenseServiceProvider).isJoinedMember ||
+          await ref.read(licenseServiceProvider).announcesEndedLicense) {
         // A joined device locked because its shop's license ran out must still
         // be reachable on the shop's network: that is how the shop's main
-        // device hands it the renewal, with no internet involved. (Cloud sync
-        // stays off - there is nothing to sync while the device is locked.)
+        // device hands it the renewal, with no internet involved. The same goes
+        // the other way: a main device whose own license ended stays there to
+        // tell the joined devices so. (Cloud sync stays off - there is nothing to
+        // sync while the device is locked.)
         await ref.read(lanSyncServiceProvider).syncNow();
       }
     } finally {
@@ -441,7 +444,8 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
         _lanAccessCheckedAt = now;
         _lanAllowed =
             await ref.read(hasCachedLicenseProvider.future) ||
-            await ref.read(licenseServiceProvider).isJoinedMember;
+            await ref.read(licenseServiceProvider).isJoinedMember ||
+            await ref.read(licenseServiceProvider).announcesEndedLicense;
       }
       if (_lanAllowed && mounted) {
         await ref.read(lanSyncServiceProvider).syncNow();

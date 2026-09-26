@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -25,6 +26,14 @@ const _validUntilKey = 'nexapos.license.validUntil';
 const _ownCountKey = 'nexapos.license.ownCount';
 const _lastEndKey = 'nexapos.license.lastEnd';
 const _membershipKey = 'nexapos.license.shopMembership';
+
+/// The stamp of the ended license this device last told the platform about, so an
+/// ending is reported once (and retried until it gets through).
+const _endReportedKey = 'nexapos.license.endReported';
+
+/// How long a device that reports its license to the platform waits before
+/// repeating the same report - or before asking again after being refused.
+const _reportAgain = Duration(minutes: 30);
 
 /// Whether a cached, still-valid activation exists on this device - the
 /// single source of truth app.dart's redirect guard checks, mirroring
@@ -64,10 +73,13 @@ LicenseService licenseService(Ref ref) {
 enum LicenseState {
   /// Licensed and within its validity window (or it never expires).
   active,
+
   /// The validity window has ended.
   expired,
+
   /// The vendor ended it before its time (a refund, a dispute).
   revoked,
+
   /// No license of its own: joined a shop owned by another device, whose
   /// access is kept alive by re-confirming the membership online.
   joined,
@@ -114,8 +126,10 @@ class LicenseStatus {
 enum LicenseEndReason {
   /// The validity window ran out.
   expired,
+
   /// The vendor ended it before its time.
   revoked,
+
   /// A joined device: the license of the shop it follows ran out.
   shopLicenseExpired,
 }
@@ -125,9 +139,19 @@ enum LicenseEndReason {
 /// Written the moment [LicenseService.backgroundVerify] locks the app, and
 /// removed once a license is activated again.
 class LicenseEnd {
-  const LicenseEnd({required this.reason, this.validUntil, this.noticedAt});
+  const LicenseEnd({
+    required this.reason,
+    this.validUntil,
+    this.noticedAt,
+    this.stamp,
+  });
 
   final LicenseEndReason reason;
+
+  /// When the ending was established, ms since 1970 - by the license server's
+  /// clock when it said so. Puts it in order against other statements about the
+  /// shop's license (see [LicenseLease.stamp]).
+  final int? stamp;
 
   /// The license's end date, when it had one.
   final DateTime? validUntil;
@@ -139,6 +163,7 @@ class LicenseEnd {
     'reason': reason.name,
     'validUntil': validUntil?.toUtc().toIso8601String(),
     'noticedAt': noticedAt?.toUtc().toIso8601String(),
+    if (stamp != null) 'stamp': stamp,
   };
 
   static LicenseEnd? fromJson(Object? decoded) {
@@ -151,8 +176,22 @@ class LicenseEnd {
       reason: reason,
       validUntil: DateTime.tryParse(decoded['validUntil'] as String? ?? ''),
       noticedAt: DateTime.tryParse(decoded['noticedAt'] as String? ?? ''),
+      stamp: decoded['stamp'] is num ? (decoded['stamp'] as num).toInt() : null,
     );
   }
+}
+
+/// What [LicenseService.acceptLease] does with a statement about the shop's license.
+enum _Adoption {
+  /// Ignore it.
+  none,
+
+  /// The same news as held, only newer: keep this device's own count, remember
+  /// the newer stamp.
+  restamp,
+
+  /// Replace what is held with it.
+  replace,
 }
 
 /// How long a joined device may go without confirming its membership online
@@ -358,48 +397,92 @@ class LicenseService {
   /// What to hand to another device of the same shop. The shop's main device
   /// (the one holding the license) offers the time its own license has left;
   /// a joined device passes on the lease it follows. Null when there is
-  /// nothing worth giving (no license, or an ended one).
+  /// nothing worth giving (no license at all).
+  ///
+  /// An ENDED license is offered too - as zero time left, carrying the stamp
+  /// that says how recent that news is - so a device holding time from before is
+  /// told it is over (it used to be simply not offered, and the device counted on).
+  /// Without a stamp there is nothing to put it in order with, and it stays not
+  /// offered, as before.
   Future<LeaseOffer?> leaseToShare() async {
     final own = await _advanceOwn();
-    if (own != null) {
-      if (own.isExpired) return null;
-      return LeaseOffer(
-        remaining: own.remaining,
-        neverExpires: own.neverExpires,
-      );
-    }
+    if (own != null) return _offerOf(own);
+    final ended = await _endedOffer();
+    if (ended != null) return ended;
     final lease = await _advanceLease();
-    if (lease == null || lease.isExpired) return null;
+    return lease == null ? null : _offerOf(lease);
+  }
+
+  /// True for a device whose OWN license ended (it expired or was revoked) and was
+  /// cleared: it keeps to the shop's network anyway, so the shop's joined devices
+  /// - which ask it for the license's state - hear that it is over.
+  Future<bool> get announcesEndedLicense async => await _endedOffer() != null;
+
+  LeaseOffer? _offerOf(LicenseLease lease) {
+    if (lease.isExpired && lease.stamp == null) return null;
     return LeaseOffer(
-      remaining: lease.remaining,
+      remaining: lease.isExpired ? Duration.zero : lease.remaining,
       neverExpires: lease.neverExpires,
+      stamp: lease.stamp,
     );
   }
 
-  /// Takes the license time another device of the shop offers. Only a joined
-  /// device follows a lease, and one holding a valid license of its own never
-  /// does. A lease is only ever replaced by one with MORE time left: a shop's
-  /// license can be extended but not shortened, so this both carries a renewal
-  /// to every device and wipes out whatever error a device's own counting has
-  /// picked up (the shop's main device is the reference). Returns whether the
-  /// offer was taken.
-  Future<bool> acceptLease(LeaseOffer offer) async {
+  /// This device held the shop's license, it ended (expired or was revoked) and
+  /// was cleared: what it tells the shop's other devices.
+  Future<LeaseOffer?> _endedOffer() async {
+    final end = await _readLastEnd(_ref.read(secureStorageProvider));
+    if (end == null || end.stamp == null) return null;
+    if (end.reason != LicenseEndReason.expired &&
+        end.reason != LicenseEndReason.revoked) {
+      return null;
+    }
+    return LeaseOffer(remaining: Duration.zero, stamp: end.stamp);
+  }
+
+  /// Takes the shop's license as another device of the shop, or the platform,
+  /// says it stands. Only a joined device follows a lease, and one holding a valid
+  /// license of its own never does.
+  ///
+  /// The shop's MAIN device is the reference, and what it says last wins, whether
+  /// that gives the shop more time or less: every statement carries a stamp (when
+  /// the license server last vouched for it), and one with a later stamp replaces
+  /// what is held - so an expiry or a revoke reaches a device that was still
+  /// counting down, and a renewal reaches one that had run out. A statement with an
+  /// EARLIER stamp (a stale relay from a device that has not caught up) is ignored.
+  /// One with the SAME stamp is the same statement counted by another device: it
+  /// only replaces what is held when it has more time, or - from the platform
+  /// ([fromPlatform], whose figure is exact) - when the two counts differ.
+  /// A statement from a version that does not stamp can only extend a lease that
+  /// is not stamped either, as it always could. Returns whether it changed
+  /// anything that matters.
+  Future<bool> acceptLease(
+    LeaseOffer offer, {
+    bool fromPlatform = false,
+  }) async {
     final membership = await _membership();
     if (membership == null || membership['blocked'] == true) return false;
     if (await hasValidCachedLicense()) return false;
     final current = await _advanceLease();
-    final better = current == null
-        ? true
-        : current.neverExpires
-        ? false
-        : offer.neverExpires ||
-              offer.remaining > current.remaining + _leaseAdoptMargin;
-    if (!better) return false;
+    final adoption = _adoption(current, offer, fromPlatform: fromPlatform);
+    if (adoption == _Adoption.none) return false;
     final storage = _ref.read(secureStorageProvider);
+    if (adoption == _Adoption.restamp) {
+      // The same news, only newer: keep this device's own count, remember the stamp.
+      await _writeLease(
+        LicenseLease(
+          remaining: current!.remaining,
+          neverExpires: current.neverExpires,
+          accountedAt: current.accountedAt,
+          stamp: offer.stamp,
+        ),
+      );
+      return false;
+    }
     final adopted = LicenseLease(
       remaining: offer.remaining,
       neverExpires: offer.neverExpires,
       accountedAt: _ref.read(clockProvider).now(),
+      stamp: offer.stamp,
     );
     await _writeLease(adopted);
     // Start counting from this very moment (rather than from the next check),
@@ -408,10 +491,164 @@ class LicenseService {
     _leaseCountdown
       ..reset()
       ..advance(adopted);
-    // A renewal ends the "the shop's license expired" notice.
-    await storage.delete(key: _lastEndKey);
+    // A renewal ends the "the shop's license expired" notice - an ending, of
+    // course, does not.
+    if (!adopted.isExpired) await storage.delete(key: _lastEndKey);
     _notifyAccessChanged();
     return true;
+  }
+
+  _Adoption _adoption(
+    LicenseLease? current,
+    LeaseOffer offer, {
+    required bool fromPlatform,
+  }) {
+    if (current == null) return _Adoption.replace;
+    final held = current.stamp;
+    final stamp = offer.stamp;
+    if (stamp == null) {
+      // Unstamped (an older version): it can only extend, and never overrides a
+      // stamped statement.
+      if (held != null) return _Adoption.none;
+      return _extends(current, offer) ? _Adoption.replace : _Adoption.none;
+    }
+    if (held != null && stamp < held) return _Adoption.none;
+    if (held == null || stamp > held) {
+      return _differs(current, offer) ? _Adoption.replace : _Adoption.restamp;
+    }
+    if (fromPlatform) {
+      return _differs(current, offer) ? _Adoption.replace : _Adoption.none;
+    }
+    return _extends(current, offer) ? _Adoption.replace : _Adoption.none;
+  }
+
+  /// More time than held (by more than counting noise).
+  bool _extends(LicenseLease current, LeaseOffer offer) => current.neverExpires
+      ? false
+      : offer.neverExpires ||
+            offer.remaining > current.remaining + _leaseAdoptMargin;
+
+  /// Different enough from what is held to be worth replacing it: a change of
+  /// kind (ended / never ends), or a different time left by more than counting
+  /// noise. Seconds of difference between two devices' counts are not.
+  bool _differs(LicenseLease current, LeaseOffer offer) {
+    if (current.neverExpires != offer.neverExpires) return true;
+    if (offer.neverExpires) return false;
+    if (current.isExpired != (offer.remaining <= Duration.zero)) return true;
+    return (current.remaining - offer.remaining).abs() >= _leaseAdoptMargin;
+  }
+
+  /// A joined device, told by the platform what the shop's main device reported
+  /// about the shop's license: it follows it, in either direction. Nothing is done
+  /// when the main device has never reported (an older version, or not yet).
+  Future<void> _followShopLicense(ClientStatus status) async {
+    final license = status.license;
+    if (license == null) return;
+    Duration remaining;
+    var neverExpires = false;
+    switch (license.state) {
+      case 'active':
+        final end = license.validUntil;
+        if (end == null) {
+          neverExpires = license.neverExpires;
+          if (!neverExpires) return;
+          remaining = Duration.zero;
+        } else {
+          // Counted against the platform's clock, not this device's.
+          final now = status.serverTime;
+          if (now == null) return;
+          remaining = _atLeastZero(end.difference(now));
+        }
+      case 'expired' || 'revoked':
+        remaining = Duration.zero;
+      default:
+        return;
+    }
+    await acceptLease(
+      LeaseOffer(
+        remaining: remaining,
+        neverExpires: neverExpires,
+        stamp: license.checkedAt,
+      ),
+      fromPlatform: true,
+    );
+  }
+
+  Duration? _lastReportAt;
+  String? _lastReportSignature;
+  Duration? _reportBackoffUntil;
+
+  /// The shop's main device tells the platform what its license is - what the
+  /// license server just said - so every device that joined the shop can follow
+  /// it, not only those on the same network as this one. Best effort and quiet:
+  /// nothing here may slow down or break a license check. The same report is not
+  /// repeated for [_reportAgain]; a device the platform refuses (it is not the
+  /// shop's main device) is not asked again for that long either. Returns whether
+  /// the platform took it.
+  Future<bool> _reportShopLicense({
+    required String state,
+    DateTime? validUntil,
+    required int stamp,
+  }) async {
+    final monotonic = _ref.read(monotonicClockProvider).elapsed();
+    final backoff = _reportBackoffUntil;
+    if (backoff != null && monotonic < backoff) return false;
+    final signature = '$state|${validUntil?.toUtc().toIso8601String()}';
+    final last = _lastReportAt;
+    if (signature == _lastReportSignature &&
+        last != null &&
+        monotonic - last < _reportAgain) {
+      return true;
+    }
+    try {
+      final credentials = await _ref
+          .read(paystackCredentialsServiceProvider)
+          .load();
+      if (!credentials.isConfigured) return false;
+      await _ref
+          .read(platformOnboardingGatewayProvider)
+          .reportShopLicense(
+            baseUrl: credentials.baseUrl,
+            apiKey: credentials.apiKey,
+            state: state,
+            validUntil: validUntil,
+            checkedAt: stamp,
+          );
+      _lastReportSignature = signature;
+      _lastReportAt = monotonic;
+      return true;
+    } on PaystackOfflineException {
+      return false; // try again on the next check
+    } on PaystackException {
+      _reportBackoffUntil = monotonic + _reportAgain;
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// A license this device held has ended and been cleared: tell the platform (and
+  /// through it the shop's joined devices) once, and keep trying until it goes
+  /// through. Reports only a stamped ending, and only what THIS device held
+  /// (a joined device's "the shop's license expired" note is not its to report).
+  Future<void> _reportEndedLicense() async {
+    final storage = _ref.read(secureStorageProvider);
+    final end = await _readLastEnd(storage);
+    final stamp = end?.stamp;
+    if (end == null || stamp == null) return;
+    final state = switch (end.reason) {
+      LicenseEndReason.expired => 'expired',
+      LicenseEndReason.revoked => 'revoked',
+      LicenseEndReason.shopLicenseExpired => null,
+    };
+    if (state == null) return;
+    if (await storage.read(key: _endReportedKey) == '$stamp') return;
+    final taken = await _reportShopLicense(
+      state: state,
+      validUntil: end.validUntil,
+      stamp: stamp,
+    );
+    if (taken) await storage.write(key: _endReportedKey, value: '$stamp');
   }
 
   /// Once the shop's license has run out on a device that follows it, say so
@@ -422,7 +659,8 @@ class LicenseService {
     if (lease == null || !lease.isExpired) return;
     final storage = _ref.read(secureStorageProvider);
     final recorded = await storage.read(key: _lastEndKey);
-    if (recorded != null && recorded.contains(LicenseEndReason.shopLicenseExpired.name)) {
+    if (recorded != null &&
+        recorded.contains(LicenseEndReason.shopLicenseExpired.name)) {
       return;
     }
     await storage.write(
@@ -526,42 +764,51 @@ class LicenseService {
     _notifyAccessChanged();
   }
 
-  Future<void> verifyJoinedMembership() =>
-      _ref.read(syncServiceProvider).exclusive(() async {
-        if (await _ref.read(syncServiceProvider).hasPendingShopChange) return;
-        final membership = await _membership();
-        if (membership == null || membership['blocked'] == true) return;
-        final credentials = await _ref
-            .read(paystackCredentialsServiceProvider)
-            .load();
-        if (!credentials.isConfigured) {
+  Future<void>
+  verifyJoinedMembership() => _ref.read(syncServiceProvider).exclusive(
+    () async {
+      if (await _ref.read(syncServiceProvider).hasPendingShopChange) return;
+      final membership = await _membership();
+      if (membership == null || membership['blocked'] == true) return;
+      final credentials = await _ref
+          .read(paystackCredentialsServiceProvider)
+          .load();
+      if (!credentials.isConfigured) {
+        await _blockMembership(membership);
+        return;
+      }
+      try {
+        final status = await _ref
+            .read(platformOnboardingGatewayProvider)
+            .getClientStatus(
+              baseUrl: credentials.baseUrl,
+              apiKey: credentials.apiKey,
+            );
+        if (status.isOwner ||
+            status.shopId != membership['shopId'] ||
+            status.status == 'disabled') {
           await _blockMembership(membership);
-          return;
-        }
-        try {
-          final status = await _ref
-              .read(platformOnboardingGatewayProvider)
-              .getClientStatus(
-                baseUrl: credentials.baseUrl,
-                apiKey: credentials.apiKey,
-              );
-          if (status.isOwner ||
-              status.shopId != membership['shopId'] ||
-              status.status == 'disabled') {
-            await _blockMembership(membership);
-          } else {
-            await _writeMembership(status.shopId);
+        } else {
+          await _writeMembership(status.shopId);
+          // The platform also knows what the shop's main device reported about
+          // the shop's license: follow it, over the internet as over the LAN.
+          try {
+            await _followShopLicense(status);
+          } catch (_) {
+            // Never allowed to break the membership check.
           }
-        } on PaystackOfflineException {
+        }
+      } on PaystackOfflineException {
+        _notifyAccessChanged();
+      } on PaystackException catch (e) {
+        if (e.statusCode == 401 || e.statusCode == 403) {
+          await _blockMembership(membership);
+        } else {
           _notifyAccessChanged();
-        } on PaystackException catch (e) {
-          if (e.statusCode == 401 || e.statusCode == 403) {
-            await _blockMembership(membership);
-          } else {
-            _notifyAccessChanged();
-          }
         }
-      });
+      }
+    },
+  );
 
   Future<void> _resetQueue = Future.value();
 
@@ -634,6 +881,14 @@ class LicenseService {
       await _writeValidUntil(storage, result.validUntil);
       // Licensed again - the "your license ended" notice no longer applies.
       await storage.delete(key: _lastEndKey);
+      // ...and the shop's joined devices are told (a renewal reaches them at once).
+      unawaited(
+        _reportShopLicense(
+          state: 'active',
+          validUntil: result.validUntil,
+          stamp: _stampOf(result.serverTime),
+        ),
+      );
       _ref.invalidate(hasCachedLicenseProvider);
       _ref.read(licenseChangeSignalProvider.notifier).bump();
       return const Result.ok(null);
@@ -759,7 +1014,12 @@ class LicenseService {
     await _enforceLease();
     final storage = _ref.read(secureStorageProvider);
     final token = await storage.read(key: _tokenKey);
-    if (token == null || token.isEmpty) return;
+    if (token == null || token.isEmpty) {
+      // A license that ended and was cleared: keep telling the platform until it
+      // has heard (a no-op once it has, and for a device that never held one).
+      unawaited(_reportEndedLicense());
+      return;
+    }
 
     // A count that has run out ends the license - unless the server can be
     // reached: its answer wins. That is what saves a device whose date was
@@ -782,8 +1042,10 @@ class LicenseService {
                 : LicenseEndReason.revoked,
             validUntil: result.validUntil ?? saved,
             noticedAt: now,
+            stamp: _stampOf(result.serverTime),
           ),
         );
+        unawaited(_reportEndedLicense());
         return;
       }
       // Re-anchors the count on what the server just said (its own clock
@@ -815,6 +1077,14 @@ class LicenseService {
       // covers a vendor-side revoke/extend that changed valid_until
       // without this device needing to reactivate.
       await _writeValidUntil(storage, result.validUntil);
+      // What the shop's joined devices follow (only sent when it changed).
+      unawaited(
+        _reportShopLicense(
+          state: 'active',
+          validUntil: result.validUntil,
+          stamp: _stampOf(result.serverTime),
+        ),
+      );
       await _applyAuthenticatorReset(result.authenticatorGeneration);
     } on LicenseOfflineException {
       // No internet right now - stay licensed, try again next cycle. (Unless
@@ -913,16 +1183,19 @@ class LicenseService {
   }) async {
     final now = _ref.read(clockProvider).now();
     LicenseLease? next;
+    final stamp = serverTime?.millisecondsSinceEpoch;
     if (validUntil == null) {
       next = LicenseLease(
         remaining: Duration.zero,
         accountedAt: now,
         neverExpires: true,
+        stamp: stamp,
       );
     } else if (serverTime != null) {
       next = LicenseLease(
         remaining: _atLeastZero(validUntil.difference(serverTime)),
         accountedAt: now,
+        stamp: stamp,
       );
     } else if (replace || await _readOwn() == null) {
       next = LicenseLease(
@@ -931,9 +1204,7 @@ class LicenseService {
       );
     } else {
       final own = await _advanceOwn();
-      final previous = await _savedValidUntil(
-        _ref.read(secureStorageProvider),
-      );
+      final previous = await _savedValidUntil(_ref.read(secureStorageProvider));
       if (own != null &&
           !own.neverExpires &&
           previous != null &&
@@ -981,8 +1252,14 @@ class LicenseService {
       reason: LicenseEndReason.expired,
       validUntil: await _savedValidUntil(storage),
       noticedAt: _ref.read(clockProvider).now(),
+      stamp: _stampOf(null),
     );
   }
+
+  /// A statement's stamp: the license server's clock when it gave one, this
+  /// device's otherwise.
+  int _stampOf(DateTime? serverTime) =>
+      (serverTime ?? _ref.read(clockProvider).now()).millisecondsSinceEpoch;
 
   /// What the activation screen shows about a license that stopped counting,
   /// or null when there is nothing to say (never licensed, or licensed and
