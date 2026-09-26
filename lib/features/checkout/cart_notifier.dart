@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:drift/drift.dart' show Variable;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../core/providers.dart';
 import '../../core/utils/money.dart';
@@ -61,11 +62,55 @@ class CartNotifier extends _$CartNotifier {
       final restored = _cartStateFromJson(
         jsonDecode(row.data['value'] as String) as Map<String, dynamic>,
       );
-      if (restored.isNotEmpty) state = restored;
+      if (restored.isNotEmpty) state = await _withCatalogPrices(restored);
     } catch (_) {
       // A draft from an older, incompatible app version, or genuinely
       // corrupt - dropping it silently is safer than crashing the cart
       // on every future launch.
+    }
+  }
+
+  /// A draft saved by an older version has no catalog prices on its lines, so
+  /// switching it to wholesale could not re-price them. Fill them in from the
+  /// products as they are now (the lines keep the price they were added at until
+  /// the sale type is switched). Best effort: a product that is gone, or a
+  /// database that cannot be read, just leaves that line as it was.
+  Future<CartState> _withCatalogPrices(CartState draft) async {
+    final missing = [
+      for (final item in draft.items)
+        if (!item.isManual && (item.retailPrice == null || item.wholesalePrice == null)) item.productId!,
+    ];
+    if (missing.isEmpty) return draft;
+    try {
+      final rows = await ref
+          .read(appDatabaseProvider)
+          .customSelect(
+            'SELECT id, retail_price_cents, wholesale_price_cents FROM products '
+            'WHERE id IN (${List.filled(missing.length, '?').join(',')})',
+            variables: [for (final id in missing) Variable.withString(id)],
+          )
+          .get();
+      final prices = {
+        for (final row in rows)
+          row.data['id'] as String: (
+            Money(row.data['retail_price_cents'] as int),
+            Money(row.data['wholesale_price_cents'] as int),
+          ),
+      };
+      return draft.copyWith(
+        items: [
+          for (final item in draft.items)
+            if (!item.isManual && prices.containsKey(item.productId))
+              item.copyWith(
+                retailPrice: item.retailPrice ?? prices[item.productId]!.$1,
+                wholesalePrice: item.wholesalePrice ?? prices[item.productId]!.$2,
+              )
+            else
+              item,
+        ],
+      );
+    } catch (_) {
+      return draft;
     }
   }
 
@@ -88,7 +133,7 @@ class CartNotifier extends _$CartNotifier {
   /// product listed twice - CheckoutService also defensively merges
   /// duplicate lines, but the cart UI shouldn't rely on that.
   void addProduct(Product product) {
-    final price = state.saleType == 'wholesale' ? product.wholesalePrice : product.retailPrice;
+    final price = product.priceFor(state.saleType);
     final index = state.items.indexWhere((item) => item.productId == product.id);
     if (index >= 0) {
       updateQuantity(index, state.items[index].quantity + 1);
@@ -100,6 +145,8 @@ class CartNotifier extends _$CartNotifier {
       unitPrice: price,
       costPrice: product.costPrice,
       quantity: 1,
+      retailPrice: product.retailPrice,
+      wholesalePrice: product.wholesalePrice,
     );
     state = state.copyWith(items: [...state.items, item]);
   }
@@ -124,7 +171,13 @@ class CartNotifier extends _$CartNotifier {
     state = state.copyWith(items: items);
   }
 
-  void setSaleType(String saleType) => state = state.copyWith(saleType: saleType);
+  /// Switching between retail and wholesale re-prices every catalog line already
+  /// in the cart, not just the ones added afterwards (manual items keep the price
+  /// they were typed with).
+  void setSaleType(String saleType) => state = state.copyWith(
+    saleType: saleType,
+    items: [for (final item in state.items) item.repricedFor(saleType)],
+  );
 
   void setDiscount(Money discount) => state = state.copyWith(discount: discount);
 
@@ -179,6 +232,8 @@ Map<String, dynamic> _cartItemToJson(CartItem item) => {
   'unitPriceCents': item.unitPrice.cents,
   'costPriceCents': item.costPrice.cents,
   'quantity': item.quantity,
+  if (item.retailPrice != null) 'retailPriceCents': item.retailPrice!.cents,
+  if (item.wholesalePrice != null) 'wholesalePriceCents': item.wholesalePrice!.cents,
 };
 
 CartItem _cartItemFromJson(Map<String, dynamic> json) => CartItem(
@@ -187,4 +242,6 @@ CartItem _cartItemFromJson(Map<String, dynamic> json) => CartItem(
   unitPrice: Money(json['unitPriceCents'] as int),
   costPrice: Money(json['costPriceCents'] as int),
   quantity: json['quantity'] as int,
+  retailPrice: json['retailPriceCents'] is int ? Money(json['retailPriceCents'] as int) : null,
+  wholesalePrice: json['wholesalePriceCents'] is int ? Money(json['wholesalePriceCents'] as int) : null,
 );

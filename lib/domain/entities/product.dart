@@ -24,5 +24,12 @@ abstract class Product with _$Product {
 
   bool get isActive => status == 'active';
 
+  /// The price this product sells at for [saleType] ('retail' or 'wholesale').
+  /// A product whose wholesale price was never filled in (it is saved as zero)
+  /// sells at its retail price rather than for nothing.
+  Money priceFor(String saleType) => saleType == 'wholesale' && wholesalePrice > const Money.zero()
+      ? wholesalePrice
+      : retailPrice;
+
   bool get isLowStock => stockQty <= reorderLevel;
 }

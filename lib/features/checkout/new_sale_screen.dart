@@ -93,7 +93,7 @@ class _NewSaleScreenState extends ConsumerState<NewSaleScreen> {
             itemCount: filtered.length,
             itemBuilder: (context, index) {
               final product = filtered[index];
-              final price = cart.saleType == 'wholesale' ? product.wholesalePrice : product.retailPrice;
+              final price = product.priceFor(cart.saleType);
               return ListTile(
                 title: Text(product.name),
                 subtitle: Text('${price.format()} · ${product.stockQty} in stock'),
