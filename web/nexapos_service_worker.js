@@ -57,7 +57,7 @@ self.addEventListener('activate', (event) => {
 async function fetchNavigation(request) {
   try {
     const response = await Promise.race([
-      fetch(request),
+      fetch(request, { cache: 'no-store' }),
       new Promise((_, reject) => setTimeout(() => reject(new Error('offline')), 3000)),
     ]);
     if (response && response.ok) {
@@ -73,7 +73,8 @@ async function fetchNavigation(request) {
 }
 
 async function fetchApplicationFile(request) {
-  const cached = await caches.match(request, { ignoreSearch: true });
+  const cache = await caches.open(CACHE_NAME);
+  const cached = await cache.match(request, { ignoreSearch: true });
   if (cached) return cached;
 
   const response = await fetch(request);
@@ -94,4 +95,27 @@ self.addEventListener('fetch', (event) => {
       ? fetchNavigation(event.request)
       : fetchApplicationFile(event.request),
   );
+});
+
+// Refresh only application assets. IndexedDB/OPFS (shop data), preferences and
+// credentials are never touched. Stage all downloads before replacing the cache
+// so a failed/offline update leaves the existing offline application usable.
+self.addEventListener('message', (event) => {
+  if (event.data?.type !== 'NEXAPOS_REFRESH') return;
+  event.waitUntil((async () => {
+    try {
+      const entries = [];
+      for (const path of PRECACHE_FOR_THIS_BROWSER) {
+        const request = new Request(new URL(path, self.registration.scope));
+        const response = await fetch(request, { cache: 'no-store' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        entries.push([request, response]);
+      }
+      const cache = await caches.open(CACHE_NAME);
+      for (const [request, response] of entries) await cache.put(request, response);
+      event.ports[0]?.postMessage({ ok: true });
+    } catch (error) {
+      event.ports[0]?.postMessage({ ok: false, error: String(error) });
+    }
+  })());
 });

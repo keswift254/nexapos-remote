@@ -10,6 +10,7 @@ import 'package:intl/intl.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../core/providers.dart';
+import '../../core/adaptive_pair.dart';
 import '../../core/utils/money.dart';
 import '../../domain/entities/user_role.dart';
 import '../../domain/services/home_screen_install_service.dart';
@@ -78,8 +79,11 @@ class DashboardData {
 /// navigating back - THAT part is the unconditionally-correct fix,
 /// verified for real; this keepAlive is the more theoretical half.
 @Riverpod(keepAlive: true)
-Stream<void> dashboardChangeTicker(Ref ref) {
-  return ref.watch(appDatabaseProvider).tableUpdates().map((_) {});
+Stream<int> dashboardChangeTicker(Ref ref) {
+  // Riverpod compares successive values. A void stream emits null every time,
+  // suppressing all notifications after the first database change.
+  var revision = 0;
+  return ref.watch(appDatabaseProvider).tableUpdates().map((_) => ++revision);
 }
 
 @Riverpod(keepAlive: true)
@@ -280,19 +284,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                     child: Text('Connected Devices'),
                   ),
                 if (user.role == UserRole.admin)
-                  const PopupMenuItem(
-                    value: '/backup',
-                    child: Text('Backup'),
-                  ),
+                  const PopupMenuItem(value: '/backup', child: Text('Backup')),
                 if (user.role == UserRole.admin)
                   const PopupMenuItem(
                     value: '/region-time',
                     child: Text('Region and Time'),
                   ),
-                const PopupMenuItem(
-                  value: '/license',
-                  child: Text('License'),
-                ),
+                const PopupMenuItem(value: '/license', child: Text('License')),
                 const PopupMenuItem(
                   value: '/update',
                   child: Text('Check for Updates'),
@@ -567,7 +565,7 @@ class _DashboardStatsState extends State<_DashboardStats> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        IntrinsicHeight(
+        AdaptivePair(
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -604,7 +602,7 @@ class _DashboardStatsState extends State<_DashboardStats> {
           ),
         ),
         const SizedBox(height: 12),
-        IntrinsicHeight(
+        AdaptivePair(
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [

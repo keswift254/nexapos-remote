@@ -44,6 +44,30 @@ DashboardData _dashboardData() => DashboardData(
 );
 
 void main() {
+  for (final width in [320.0, 800.0, 1920.0]) {
+    testWidgets('full dashboard fits at $width pixels', (tester) async {
+      tester.view.physicalSize = Size(width, 768);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final container = ProviderContainer(
+        overrides: [
+          sessionProvider.overrideWith(_Session.new),
+          dashboardDataProvider.overrideWith((ref) async => _dashboardData()),
+        ],
+      );
+      addTearDown(container.dispose);
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: DashboardScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
   testWidgets(
     'financial values start hidden, reveal for 60 seconds, and hide on refresh',
     (tester) async {

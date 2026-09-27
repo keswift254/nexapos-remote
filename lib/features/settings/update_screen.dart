@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/update/update_gateway.dart';
 import '../../domain/services/update_service.dart';
+import 'web_update_button.dart';
 
 /// Reachable from the dashboard's Settings menu ("Check for Updates")
 /// and from the dashboard's own update-available banner tap - both just
@@ -87,10 +88,17 @@ class _UpdateScreenState extends ConsumerState<UpdateScreen> {
     final theme = Theme.of(context);
     final installState = ref.watch(updateInstallProvider);
     ref.listen<UpdateInstallState>(updateInstallProvider, (previous, next) {
-      final finishedOk = (previous?.installing ?? false) && !next.installing && next.error == null;
+      final finishedOk =
+          (previous?.installing ?? false) &&
+          !next.installing &&
+          next.error == null;
       if (!finishedOk) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Installer opened - finish the install there, then reopen NexaPOS.')),
+        const SnackBar(
+          content: Text(
+            'Installer opened - finish the install there, then reopen NexaPOS.',
+          ),
+        ),
       );
       // Android reaches here (Windows already called exit(0) on success) -
       // re-check so "You're on the latest version" reflects reality once
@@ -99,7 +107,9 @@ class _UpdateScreenState extends ConsumerState<UpdateScreen> {
     });
 
     final latest = _result?.latest ?? installState.info;
-    final updateAvailable = _result != null ? _result!.updateAvailable : installState.info != null;
+    final updateAvailable = _result != null
+        ? _result!.updateAvailable
+        : installState.info != null;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Software Update')),
@@ -120,8 +130,14 @@ class _UpdateScreenState extends ConsumerState<UpdateScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('Installed version', style: theme.textTheme.labelLarge),
-                                Text(_result!.currentVersion, style: theme.textTheme.titleMedium),
+                                Text(
+                                  'Installed version',
+                                  style: theme.textTheme.labelLarge,
+                                ),
+                                Text(
+                                  _result!.currentVersion,
+                                  style: theme.textTheme.titleMedium,
+                                ),
                               ],
                             ),
                           ),
@@ -144,7 +160,9 @@ class _UpdateScreenState extends ConsumerState<UpdateScreen> {
                           // published (a download link, once) is not shown here.
                           Text(
                             'Update available: ${latest.version}',
-                            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ],
                       ),
@@ -152,26 +170,15 @@ class _UpdateScreenState extends ConsumerState<UpdateScreen> {
                   ),
                   const SizedBox(height: 20),
                   if (kIsWeb)
-                    // The browser edition has no installer to download -
-                    // it updates itself the next time the page loads fresh,
-                    // once the newly-deployed version is live. Showing the
-                    // same "Download & Install" button as native here would
-                    // always fail with "not available on this platform yet",
-                    // which reads as broken rather than as the different
-                    // (and simpler) way web actually updates.
-                    Row(
-                      children: [
-                        Icon(Icons.info_outline, color: theme.colorScheme.primary),
-                        const SizedBox(width: 8),
-                        const Expanded(
-                          child: Text(
-                            'The browser version updates itself - reload NexaPOS in your browser to get this version.',
-                          ),
-                        ),
-                      ],
-                    )
+                    // Refresh the browser's application assets, preserving the
+                    // local shop database and normal offline caching afterward.
+                    const WebUpdateButton()
                   else if (installState.installing) ...[
-                    LinearProgressIndicator(value: installState.progress > 0 ? installState.progress : null),
+                    LinearProgressIndicator(
+                      value: installState.progress > 0
+                          ? installState.progress
+                          : null,
+                    ),
                     const SizedBox(height: 8),
                     Text(
                       installState.progress < 0.9
@@ -196,11 +203,17 @@ class _UpdateScreenState extends ConsumerState<UpdateScreen> {
                   ),
                 if (_error != null) ...[
                   const SizedBox(height: 16),
-                  Text(_error!, style: TextStyle(color: theme.colorScheme.error)),
+                  Text(
+                    _error!,
+                    style: TextStyle(color: theme.colorScheme.error),
+                  ),
                 ],
                 if (installState.error != null) ...[
                   const SizedBox(height: 16),
-                  Text(installState.error!, style: TextStyle(color: theme.colorScheme.error)),
+                  Text(
+                    installState.error!,
+                    style: TextStyle(color: theme.colorScheme.error),
+                  ),
                 ],
                 const SizedBox(height: 20),
                 OutlinedButton.icon(

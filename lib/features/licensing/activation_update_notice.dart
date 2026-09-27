@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/services/update_service.dart';
+import '../settings/web_update_button.dart';
 
 /// "Update available" for a device that is stuck on the activation screen - a
 /// fresh install, an expired or revoked license, a phone that was reset. The
@@ -86,9 +87,7 @@ class _ActivationUpdateNoticeState
                 ),
                 const SizedBox(height: 4),
                 if (kIsWeb)
-                  const Text(
-                    'Reload NexaPOS in your browser to get this version.',
-                  )
+                  const WebUpdateButton()
                 else ...[
                   const Text(
                     'You can update this device right now - it does not need a '

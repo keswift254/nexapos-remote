@@ -1,12 +1,14 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show HardwareKeyboard, KeyEvent;
+import 'package:flutter/services.dart'
+    show HardwareKeyboard, KeyEvent, LogicalKeyboardKey;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import 'core/providers.dart';
+import 'core/keyboard_back.dart';
 import 'core/utils/monotonic_clock.dart';
 import 'domain/services/session_service.dart';
 import 'domain/services/sync_service.dart';
@@ -522,6 +524,44 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
         title: 'NexaPOS',
         theme: ThemeData(colorSchemeSeed: Colors.indigo, useMaterial3: true),
         routerConfig: router,
+        builder: (context, child) => CallbackShortcuts(
+          bindings: {
+            const SingleActivator(LogicalKeyboardKey.escape): () => keyboardBack(router),
+            const SingleActivator(LogicalKeyboardKey.f2): () =>
+                router.push('/new-sale'),
+            const SingleActivator(LogicalKeyboardKey.f4): () =>
+                router.push('/checkout/cart'),
+            const SingleActivator(LogicalKeyboardKey.home, alt: true): () =>
+                router.go('/'),
+            const SingleActivator(LogicalKeyboardKey.arrowLeft, alt: true): () {
+              keyboardBack(router);
+            },
+            const SingleActivator(LogicalKeyboardKey.f1): () {
+              final navigatorContext =
+                  router.routerDelegate.navigatorKey.currentContext;
+              if (navigatorContext == null) return;
+              showDialog<void>(
+                context: navigatorContext,
+                builder: (context) => AlertDialog(
+                  title: const Text('Keyboard controls'),
+                  content: const Text(
+                    'Tab / Shift+Tab: next / previous control\nEnter or Space: activate a button\nArrow keys: choose menu options\nEsc: close a dialog or go back\nF2: new sale\nF4: cart\nAlt+Home: dashboard\nAlt+Left: back\nF1: this help',
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Close'),
+                    ),
+                  ],
+                ),
+              );
+            },
+          },
+          child: FocusTraversalGroup(
+            policy: ReadingOrderTraversalPolicy(),
+            child: child ?? const SizedBox.shrink(),
+          ),
+        ),
       ),
     );
   }

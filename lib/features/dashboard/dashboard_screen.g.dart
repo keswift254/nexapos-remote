@@ -70,8 +70,8 @@ final dashboardChangeTickerProvider = DashboardChangeTickerProvider._();
 /// verified for real; this keepAlive is the more theoretical half.
 
 final class DashboardChangeTickerProvider
-    extends $FunctionalProvider<AsyncValue<void>, void, Stream<void>>
-    with $FutureModifier<void>, $StreamProvider<void> {
+    extends $FunctionalProvider<AsyncValue<int>, int, Stream<int>>
+    with $FutureModifier<int>, $StreamProvider<int> {
   /// Deliberately narrower than the PHP dashboard's dashboardChartData:
   /// today-vs-yesterday stats plus a 7-day trend, not its full daily/
   /// weekly/monthly/yearly bucketed chart system (see ReportsService's
@@ -116,17 +116,17 @@ final class DashboardChangeTickerProvider
 
   @$internal
   @override
-  $StreamProviderElement<void> $createElement($ProviderPointer pointer) =>
+  $StreamProviderElement<int> $createElement($ProviderPointer pointer) =>
       $StreamProviderElement(pointer);
 
   @override
-  Stream<void> create(Ref ref) {
+  Stream<int> create(Ref ref) {
     return dashboardChangeTicker(ref);
   }
 }
 
 String _$dashboardChangeTickerHash() =>
-    r'51c2d33f7e12bdd5167ac93443872f9187ae2081';
+    r'16c747b73a10549b5e2c4133c40e17b19ba49c6e';
 
 @ProviderFor(dashboardData)
 final dashboardDataProvider = DashboardDataProvider._();
@@ -165,4 +165,4 @@ final class DashboardDataProvider
   }
 }
 
-String _$dashboardDataHash() => r'65aff3c60a5945d41f1a7093f6fb677e40a77228';
+String _$dashboardDataHash() => r'9b6d95c937d1f8830bab25bb8b2e197d071ade41';
