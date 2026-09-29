@@ -4,8 +4,16 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - restore-cloudflare-release-path
       - nexapos-1.0.12-safety
-      - release-1.0.53-artifacts
+    paths:
+      - 'lib/**'
+      - 'android/**'
+      - 'windows/**'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+      - 'assets/**'
+      - 'docs/release-*.md'
 
 permissions:
   contents: write
@@ -62,10 +70,6 @@ jobs:
           channel: stable
           cache: true
 
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "8.0.x"
-
       - run: flutter pub get
       - run: flutter config --enable-windows-desktop
       - name: Build Windows release
@@ -80,17 +84,36 @@ jobs:
           Compress-Archive -Path 'build\windows\x64\runner\Release\*' -DestinationPath $runtime -Force
           "RUNTIME_ZIP=$runtime" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Build Windows installer
+      - name: Build compact Windows installer
         shell: pwsh
         run: |
-          $output = Join-Path $env:RUNNER_TEMP 'nexapos-setup'
-          dotnet publish windows/setup/NexaPOSSetup.csproj -c Release -r win-x64 --self-contained true -p:PayloadZip="$env:RUNTIME_ZIP" -p:Version="${{ needs.metadata.outputs.version }}" -o "$output"
-          $setup = Join-Path $output 'NexaPOS-Setup.exe'
-          if (!(Test-Path $setup)) { throw 'NexaPOS-Setup.exe was not produced.' }
-          & $setup /verify-payload
+          $version = "${{ needs.metadata.outputs.version }}"
+          $parts = $version.Split('.')
+          $assemblyVersion = "$($parts[0]).$($parts[1]).$($parts[2]).0"
+          $assemblyInfo = Join-Path $env:RUNNER_TEMP 'SetupVersion.cs'
+          @"
+          using System.Reflection;
+          [assembly: AssemblyVersion("$assemblyVersion")]
+          [assembly: AssemblyFileVersion("$assemblyVersion")]
+          "@ | Set-Content -Path $assemblyInfo -Encoding ascii
+
+          $csc = 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+          if (!(Test-Path $csc)) { throw "Framework C# compiler not found at $csc" }
+          $named = Join-Path $env:RUNNER_TEMP "NexaPOS-Setup-$version.exe"
+          & $csc /nologo /target:winexe /optimize+ /out:"$named" `
+            /win32manifest:windows\setup\app.manifest `
+            /resource:"$env:RUNTIME_ZIP",NexaPOS-Windows-runtime.zip `
+            /reference:System.Windows.Forms.dll `
+            /reference:System.IO.Compression.dll `
+            /reference:System.IO.Compression.FileSystem.dll `
+            /reference:Microsoft.CSharp.dll `
+            windows\setup\Program.cs "$assemblyInfo"
+          if ($LASTEXITCODE -ne 0) { throw "Installer compile failed with exit code $LASTEXITCODE." }
+          & $named /verify-payload
           if ($LASTEXITCODE -ne 0) { throw "Installer payload verification failed with exit code $LASTEXITCODE." }
-          $named = Join-Path $env:RUNNER_TEMP "NexaPOS-Setup-${{ needs.metadata.outputs.version }}.exe"
-          Copy-Item $setup $named -Force
+          $size = (Get-Item $named).Length
+          if ($size -gt 25MB) { throw "Installer is $size bytes; expected compact Worker-hosted package below 25 MiB." }
+          Write-Host "Compact installer size: $size bytes"
           "WINDOWS_SETUP=$named" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - uses: actions/upload-artifact@v4
