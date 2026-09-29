@@ -179,14 +179,141 @@ jobs:
           }
 
           $assembly = [System.Reflection.Assembly]::LoadFile($legacySetup)
-          $resourceName = @($assembly.GetManifestResourceNames() | Where-Object {
-            $_ -eq 'NexaPOS-Windows-runtime.zip' -or
-            $_ -like '*WindowsRuntime.zip' -or
-            $_ -like '*Windows-runtime.zip'
-          })[0]
-          if ([string]::IsNullOrWhiteSpace($resourceName)) {
-            throw 'Could not find the verified legacy runtime resource.'
+          $resourceNames = @($assembly.GetManifestResourceNames())
+          Write-Host "Verified 1.0.52 installer resources: $($resourceNames -join ', ')"
+          $zipResources = @($resourceNames | Where-Object { $_ -match '(?i)\\.zip
+
+          $oldRuntimeZip = Join-Path $env:RUNNER_TEMP 'legacy-1.0.52-runtime.zip'
+          $stream = $assembly.GetManifestResourceStream($resourceName)
+          if ($null -eq $stream) { throw 'Could not open the verified legacy runtime resource.' }
+          try {
+            $target = [System.IO.File]::Create($oldRuntimeZip)
+            try { $stream.CopyTo($target) } finally { $target.Dispose() }
+          } finally { $stream.Dispose() }
+
+          $oldRuntime = Join-Path $env:RUNNER_TEMP 'legacy-1.0.52-runtime'
+          Expand-Archive -Path $oldRuntimeZip -DestinationPath $oldRuntime -Force
+          $patchedEngine = Join-Path $oldRuntime 'flutter_windows.dll'
+          if (!(Test-Path $patchedEngine)) {
+            throw 'Verified 1.0.52 legacy runtime did not contain flutter_windows.dll.'
           }
+
+          $newRuntime = 'build\windows\x64\runner\Release'
+          Copy-Item $patchedEngine (Join-Path $newRuntime 'flutter_windows.dll') -Force
+
+          if (Test-Path (Join-Path $newRuntime 'local_auth_windows_plugin.dll')) {
+            throw 'Legacy runtime unexpectedly contains local_auth_windows_plugin.dll.'
+          }
+          $files = @(Get-ChildItem $newRuntime -File -Recurse)
+          Write-Host "Legacy runtime files: $($files.Count)"
+          Write-Host "Patched engine SHA256: $((Get-FileHash (Join-Path $newRuntime 'flutter_windows.dll') -Algorithm SHA256).Hash.ToLowerInvariant())"
+
+      - name: Package legacy Windows runtime
+        shell: pwsh
+        run: |
+          $runtime = Join-Path $env:RUNNER_TEMP 'NexaPOS-Windows7-8-runtime.zip'
+          Compress-Archive -Path 'build\windows\x64\runner\Release\*' -DestinationPath $runtime -Force
+          "LEGACY_RUNTIME_ZIP=$runtime" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build compact Windows 7/8 installer
+        shell: pwsh
+        run: |
+          $version = "\${{ needs.metadata.outputs.version }}"
+          $parts = $version.Split('.')
+          $assemblyVersion = "$($parts[0]).$($parts[1]).$($parts[2]).0"
+          $assemblyInfo = Join-Path $env:RUNNER_TEMP 'SetupVersionLegacy.cs'
+          @"
+          using System.Reflection;
+          [assembly: AssemblyVersion("$assemblyVersion")]
+          [assembly: AssemblyFileVersion("$assemblyVersion")]
+          "@ | Set-Content -Path $assemblyInfo -Encoding ascii
+
+          $csc = 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+          if (!(Test-Path $csc)) { throw "Framework C# compiler not found at $csc" }
+          $named = Join-Path $env:RUNNER_TEMP "NexaPOS-Setup-Windows7-8-$version.exe"
+          $compilerArgs = @(
+            '/nologo',
+            '/target:winexe',
+            '/optimize+',
+            "/out:$named",
+            '/win32manifest:windows\setup\app.manifest',
+            "/resource:$env:LEGACY_RUNTIME_ZIP,NexaPOS-Windows-runtime.zip",
+            '/reference:System.Windows.Forms.dll',
+            '/reference:System.IO.Compression.dll',
+            '/reference:System.IO.Compression.FileSystem.dll',
+            '/reference:Microsoft.CSharp.dll',
+            'windows\setup\Program.cs',
+            $assemblyInfo
+          )
+          & $csc @compilerArgs
+          if ($LASTEXITCODE -ne 0) { throw "Legacy installer compile failed with exit code $LASTEXITCODE." }
+
+          & $named /verify-payload
+          if ($LASTEXITCODE -ne 0) { throw "Legacy installer payload verification failed with exit code $LASTEXITCODE." }
+
+          $size = (Get-Item $named).Length
+          if ($size -gt 25MB) {
+            throw "Legacy installer is $size bytes; expected compact Worker-hosted package below 25 MiB."
+          }
+          Write-Host "Compact legacy installer size: $size bytes"
+          Write-Host "Legacy installer SHA256: $((Get-FileHash $named -Algorithm SHA256).Hash.ToLowerInvariant())"
+          "WINDOWS_LEGACY_SETUP=$named" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NexaPOS-Windows7-8-\${{ needs.metadata.outputs.version }}
+          path: \${{ env.WINDOWS_LEGACY_SETUP }}
+          if-no-files-found: error
+
+  publish-github-release:
+    if: github.ref == 'refs/heads/nexapos-1.0.12-safety'
+    needs:
+      - metadata
+      - android-release
+      - windows-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: NexaPOS-Android-${{ needs.metadata.outputs.version }}
+          path: artifacts/android
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: NexaPOS-Windows-${{ needs.metadata.outputs.version }}
+          path: artifacts/windows
+
+      - name: Prepare release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.metadata.outputs.version }}"
+          mkdir -p release
+          cp artifacts/android/app-release.apk "release/NexaPOS-$VERSION.apk"
+          cp "artifacts/windows/NexaPOS-Setup-$VERSION.exe" "release/NexaPOS-Setup-$VERSION.exe"
+          sha256sum "release/NexaPOS-$VERSION.apk" "release/NexaPOS-Setup-$VERSION.exe" > "release/SHA256SUMS-$VERSION.txt"
+
+      - name: Publish GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.metadata.outputs.version }}"
+          TAG="v$VERSION"
+          NOTES="docs/release-$VERSION.md"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" release/* --clobber
+          else
+            gh release create "$TAG" release/* --target "$GITHUB_SHA" --title "NexaPOS $VERSION" --notes-file "$NOTES"
+          fi
+ })
+          if ($zipResources.Count -ne 1) {
+            throw "Expected exactly one runtime ZIP in the verified legacy installer; found $($zipResources.Count)."
+          }
+          $resourceName = $zipResources[0]
 
           $oldRuntimeZip = Join-Path $env:RUNNER_TEMP 'legacy-1.0.52-runtime.zip'
           $stream = $assembly.GetManifestResourceStream($resourceName)
