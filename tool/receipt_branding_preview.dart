@@ -1,6 +1,6 @@
 import 'dart:io';
 import 'package:image/image.dart' as img;
-import '../lib/data/printing/receipt_branding.dart';
+import 'package:nexapos_mobile/data/printing/receipt_branding.dart';
 
 void main(List<String> args) {
   final output = Directory(args.single)..createSync(recursive: true);
