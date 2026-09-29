@@ -300,7 +300,7 @@ jobs:
       - name: Build compact Windows 7/8 installer
         shell: pwsh
         run: |
-          $version = "\${{ needs.metadata.outputs.version }}"
+          $version = "${{ needs.metadata.outputs.version }}"
           $parts = $version.Split('.')
           $assemblyVersion = "$($parts[0]).$($parts[1]).$($parts[2]).0"
           $assemblyInfo = Join-Path $env:RUNNER_TEMP 'SetupVersionLegacy.cs'
@@ -343,8 +343,8 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: NexaPOS-Windows7-8-\${{ needs.metadata.outputs.version }}
-          path: \${{ env.WINDOWS_LEGACY_SETUP }}
+          name: NexaPOS-Windows7-8-${{ needs.metadata.outputs.version }}
+          path: ${{ env.WINDOWS_LEGACY_SETUP }}
           if-no-files-found: error
 
   publish-github-release:
