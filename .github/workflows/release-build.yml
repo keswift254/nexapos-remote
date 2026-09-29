@@ -126,6 +126,150 @@ jobs:
           path: ${{ env.WINDOWS_SETUP }}
           if-no-files-found: error
 
+
+  windows-legacy-release:
+    needs: metadata
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.1"
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+      - run: flutter config --enable-windows-desktop
+
+      - name: Disable Windows Hello plugin for legacy edition
+        shell: pwsh
+        run: |
+          $registrant = 'windows\flutter\generated_plugin_registrant.cc'
+          $text = Get-Content $registrant -Raw
+          $text = $text -replace '(?m)^#include <local_auth_windows/local_auth_plugin\.h>\r?\n', ''
+          $text = $text -replace '(?ms)^\s*LocalAuthPluginRegisterWithRegistrar\(\r?\n\s*registry->GetRegistrarForPlugin\("LocalAuthPlugin"\)\);\r?\n', ''
+          Set-Content -Path $registrant -Value $text -Encoding utf8
+
+          $plugins = 'windows\flutter\generated_plugins.cmake'
+          $text = Get-Content $plugins -Raw
+          $text = $text -replace '(?m)^\s*local_auth_windows\r?\n', ''
+          Set-Content -Path $plugins -Value $text -Encoding utf8
+
+          if (Select-String -Path $registrant,$plugins -Pattern 'local_auth_windows|LocalAuthPlugin' -Quiet) {
+            throw 'Windows Hello plugin is still registered in the legacy build.'
+          }
+
+      - name: Build Windows 7/8 release
+        shell: pwsh
+        run: flutter build windows --release --no-pub --dart-define=NEXAPOS_LEGACY_WINDOWS=true
+        env:
+          CL: /D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
+
+      - name: Restore verified Windows 7-compatible Flutter engine
+        shell: pwsh
+        run: |
+          $legacySetup = Join-Path $env:RUNNER_TEMP 'NexaPOS-Setup-Windows7-8-1.0.52.exe'
+          Invoke-WebRequest -Uri 'https://nexapos-downloads.condojuniur.workers.dev/NexaPOS-Setup-Windows7-8-1.0.52.exe' -OutFile $legacySetup
+
+          $expected = '777b44767eaa09cd2e847c6723d86faebdf57cf833422c95925dbd99680b7991'
+          $actual = (Get-FileHash $legacySetup -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) {
+            throw "Published 1.0.52 legacy installer hash mismatch: $actual"
+          }
+
+          $assembly = [System.Reflection.Assembly]::LoadFile($legacySetup)
+          $resourceName = @($assembly.GetManifestResourceNames() | Where-Object {
+            $_ -eq 'NexaPOS-Windows-runtime.zip' -or
+            $_ -like '*WindowsRuntime.zip' -or
+            $_ -like '*Windows-runtime.zip'
+          })[0]
+          if ([string]::IsNullOrWhiteSpace($resourceName)) {
+            throw 'Could not find the verified legacy runtime resource.'
+          }
+
+          $oldRuntimeZip = Join-Path $env:RUNNER_TEMP 'legacy-1.0.52-runtime.zip'
+          $stream = $assembly.GetManifestResourceStream($resourceName)
+          if ($null -eq $stream) { throw 'Could not open the verified legacy runtime resource.' }
+          try {
+            $target = [System.IO.File]::Create($oldRuntimeZip)
+            try { $stream.CopyTo($target) } finally { $target.Dispose() }
+          } finally { $stream.Dispose() }
+
+          $oldRuntime = Join-Path $env:RUNNER_TEMP 'legacy-1.0.52-runtime'
+          Expand-Archive -Path $oldRuntimeZip -DestinationPath $oldRuntime -Force
+          $patchedEngine = Join-Path $oldRuntime 'flutter_windows.dll'
+          if (!(Test-Path $patchedEngine)) {
+            throw 'Verified 1.0.52 legacy runtime did not contain flutter_windows.dll.'
+          }
+
+          $newRuntime = 'build\windows\x64\runner\Release'
+          Copy-Item $patchedEngine (Join-Path $newRuntime 'flutter_windows.dll') -Force
+
+          if (Test-Path (Join-Path $newRuntime 'local_auth_windows_plugin.dll')) {
+            throw 'Legacy runtime unexpectedly contains local_auth_windows_plugin.dll.'
+          }
+          $files = @(Get-ChildItem $newRuntime -File -Recurse)
+          Write-Host "Legacy runtime files: $($files.Count)"
+          Write-Host "Patched engine SHA256: $((Get-FileHash (Join-Path $newRuntime 'flutter_windows.dll') -Algorithm SHA256).Hash.ToLowerInvariant())"
+
+      - name: Package legacy Windows runtime
+        shell: pwsh
+        run: |
+          $runtime = Join-Path $env:RUNNER_TEMP 'NexaPOS-Windows7-8-runtime.zip'
+          Compress-Archive -Path 'build\windows\x64\runner\Release\*' -DestinationPath $runtime -Force
+          "LEGACY_RUNTIME_ZIP=$runtime" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build compact Windows 7/8 installer
+        shell: pwsh
+        run: |
+          $version = "\${{ needs.metadata.outputs.version }}"
+          $parts = $version.Split('.')
+          $assemblyVersion = "$($parts[0]).$($parts[1]).$($parts[2]).0"
+          $assemblyInfo = Join-Path $env:RUNNER_TEMP 'SetupVersionLegacy.cs'
+          @"
+          using System.Reflection;
+          [assembly: AssemblyVersion("$assemblyVersion")]
+          [assembly: AssemblyFileVersion("$assemblyVersion")]
+          "@ | Set-Content -Path $assemblyInfo -Encoding ascii
+
+          $csc = 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+          if (!(Test-Path $csc)) { throw "Framework C# compiler not found at $csc" }
+          $named = Join-Path $env:RUNNER_TEMP "NexaPOS-Setup-Windows7-8-$version.exe"
+          $compilerArgs = @(
+            '/nologo',
+            '/target:winexe',
+            '/optimize+',
+            "/out:$named",
+            '/win32manifest:windows\setup\app.manifest',
+            "/resource:$env:LEGACY_RUNTIME_ZIP,NexaPOS-Windows-runtime.zip",
+            '/reference:System.Windows.Forms.dll',
+            '/reference:System.IO.Compression.dll',
+            '/reference:System.IO.Compression.FileSystem.dll',
+            '/reference:Microsoft.CSharp.dll',
+            'windows\setup\Program.cs',
+            $assemblyInfo
+          )
+          & $csc @compilerArgs
+          if ($LASTEXITCODE -ne 0) { throw "Legacy installer compile failed with exit code $LASTEXITCODE." }
+
+          & $named /verify-payload
+          if ($LASTEXITCODE -ne 0) { throw "Legacy installer payload verification failed with exit code $LASTEXITCODE." }
+
+          $size = (Get-Item $named).Length
+          if ($size -gt 25MB) {
+            throw "Legacy installer is $size bytes; expected compact Worker-hosted package below 25 MiB."
+          }
+          Write-Host "Compact legacy installer size: $size bytes"
+          Write-Host "Legacy installer SHA256: $((Get-FileHash $named -Algorithm SHA256).Hash.ToLowerInvariant())"
+          "WINDOWS_LEGACY_SETUP=$named" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NexaPOS-Windows7-8-\${{ needs.metadata.outputs.version }}
+          path: \${{ env.WINDOWS_LEGACY_SETUP }}
+          if-no-files-found: error
+
   publish-github-release:
     if: github.ref == 'refs/heads/nexapos-1.0.12-safety'
     needs:
