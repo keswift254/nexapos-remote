@@ -1,0 +1,42 @@
+name: Build web POS for NameCrane
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - restore-cloudflare-release-path
+    paths:
+      - 'lib/**'
+      - 'web/**'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+      - 'assets/**'
+      - '.github/workflows/web-release.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  web-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.1'
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter build web --release --no-pub --base-href /app/
+      - run: python3 tool/stamp_web_offline_cache.py build/web
+      - name: Verify output version
+        shell: bash
+        run: |
+          test -s build/web/main.dart.js
+          test -s build/web/version.json
+          grep -q '"version":"1.0.53"' build/web/version.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NexaPOS-Web-1.0.53-NameCrane
+          path: build/web/
+          if-no-files-found: error
