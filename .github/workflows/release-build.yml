@@ -240,6 +240,8 @@ jobs:
               $originalLength = $reader.ReadInt64()
               $storedLength = $reader.ReadInt64()
               $method = $reader.ReadByte()
+              $expectedDigest = $reader.ReadBytes(32)
+              if ($expectedDigest.Length -ne 32) { throw "Truncated digest for $name." }
               if ($originalLength -lt 0 -or $originalLength -gt 500MB -or $storedLength -lt 0 -or $storedLength -gt 500MB) {
                 throw "Invalid payload lengths for $name."
               }
@@ -266,6 +268,9 @@ jobs:
               }
               $actualLength = (Get-Item $destination).Length
               if ($actualLength -ne $originalLength) { throw "Incorrect decoded length for $name ($actualLength vs $originalLength)." }
+              $actualDigest = (Get-FileHash $destination -Algorithm SHA256).Hash.ToLowerInvariant()
+              $expectedHex = [System.BitConverter]::ToString($expectedDigest).Replace('-', '').ToLowerInvariant()
+              if ($actualDigest -ne $expectedHex) { throw "Digest mismatch for $name." }
               Write-Host "Recovered $name ($actualLength bytes, method $method)"
             }
             if ($inputFile.Position -ne $inputFile.Length) { throw "Unexpected trailing bytes in legacy payload." }
