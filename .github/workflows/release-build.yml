@@ -181,11 +181,10 @@ jobs:
           $assembly = [System.Reflection.Assembly]::LoadFile($legacySetup)
           $resourceNames = @($assembly.GetManifestResourceNames())
           Write-Host "Verified 1.0.52 installer resources: $($resourceNames -join ', ')"
-          $zipResources = @($resourceNames | Where-Object { $_ -match '(?i)\\.zip$' })
-          if ($zipResources.Count -ne 1) {
-            throw "Expected exactly one runtime ZIP in the verified legacy installer; found $($zipResources.Count)."
+          if ($resourceNames.Count -ne 1 -or $resourceNames[0] -ne 'NexaPOS.LegacyPayload.bin') {
+            throw "Unexpected verified legacy installer resources: $($resourceNames -join ', ')"
           }
-          $resourceName = $zipResources[0]
+          $resourceName = $resourceNames[0]
 
           $oldRuntimeZip = Join-Path $env:RUNNER_TEMP 'legacy-1.0.52-runtime.zip'
           $stream = $assembly.GetManifestResourceStream($resourceName)
