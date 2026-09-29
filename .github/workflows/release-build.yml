@@ -228,7 +228,7 @@ jobs:
           $reader = [System.IO.BinaryReader]::new($inputFile)
           try {
             $magic = [System.Text.Encoding]::ASCII.GetString($reader.ReadBytes(6))
-            if ($magic -ne "NXPK1 ") { throw "Unexpected legacy payload magic." }
+            if ($magic.Length -ne 6 -or !$magic.StartsWith('NXPK1') -or [int][char]$magic[5] -ne 0) { throw 'Unexpected legacy payload magic.' }
             $count = $reader.ReadInt32()
             if ($count -ne 21) { throw "Expected 21 legacy runtime files; found $count." }
             for ($entry = 0; $entry -lt $count; $entry++) {
