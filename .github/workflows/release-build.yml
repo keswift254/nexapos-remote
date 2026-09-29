@@ -222,29 +222,55 @@ jobs:
             try { $stream.CopyTo($target) } finally { $target.Dispose() }
           } finally { $stream.Dispose() }
 
-          $payloadBytes = [System.IO.File]::ReadAllBytes($payloadFile)
-          if ($payloadBytes.Length -lt 4) { throw 'Legacy runtime resource is too short.' }
-          $prefix = [System.BitConverter]::ToString($payloadBytes, 0, [Math]::Min(16, $payloadBytes.Length))
-          Write-Host "Verified legacy payload: $($payloadBytes.Length) bytes; header $prefix"
-          $oldRuntimeZip = Join-Path $env:RUNNER_TEMP 'legacy-1.0.52-runtime.zip'
-          if ($payloadBytes[0] -eq 0x50 -and $payloadBytes[1] -eq 0x4B) {
-            Copy-Item $payloadFile $oldRuntimeZip
-          } elseif ($payloadBytes[0] -eq 0x1F -and $payloadBytes[1] -eq 0x8B) {
-            $inputFile = [System.IO.File]::OpenRead($payloadFile)
-            try {
-              $gzip = [System.IO.Compression.GZipStream]::new($inputFile, [System.IO.Compression.CompressionMode]::Decompress)
-              try {
-                $outputFile = [System.IO.File]::Create($oldRuntimeZip)
-                try { $gzip.CopyTo($outputFile) } finally { $outputFile.Dispose() }
-              } finally { $gzip.Dispose() }
-            } finally { $inputFile.Dispose() }
-          } else {
-            throw "Unknown verified legacy payload format; header $prefix"
-          }
-
           $oldRuntime = Join-Path $env:RUNNER_TEMP 'legacy-1.0.52-runtime'
-          Expand-Archive -Path $oldRuntimeZip -DestinationPath $oldRuntime -Force
-          $patchedEngine = Join-Path $oldRuntime 'flutter_windows.dll'
+          [System.IO.Directory]::CreateDirectory($oldRuntime) | Out-Null
+          $inputFile = [System.IO.File]::OpenRead($payloadFile)
+          $reader = [System.IO.BinaryReader]::new($inputFile)
+          try {
+            $magic = [System.Text.Encoding]::ASCII.GetString($reader.ReadBytes(6))
+            if ($magic -ne "NXPK1 ") { throw "Unexpected legacy payload magic." }
+            $count = $reader.ReadInt32()
+            if ($count -ne 21) { throw "Expected 21 legacy runtime files; found $count." }
+            for ($entry = 0; $entry -lt $count; $entry++) {
+              $nameLength = $reader.ReadInt32()
+              if ($nameLength -lt 1 -or $nameLength -gt 4096) { throw "Invalid name length $nameLength." }
+              $nameBytes = $reader.ReadBytes($nameLength)
+              if ($nameBytes.Length -ne $nameLength) { throw "Truncated entry name $entry." }
+              $name = [System.Text.Encoding]::UTF8.GetString($nameBytes)
+              $originalLength = $reader.ReadInt64()
+              $storedLength = $reader.ReadInt64()
+              $method = $reader.ReadByte()
+              if ($originalLength -lt 0 -or $originalLength -gt 500MB -or $storedLength -lt 0 -or $storedLength -gt 500MB) {
+                throw "Invalid payload lengths for $name."
+              }
+              $stored = $reader.ReadBytes([int]$storedLength)
+              if ($stored.Length -ne $storedLength) { throw "Truncated payload for $name." }
+              $destination = [System.IO.Path]::GetFullPath((Join-Path $oldRuntime $name))
+              if (!$destination.StartsWith($oldRuntime + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+                throw "Unsafe legacy payload path $name."
+              }
+              [System.IO.Directory]::CreateDirectory([System.IO.Path]::GetDirectoryName($destination)) | Out-Null
+              if ($method -eq 0) {
+                [System.IO.File]::WriteAllBytes($destination, $stored)
+              } elseif ($method -eq 1) {
+                $compressed = [System.IO.MemoryStream]::new($stored, $false)
+                try {
+                  $inflater = [System.IO.Compression.DeflateStream]::new($compressed, [System.IO.Compression.CompressionMode]::Decompress)
+                  try {
+                    $outputFile = [System.IO.File]::Create($destination)
+                    try { $inflater.CopyTo($outputFile) } finally { $outputFile.Dispose() }
+                  } finally { $inflater.Dispose() }
+                } finally { $compressed.Dispose() }
+              } else {
+                throw "Unsupported compression method $method for $name."
+              }
+              $actualLength = (Get-Item $destination).Length
+              if ($actualLength -ne $originalLength) { throw "Incorrect decoded length for $name ($actualLength vs $originalLength)." }
+              Write-Host "Recovered $name ($actualLength bytes, method $method)"
+            }
+            if ($inputFile.Position -ne $inputFile.Length) { throw "Unexpected trailing bytes in legacy payload." }
+          } finally { $reader.Dispose(); $inputFile.Dispose() }
+                    $patchedEngine = Join-Path $oldRuntime 'flutter_windows.dll'
           if (!(Test-Path $patchedEngine)) {
             throw 'Verified 1.0.52 legacy runtime did not contain flutter_windows.dll.'
           }
