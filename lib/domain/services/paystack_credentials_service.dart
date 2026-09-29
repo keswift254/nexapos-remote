@@ -1,6 +1,7 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../core/secure_storage_provider.dart';
+import '../../data/payments/platform_http_client.dart' show nexaposPlatformBaseUrl;
 import '../entities/paystack_credentials.dart';
 
 part 'paystack_credentials_service.g.dart';
@@ -12,6 +13,7 @@ const _defaultEmailKey = 'nexapos.paystack.defaultEmail';
 const _deviceLabelKey = 'nexapos.platform.deviceLabel';
 const _defaultCurrency = 'KES';
 const _defaultEmail = 'customer@nexapos.co.ke';
+const _previousPlatformBaseUrl = 'https://nexapos-platform.onrender.com/index.php';
 
 @Riverpod(keepAlive: true)
 PaystackCredentialsService paystackCredentialsService(Ref ref) {
@@ -30,7 +32,12 @@ class PaystackCredentialsService {
   PaystackCredentialsService(this._storage);
 
   Future<PaystackCredentials> load() async {
-    final baseUrl = await _storage.read(key: _baseUrlKey) ?? '';
+    final storedBaseUrl = await _storage.read(key: _baseUrlKey) ?? '';
+    // Existing registered devices keep their API key. Redirect only the
+    // former central endpoint; preserve any custom server address.
+    final baseUrl = storedBaseUrl.trim() == _previousPlatformBaseUrl
+        ? nexaposPlatformBaseUrl
+        : storedBaseUrl;
     final apiKey = await _storage.read(key: _apiKeyKey) ?? '';
     final currency = await _storage.read(key: _currencyKey) ?? _defaultCurrency;
     final email = await _storage.read(key: _defaultEmailKey) ?? _defaultEmail;
