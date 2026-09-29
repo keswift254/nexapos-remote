@@ -299,10 +299,13 @@ void main() {
       await openScreen(tester);
       server.offline = true;
 
-      await buy(tester, 'm6');
+      await tester.tap(find.byKey(const Key('pay-m6')));
+      await tester.pumpAndSettle();
 
-      expect(find.textContaining('Could not reach the server'), findsOneWidget);
+      expect(find.textContaining('Could not confirm the current price'), findsOneWidget);
       expect(find.byKey(const Key('payment-dialog')), findsNothing);
+      expect(find.byKey(const Key('purchase-email')), findsNothing);
+      expect(server.startCalls, 0);
 
       await close(tester);
     });
