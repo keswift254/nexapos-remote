@@ -1,9 +1,6 @@
 name: Publish update metadata
 
 on:
-  push:
-    branches:
-      - nexapos-1.0.12-safety
   workflow_dispatch:
 
 permissions:
@@ -21,12 +18,11 @@ jobs:
           set -euo pipefail
           VERSION="$(sed -n 's/^version: *\([^+]*\).*/\1/p' pubspec.yaml | head -n 1)"
           test -n "$VERSION"
-          BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/v$VERSION"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "ANDROID_URL=$BASE/NexaPOS-$VERSION.apk" >> "$GITHUB_ENV"
-          echo "WINDOWS_URL=$BASE/NexaPOS-Setup-$VERSION.exe" >> "$GITHUB_ENV"
+          echo "ANDROID_URL=https://pub-2a7877d5b6bf40a18da4c1d6ed977081.r2.dev/NexaPOS-$VERSION.apk" >> "$GITHUB_ENV"
+          echo "WINDOWS_URL=https://nexapos-downloads.condojuniur.workers.dev/NexaPOS-Setup-$VERSION.exe" >> "$GITHUB_ENV"
 
-      - name: Verify files and calculate SHA-256
+      - name: Verify Cloudflare-hosted files and calculate SHA-256
         shell: bash
         run: |
           set -euo pipefail
