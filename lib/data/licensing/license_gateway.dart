@@ -2,14 +2,8 @@ import 'package:http/http.dart' as http;
 
 import '../payments/platform_http_client.dart';
 
-/// nexapos_license runs as a single central server this vendor operates
-/// (unlike nexapos_platform's baseUrl, which each shop configures for
-/// its own self-hosted instance during onboarding) - so the address is
-/// a compile-time constant rather than something typed in during setup.
-/// Deployed 2026-08-23 to Render - note the "-1" suffix: "nexapos-license"
-/// alone was already taken on Render's global .onrender.com namespace, so
-/// this is the real assigned hostname, not a typo.
-const licenseServerBaseUrl = 'https://nexapos-license-1.onrender.com/index.php';
+/// Central license API used by activation, renewal, and updates.
+const licenseServerBaseUrl = 'https://license.nexapos.cc/index.php';
 
 class LicenseException implements Exception {
   final String message;
