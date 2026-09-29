@@ -229,7 +229,12 @@ class LicenseGateway {
       'GET',
       'plans',
       baseUrl,
-      queryParameters: const {'v': '2'},
+      // Plans are operator-controlled live data; a CDN or browser must not
+      // reuse an earlier response after a generator.html edit.
+      queryParameters: {
+        'v': '2',
+        '_': DateTime.now().microsecondsSinceEpoch.toString(),
+      },
     );
     if (response['success'] != true) {
       throw LicenseException(

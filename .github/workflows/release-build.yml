@@ -85,43 +85,20 @@ jobs:
         env:
           CL: /D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
 
-      - name: Package Windows runtime
-        shell: pwsh
-        run: |
-          $runtime = Join-Path $env:RUNNER_TEMP 'NexaPOS-Windows-runtime.zip'
-          Compress-Archive -Path 'build\windows\x64\runner\Release\*' -DestinationPath $runtime -Force
-          "RUNTIME_ZIP=$runtime" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
       - name: Build compact Windows installer
         shell: pwsh
         run: |
           $version = "${{ needs.metadata.outputs.version }}"
-          $parts = $version.Split('.')
-          $assemblyVersion = "$($parts[0]).$($parts[1]).$($parts[2]).0"
-          $assemblyInfo = Join-Path $env:RUNNER_TEMP 'SetupVersion.cs'
-          @"
-          using System.Reflection;
-          [assembly: AssemblyVersion("$assemblyVersion")]
-          [assembly: AssemblyFileVersion("$assemblyVersion")]
-          "@ | Set-Content -Path $assemblyInfo -Encoding ascii
-
-          $csc = 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe'
-          if (!(Test-Path $csc)) { throw "Framework C# compiler not found at $csc" }
-          $named = Join-Path $env:RUNNER_TEMP "NexaPOS-Setup-$version.exe"
-          $outArg = "/out:$named"
-          $manifestArg = "/win32manifest:windows\setup\app.manifest"
-          $resourceArg = "/resource:$env:RUNTIME_ZIP,NexaPOS-Windows-runtime.zip"
-          & $csc /nologo /target:winexe /optimize+ $outArg `
-            $manifestArg `
-            $resourceArg `
-            /reference:System.Windows.Forms.dll `
-            /reference:System.IO.Compression.dll `
-            /reference:System.IO.Compression.FileSystem.dll `
-            /reference:Microsoft.CSharp.dll `
-            windows\setup\Program.cs "$assemblyInfo"
-          if ($LASTEXITCODE -ne 0) { throw "Installer compile failed with exit code $LASTEXITCODE." }
-          & $named /verify-payload
-          if ($LASTEXITCODE -ne 0) { throw "Installer payload verification failed with exit code $LASTEXITCODE." }
+          choco install innosetup -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "Could not install native setup compiler." }
+          $compiler = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (!(Test-Path $compiler)) { throw "Native setup compiler not found at $compiler" }
+          $runtimeDir = (Resolve-Path 'build\windows\x64\runner\Release').Path
+          $base = "NexaPOS-Setup-$version-native"
+          & $compiler '/Q' "/DAppVersion=$version" "/DRuntimeDir=$runtimeDir" "/DOutputBase=$base" "/O$env:RUNNER_TEMP" 'windows\setup\NexaPOS.iss'
+          if ($LASTEXITCODE -ne 0) { throw "Native installer compile failed with exit code $LASTEXITCODE." }
+          $named = Join-Path $env:RUNNER_TEMP "$base.exe"
+          if (!(Test-Path $named)) { throw "Native installer missing." }
           $size = (Get-Item $named).Length
           if ($size -gt 25MB) { throw "Installer is $size bytes; expected compact Worker-hosted package below 25 MiB." }
           Write-Host "Compact installer size: $size bytes"
@@ -294,48 +271,20 @@ jobs:
           Write-Host "Known-good engine SHA256: $((Get-FileHash (Join-Path $repairedRuntime 'flutter_windows.dll') -Algorithm SHA256).Hash.ToLowerInvariant())"
           "REPAIRED_LEGACY_RUNTIME=$repairedRuntime" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Package legacy Windows runtime
-        shell: pwsh
-        run: |
-          $runtime = Join-Path $env:RUNNER_TEMP 'NexaPOS-Windows7-8-runtime.zip'
-          Compress-Archive -Path (Join-Path $env:REPAIRED_LEGACY_RUNTIME '*') -DestinationPath $runtime -Force
-          "LEGACY_RUNTIME_ZIP=$runtime" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
       - name: Build compact Windows 7/8 installer
         shell: pwsh
         run: |
           $version = "${{ needs.metadata.outputs.version }}"
-          $parts = $version.Split('.')
-          $assemblyVersion = "$($parts[0]).$($parts[1]).$($parts[2]).0"
-          $assemblyInfo = Join-Path $env:RUNNER_TEMP 'SetupVersionLegacy.cs'
-          @"
-          using System.Reflection;
-          [assembly: AssemblyVersion("$assemblyVersion")]
-          [assembly: AssemblyFileVersion("$assemblyVersion")]
-          "@ | Set-Content -Path $assemblyInfo -Encoding ascii
-
-          $csc = 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe'
-          if (!(Test-Path $csc)) { throw "Framework C# compiler not found at $csc" }
-          $named = Join-Path $env:RUNNER_TEMP "NexaPOS-Setup-Windows7-8-$version.exe"
-          $compilerArgs = @(
-            '/nologo',
-            '/target:winexe',
-            '/optimize+',
-            "/out:$named",
-            '/win32manifest:windows\setup\app.manifest',
-            "/resource:$env:LEGACY_RUNTIME_ZIP,NexaPOS-Windows-runtime.zip",
-            '/reference:System.Windows.Forms.dll',
-            '/reference:System.IO.Compression.dll',
-            '/reference:System.IO.Compression.FileSystem.dll',
-            '/reference:Microsoft.CSharp.dll',
-            'windows\setup\Program.cs',
-            $assemblyInfo
-          )
-          & $csc @compilerArgs
-          if ($LASTEXITCODE -ne 0) { throw "Legacy installer compile failed with exit code $LASTEXITCODE." }
-
-          & $named /verify-payload
-          if ($LASTEXITCODE -ne 0) { throw "Legacy installer payload verification failed with exit code $LASTEXITCODE." }
+          choco install innosetup -y --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "Could not install native setup compiler." }
+          $compiler = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (!(Test-Path $compiler)) { throw "Native setup compiler not found at $compiler" }
+          $runtimeDir = (Resolve-Path $env:REPAIRED_LEGACY_RUNTIME).Path
+          $base = "NexaPOS-Setup-Windows7-8-$version-native"
+          & $compiler '/Q' "/DAppVersion=$version" "/DRuntimeDir=$runtimeDir" "/DOutputBase=$base" "/O$env:RUNNER_TEMP" 'windows\setup\NexaPOS.iss'
+          if ($LASTEXITCODE -ne 0) { throw "Native installer compile failed with exit code $LASTEXITCODE." }
+          $named = Join-Path $env:RUNNER_TEMP "$base.exe"
+          if (!(Test-Path $named)) { throw "Native installer missing." }
 
           $size = (Get-Item $named).Length
           if ($size -gt 25MB) {

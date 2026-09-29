@@ -30,7 +30,8 @@ class PurchaseSection extends ConsumerStatefulWidget {
   ConsumerState<PurchaseSection> createState() => _PurchaseSectionState();
 }
 
-class _PurchaseSectionState extends ConsumerState<PurchaseSection> {
+class _PurchaseSectionState extends ConsumerState<PurchaseSection>
+    with WidgetsBindingObserver {
   /// The longest starting a payment may take (one server call plus this device
   /// identifying itself) before the person is told and can try again.
   static const _startTimeout = Duration(seconds: 60);
@@ -41,12 +42,34 @@ class _PurchaseSectionState extends ConsumerState<PurchaseSection> {
   PendingPurchase? _pending;
   String? _startingPlanId;
   String? _error;
+  Timer? _plansRefresh;
+  bool _fetchingPlans = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    // Keep an open activation screen in sync with edits made in generator.html.
+    // A newly opened screen still fetches at once in _loadPlans below.
+    _plansRefresh = Timer.periodic(const Duration(seconds: 20), (_) {
+      if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
+        _loadPlans(quiet: true);
+      }
+    });
     _loadPending();
     _loadPlans();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _loadPlans(quiet: true);
+  }
+
+  @override
+  void dispose() {
+    _plansRefresh?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
   }
 
   Future<void> _loadPending() async {
@@ -58,30 +81,41 @@ class _PurchaseSectionState extends ConsumerState<PurchaseSection> {
     setState(() => _pending = pending);
   }
 
-  Future<void> _loadPlans() async {
-    setState(() {
-      _loadingPlans = true;
-      _plansError = null;
-    });
+  Future<void> _loadPlans({bool quiet = false}) async {
+    if (_fetchingPlans) return;
+    _fetchingPlans = true;
+    if (!quiet || _catalog == null) {
+      setState(() {
+        _loadingPlans = true;
+        _plansError = null;
+      });
+    }
     try {
       final catalog = await ref.read(licensePurchaseServiceProvider).loadPlans();
       if (!mounted) return;
       setState(() {
         _catalog = catalog;
         _loadingPlans = false;
+        _plansError = null;
       });
     } on LicenseOfflineException {
       if (!mounted) return;
-      setState(() {
-        _loadingPlans = false;
-        _plansError = "Couldn't load the plans - check your internet connection.";
-      });
+      if (!quiet || _catalog == null) {
+        setState(() {
+          _loadingPlans = false;
+          _plansError = "Couldn't load the plans - check your internet connection.";
+        });
+      }
     } catch (_) {
       if (!mounted) return;
-      setState(() {
-        _loadingPlans = false;
-        _plansError = "Couldn't load the plans right now.";
-      });
+      if (!quiet || _catalog == null) {
+        setState(() {
+          _loadingPlans = false;
+          _plansError = "Couldn't load the plans right now.";
+        });
+      }
+    } finally {
+      _fetchingPlans = false;
     }
   }
 
