@@ -101,9 +101,12 @@ jobs:
           $csc = 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe'
           if (!(Test-Path $csc)) { throw "Framework C# compiler not found at $csc" }
           $named = Join-Path $env:RUNNER_TEMP "NexaPOS-Setup-$version.exe"
-          & $csc /nologo /target:winexe /optimize+ /out:"$named" `
-            /win32manifest:windows\setup\app.manifest `
-            /resource:"$env:RUNTIME_ZIP",NexaPOS-Windows-runtime.zip `
+          $outArg = "/out:$named"
+          $manifestArg = "/win32manifest:windows\setup\app.manifest"
+          $resourceArg = "/resource:$env:RUNTIME_ZIP,NexaPOS-Windows-runtime.zip"
+          & $csc /nologo /target:winexe /optimize+ $outArg `
+            $manifestArg `
+            $resourceArg `
             /reference:System.Windows.Forms.dll `
             /reference:System.IO.Compression.dll `
             /reference:System.IO.Compression.FileSystem.dll `
