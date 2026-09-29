@@ -5,9 +5,27 @@ on:
   push:
     branches:
       - nexapos-1.0.12-safety
+      - release-1.0.53-artifacts
+
+permissions:
+  contents: write
 
 jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        shell: bash
+        run: |
+          VERSION="$(sed -n 's/^version: *\([^+]*\).*/\1/p' pubspec.yaml | head -n 1)"
+          test -n "$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
   android-release:
+    needs: metadata
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,6 +46,97 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: NexaPOS-Android-1.0.53
+          name: NexaPOS-Android-${{ needs.metadata.outputs.version }}
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
+
+  windows-release:
+    needs: metadata
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.1"
+          channel: stable
+          cache: true
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - run: flutter pub get
+      - run: flutter config --enable-windows-desktop
+      - run: flutter build windows --release --no-pub
+
+      - name: Package Windows runtime
+        shell: pwsh
+        run: |
+          $runtime = Join-Path $env:RUNNER_TEMP 'NexaPOS-Windows-runtime.zip'
+          Compress-Archive -Path 'build\windows\x64\runner\Release\*' -DestinationPath $runtime -Force
+          "RUNTIME_ZIP=$runtime" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          $output = Join-Path $env:RUNNER_TEMP 'nexapos-setup'
+          dotnet publish windows/setup/NexaPOSSetup.csproj -c Release -r win-x64 --self-contained true -p:PayloadZip="$env:RUNTIME_ZIP" -p:Version="${{ needs.metadata.outputs.version }}" -o "$output"
+          $setup = Join-Path $output 'NexaPOS-Setup.exe'
+          if (!(Test-Path $setup)) { throw 'NexaPOS-Setup.exe was not produced.' }
+          & $setup /verify-payload
+          if ($LASTEXITCODE -ne 0) { throw "Installer payload verification failed with exit code $LASTEXITCODE." }
+          $named = Join-Path $env:RUNNER_TEMP "NexaPOS-Setup-${{ needs.metadata.outputs.version }}.exe"
+          Copy-Item $setup $named -Force
+          "WINDOWS_SETUP=$named" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NexaPOS-Windows-${{ needs.metadata.outputs.version }}
+          path: ${{ env.WINDOWS_SETUP }}
+          if-no-files-found: error
+
+  publish-github-release:
+    if: github.ref == 'refs/heads/nexapos-1.0.12-safety'
+    needs:
+      - metadata
+      - android-release
+      - windows-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: NexaPOS-Android-${{ needs.metadata.outputs.version }}
+          path: artifacts/android
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: NexaPOS-Windows-${{ needs.metadata.outputs.version }}
+          path: artifacts/windows
+
+      - name: Prepare release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.metadata.outputs.version }}"
+          mkdir -p release
+          cp artifacts/android/app-release.apk "release/NexaPOS-$VERSION.apk"
+          cp "artifacts/windows/NexaPOS-Setup-$VERSION.exe" "release/NexaPOS-Setup-$VERSION.exe"
+          sha256sum "release/NexaPOS-$VERSION.apk" "release/NexaPOS-Setup-$VERSION.exe" > "release/SHA256SUMS-$VERSION.txt"
+
+      - name: Publish GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.metadata.outputs.version }}"
+          TAG="v$VERSION"
+          NOTES="docs/release-$VERSION.md"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" release/* --clobber
+          else
+            gh release create "$TAG" release/* --target "$GITHUB_SHA" --title "NexaPOS $VERSION" --notes-file "$NOTES"
+          fi
