@@ -35,13 +35,20 @@ WizardStyle=modern
 Source: "{#RuntimeDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Icons]
-Name: "{autodesktop}\NexaPOS"; Filename: "{app}\nexapos_mobile.exe"; WorkingDir: "{app}"
+; Administrative installs use the common desktop. Old C# installers created
+; a per-user desktop shortcut, so upgrades first remove both possible legacy
+; locations below and then create exactly one common-desktop shortcut.
+Name: "{commondesktop}\NexaPOS"; Filename: "{app}\nexapos_mobile.exe"; WorkingDir: "{app}"
 Name: "{commonprograms}\NexaPOS\NexaPOS"; Filename: "{app}\nexapos_mobile.exe"; WorkingDir: "{app}"
 
-; The old C# setup copied itself into Program Files. Its uninstall entry is
-; obsolete after this native installer has registered its own uninstaller.
+; Clean up the legacy setup copy and shortcut locations before recreating the
+; current shortcuts. This prevents upgraded PCs from showing two NexaPOS icons.
 [InstallDelete]
 Type: files; Name: "{app}\NexaPOS-Setup.exe"
+Type: files; Name: "{userdesktop}\NexaPOS.lnk"
+Type: files; Name: "{commondesktop}\NexaPOS.lnk"
+Type: files; Name: "{userprograms}\NexaPOS\NexaPOS.lnk"
+Type: files; Name: "{commonprograms}\NexaPOS\NexaPOS.lnk"
 
 [Registry]
 Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Uninstall\NexaPOS"; Flags: deletekey
