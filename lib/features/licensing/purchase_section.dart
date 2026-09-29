@@ -121,6 +121,39 @@ class _PurchaseSectionState extends ConsumerState<PurchaseSection>
 
   Future<void> _buy(PurchasePlan plan) async {
     final service = ref.read(licensePurchaseServiceProvider);
+    // A price edited in generator.html must be shown before the customer
+    // enters an email or opens Paystack, even during the refresh interval.
+    setState(() {
+      _startingPlanId = plan.id;
+      _error = null;
+    });
+    try {
+      final current = await service.loadPlans();
+      if (!mounted) return;
+      PurchasePlan? selected;
+      for (final candidate in current.plans) {
+        if (candidate.id == plan.id) { selected = candidate; break; }
+      }
+      final changed = selected == null ||
+          selected.amountKes != plan.amountKes ||
+          selected.label != plan.label ||
+          selected.months != plan.months ||
+          selected.days != plan.days ||
+          selected.lifetime != plan.lifetime;
+      setState(() {
+        _catalog = current;
+        _startingPlanId = null;
+        if (changed) _error = 'The plans changed. Review the current price and choose again.';
+      });
+      if (changed) return;
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _startingPlanId = null;
+        _error = 'Could not confirm the current price. Check your connection and try again.';
+      });
+      return;
+    }
     final email = await showDialog<String>(
       context: context,
       builder: (_) => _EmailDialog(

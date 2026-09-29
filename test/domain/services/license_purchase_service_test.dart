@@ -91,6 +91,16 @@ void main() {
       expect(again.amountKes, 3000);
     });
 
+    test('uses the server price when a plan changes before checkout', () async {
+      server.plans[1] = {...server.plans[1], 'label': '6 months special', 'amount_kes': 2500};
+
+      final purchase = await service().start(_m6, 'buyer@example.com');
+
+      expect(purchase.planLabel, '6 months special');
+      expect(purchase.amountKes, 2500);
+      expect((await service().pending())!.amountKes, 2500);
+    });
+
     test('remembers the email to offer next time', () async {
       expect(await service().lastEmail(), isNull);
 

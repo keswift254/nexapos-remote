@@ -235,11 +235,14 @@ class LicensePurchaseService {
           planId: plan.id,
           email: email.trim(),
         );
+    // The price can change in generator.html between the card being drawn
+    // and checkout starting. Show the terms the server actually accepted.
+    final chargedPlan = checkout.plan ?? plan;
     final purchase = PendingPurchase(
       reference: checkout.reference,
       planId: plan.id,
-      planLabel: plan.label,
-      amountKes: plan.amountKes,
+      planLabel: chargedPlan.label,
+      amountKes: chargedPlan.amountKes,
       paymentUrl: checkout.paymentUrl.toString(),
       startedAt: DateTime.now().toUtc(),
     );
