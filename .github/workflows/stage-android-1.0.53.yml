@@ -1,0 +1,48 @@
+name: Stage NexaPOS Android 1.0.53 for transfer
+
+on:
+  push:
+    branches: [restore-cloudflare-release-path]
+    paths: ['.github/workflows/stage-android-1.0.53.yml']
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: NexaPOS-Android-1.0.53
+          run-id: 36613348581
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: apk
+      - name: Verify and split the APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(sha256sum apk/app-release.apk | cut -d' ' -f1)" = "9cf45fcdd4a83f952168440d137289e0470e2370407260080976737d674fbcc1"
+          test "$(wc -c < apk/app-release.apk)" = "78009737"
+          mkdir chunks
+          split -b 28000000 -d -a 1 apk/app-release.apk chunks/NexaPOS-1.0.53.apk.part-
+          sha256sum chunks/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NexaPOS-Android-1.0.53-part-0
+          path: chunks/NexaPOS-1.0.53.apk.part-0
+          compression-level: 0
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NexaPOS-Android-1.0.53-part-1
+          path: chunks/NexaPOS-1.0.53.apk.part-1
+          compression-level: 0
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NexaPOS-Android-1.0.53-part-2
+          path: chunks/NexaPOS-1.0.53.apk.part-2
+          compression-level: 0
+          if-no-files-found: error
