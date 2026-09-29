@@ -255,26 +255,50 @@ jobs:
             }
             if ($inputFile.Position -ne $inputFile.Length) { throw "Unexpected trailing bytes in legacy payload." }
           } finally { $reader.Dispose(); $inputFile.Dispose() }
-                    $patchedEngine = Join-Path $oldRuntime 'flutter_windows.dll'
+          $patchedEngine = Join-Path $oldRuntime 'flutter_windows.dll'
           if (!(Test-Path $patchedEngine)) {
             throw 'Verified 1.0.52 legacy runtime did not contain flutter_windows.dll.'
           }
 
           $newRuntime = 'build\windows\x64\runner\Release'
-          Copy-Item $patchedEngine (Join-Path $newRuntime 'flutter_windows.dll') -Force
+          $repairedRuntime = Join-Path $env:RUNNER_TEMP 'legacy-1.0.53-repaired-runtime'
+          [System.IO.Directory]::CreateDirectory($repairedRuntime) | Out-Null
+          Copy-Item (Join-Path $oldRuntime '*') $repairedRuntime -Recurse -Force
 
-          if (Test-Path (Join-Path $newRuntime 'local_auth_windows_plugin.dll')) {
+          # Keep the complete 1.0.52 Win7-compatible native runner and plugins.
+          # The earlier 1.0.53 package only restored flutter_windows.dll, while
+          # its newly built runner/plugins exit silently on actual Windows 7.
+          Copy-Item (Join-Path $newRuntime 'data\app.so') (Join-Path $repairedRuntime 'data\app.so') -Force
+          Remove-Item (Join-Path $repairedRuntime 'data\flutter_assets') -Recurse -Force
+          Copy-Item (Join-Path $newRuntime 'data\flutter_assets') (Join-Path $repairedRuntime 'data\flutter_assets') -Recurse -Force
+          python release-tools/patch_legacy_runner_version.py (Join-Path $repairedRuntime 'nexapos_mobile.exe')
+          if ($LASTEXITCODE -ne 0) { throw 'Could not patch legacy runner version.' }
+
+          foreach ($native in @('flutter_windows.dll','dartjni.dll','file_selector_windows_plugin.dll',
+              'flutter_secure_storage_windows_plugin.dll','printing_plugin.dll','url_launcher_windows_plugin.dll')) {
+            $expectedNative = (Get-FileHash (Join-Path $oldRuntime $native) -Algorithm SHA256).Hash
+            $actualNative = (Get-FileHash (Join-Path $repairedRuntime $native) -Algorithm SHA256).Hash
+            if ($actualNative -ne $expectedNative) { throw "Win7 native component changed: $native" }
+          }
+          if (Test-Path (Join-Path $repairedRuntime 'local_auth_windows_plugin.dll')) {
             throw 'Legacy runtime unexpectedly contains local_auth_windows_plugin.dll.'
           }
-          $files = @(Get-ChildItem $newRuntime -File -Recurse)
-          Write-Host "Legacy runtime files: $($files.Count)"
-          Write-Host "Patched engine SHA256: $((Get-FileHash (Join-Path $newRuntime 'flutter_windows.dll') -Algorithm SHA256).Hash.ToLowerInvariant())"
+          $oldApp = (Get-FileHash (Join-Path $oldRuntime 'data\app.so') -Algorithm SHA256).Hash
+          $newApp = (Get-FileHash (Join-Path $newRuntime 'data\app.so') -Algorithm SHA256).Hash
+          $repairedApp = (Get-FileHash (Join-Path $repairedRuntime 'data\app.so') -Algorithm SHA256).Hash
+          if ($repairedApp -ne $newApp -or $repairedApp -eq $oldApp) {
+            throw 'The repaired runtime does not contain the new application code.'
+          }
+          $files = @(Get-ChildItem $repairedRuntime -File -Recurse)
+          Write-Host "Repaired Win7 runtime files: $($files.Count)"
+          Write-Host "Known-good engine SHA256: $((Get-FileHash (Join-Path $repairedRuntime 'flutter_windows.dll') -Algorithm SHA256).Hash.ToLowerInvariant())"
+          "REPAIRED_LEGACY_RUNTIME=$repairedRuntime" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Package legacy Windows runtime
         shell: pwsh
         run: |
           $runtime = Join-Path $env:RUNNER_TEMP 'NexaPOS-Windows7-8-runtime.zip'
-          Compress-Archive -Path 'build\windows\x64\runner\Release\*' -DestinationPath $runtime -Force
+          Compress-Archive -Path (Join-Path $env:REPAIRED_LEGACY_RUNTIME '*') -DestinationPath $runtime -Force
           "LEGACY_RUNTIME_ZIP=$runtime" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Build compact Windows 7/8 installer
