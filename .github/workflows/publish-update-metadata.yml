@@ -1,0 +1,100 @@
+name: Publish update metadata
+
+on:
+  push:
+    branches:
+      - nexapos-1.0.12-safety
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve release version and URLs
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n 's/^version: *\([^+]*\).*/\1/p' pubspec.yaml | head -n 1)"
+          test -n "$VERSION"
+          BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/v$VERSION"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "ANDROID_URL=$BASE/NexaPOS-$VERSION.apk" >> "$GITHUB_ENV"
+          echo "WINDOWS_URL=$BASE/NexaPOS-Setup-$VERSION.exe" >> "$GITHUB_ENV"
+
+      - name: Verify files and calculate SHA-256
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --silent --show-error "$ANDROID_URL" -o android.apk
+          curl --fail --location --silent --show-error "$WINDOWS_URL" -o windows.exe
+          echo "ANDROID_SHA256=$(sha256sum android.apk | awk '{print $1}')" >> "$GITHUB_ENV"
+          echo "WINDOWS_SHA256=$(sha256sum windows.exe | awk '{print $1}')" >> "$GITHUB_ENV"
+
+      - name: Publish version to NexaPOS license server
+        shell: bash
+        env:
+          LICENSE_ADMIN_SECRET: ${{ secrets.LICENSE_ADMIN_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "$LICENSE_ADMIN_SECRET" ]; then
+            echo "::error::Repository secret LICENSE_ADMIN_SECRET is not configured."
+            exit 2
+          fi
+          NOTES="$(tr '\n' ' ' < "docs/release-$VERSION.md" | sed 's/[[:space:]]\+/ /g')"
+          export NOTES
+          python - <<'PY' > payload.json
+          import json, os
+          print(json.dumps({
+              "version": os.environ["VERSION"],
+              "windows_installer_url": os.environ["WINDOWS_URL"],
+              "android_url": os.environ["ANDROID_URL"],
+              "windows_installer_sha256": os.environ["WINDOWS_SHA256"],
+              "android_sha256": os.environ["ANDROID_SHA256"],
+              "release_notes": os.environ["NOTES"],
+              "windows_legacy_installer_url": "",
+              "windows_legacy_installer_sha256": "",
+              "patch_from_version": "",
+              "android_patch_url": "",
+              "android_patch_sha256": "",
+              "windows_installer_patch_url": "",
+              "windows_installer_patch_sha256": "",
+              "windows_legacy_installer_patch_url": "",
+              "windows_legacy_installer_patch_sha256": "",
+              "patch_applier_url": "",
+              "patch_applier_sha256": ""
+          }))
+          PY
+          curl --fail-with-body --silent --show-error \
+            -X POST 'https://license.nexapos.cc/index.php?action=set_latest_version' \
+            -H "X-Admin-Secret: $LICENSE_ADMIN_SECRET" \
+            -H 'Content-Type: application/json' \
+            --data-binary @payload.json \
+            -o publish-response.json
+          python - <<'PY'
+          import json
+          data=json.load(open("publish-response.json", encoding="utf-8"))
+          if data.get("success") is not True:
+              raise SystemExit(f"Publish failed: {data.get('message','unknown server response')}")
+          print("License server accepted the release metadata.")
+          PY
+
+      - name: Verify published version
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            'https://license.nexapos.cc/index.php?action=latest_version' \
+            -o latest.json
+          python - <<'PY'
+          import json, os
+          data=json.load(open("latest.json", encoding="utf-8"))
+          expected=os.environ["VERSION"]
+          if data.get("success") is not True or data.get("version") != expected:
+              raise SystemExit(f"Expected latest version {expected}, got {data!r}")
+          print(f"Verified latest version {expected}.")
+          PY
