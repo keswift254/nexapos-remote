@@ -7,9 +7,7 @@ import 'package:http/http.dart' as http;
 const platformRequestTimeout = Duration(seconds: 25);
 
 /// Sync isn't blocking a till transaction the way a Paystack charge is,
-/// so it can afford to ride out a cold start on the Render-hosted
-/// platform backend instead of timing out and forcing the cashier to
-/// notice and press the refresh button again.
+/// so allow longer requests for a large initial snapshot.
 const platformSyncRequestTimeout = Duration(seconds: 55);
 
 /// nexapos_platform now runs as a single central server this vendor
@@ -20,7 +18,7 @@ const platformSyncRequestTimeout = Duration(seconds: 55);
 /// types in during registration; PaymentSettingsScreen no longer shows
 /// that field at all. Update this if the deployment ever moves.
 const nexaposPlatformBaseUrl =
-    'https://nexapos-platform.onrender.com/index.php';
+    'https://sync.nexapos.cc/index.php';
 
 /// An error the payments-platform backend (or Paystack, relayed through
 /// it) reported - bad/expired API key, declined transaction, malformed
