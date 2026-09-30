@@ -23,6 +23,7 @@ import 'features/auth/setup_screen.dart';
 import 'features/auth/login_screen.dart';
 import 'features/dashboard/dashboard_screen.dart';
 import 'features/users/users_screen.dart';
+import 'features/support/support_screen.dart';
 import 'features/categories/categories_screen.dart';
 import 'features/products/products_screen.dart';
 import 'features/checkout/new_sale_screen.dart';
@@ -173,6 +174,10 @@ GoRouter router(Ref ref) {
       GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
       GoRoute(path: '/', builder: (context, state) => const DashboardScreen()),
       GoRoute(path: '/users', builder: (context, state) => const UsersScreen()),
+      GoRoute(
+        path: '/support',
+        builder: (context, state) => const SupportScreen(),
+      ),
       GoRoute(
         path: '/categories',
         builder: (context, state) => const CategoriesScreen(),
