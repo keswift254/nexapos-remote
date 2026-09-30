@@ -233,7 +233,7 @@ void main() {
       await buy(tester, 'm6');
 
       // The server was asked for the plan chosen, for this device, with the email.
-      expect(server.lastStart, {'device_id': 'test-device', 'plan_id': 'm6', 'email': 'buyer@example.com'});
+      expect(server.lastStart, {'device_id': 'test-device', 'plan_id': 'm6', 'email': 'buyer@example.com', 'return_target': 'native'});
       // Paystack's page opened by itself.
       expect(opened, [Uri.parse('https://checkout.paystack.com/test0001')]);
       // And the screen is waiting.
@@ -258,7 +258,7 @@ void main() {
       await close(tester);
     });
 
-    testWidgets('the payment page can be opened again, and checked on demand', (tester) async {
+    testWidgets('the payment page can be reopened while status keeps checking automatically', (tester) async {
       await openScreen(tester);
       await buy(tester, 'm3');
       expect(opened, hasLength(1));
@@ -268,10 +268,12 @@ void main() {
       await tester.pump();
       expect(opened, hasLength(2));
       expect(opened.last, opened.first);
+      expect(find.byKey(const Key('check-now')), findsNothing,
+          reason: 'manual status checking is no longer part of the payment flow');
 
-      await tester.tap(find.byKey(const Key('check-now')));
-      await pass(tester, const Duration(milliseconds: 500));
-      expect(server.statusCalls, greaterThan(checksBefore));
+      await pass(tester, const Duration(seconds: 3));
+      expect(server.statusCalls, greaterThan(checksBefore),
+          reason: 'the periodic verifier keeps checking with no button press');
 
       await close(tester);
     });
@@ -362,7 +364,7 @@ void main() {
       await close(tester);
     });
 
-    testWidgets('a payment left in progress when the app was closed is offered again when the screen opens', (tester) async {
+    testWidgets('a payment left in progress resumes automatic checking when the screen opens', (tester) async {
       await openScreen(tester, beforeOpen: () async {
         await container.read(licensePurchaseServiceProvider).start(
           const PurchasePlan(id: 'm12', label: '1 year', months: 12, amountKes: 4800),
@@ -370,8 +372,10 @@ void main() {
         );
       });
 
-      expect(find.byKey(const Key('purchase-in-progress')), findsOneWidget);
-      expect(find.textContaining('KSh 4,800 for 1 year'), findsOneWidget);
+      expect(find.byKey(const Key('payment-dialog')), findsOneWidget);
+      expect(find.text('Waiting for your payment'), findsOneWidget);
+      expect(find.text('KSh 4,800 - 1 year'), findsOneWidget);
+      expect(find.byKey(const Key('check-now')), findsNothing);
 
       await close(tester);
     });
@@ -569,7 +573,7 @@ void main() {
 
       await buy(tester, 'lifetime', email: 'forever@example.com');
 
-      expect(server.lastStart, {'device_id': 'test-device', 'plan_id': 'lifetime', 'email': 'forever@example.com'});
+      expect(server.lastStart, {'device_id': 'test-device', 'plan_id': 'lifetime', 'email': 'forever@example.com', 'return_target': 'native'});
       expect(find.text('KSh 4,800 - Lifetime'), findsOneWidget);
       await pass(tester, const Duration(seconds: 7));
       await tester.pumpAndSettle();
@@ -675,7 +679,7 @@ void main() {
       await buy(tester, 'test', email: 'felix@example.com');
 
       // Only the plan id and the email are sent - never an amount.
-      expect(server.lastStart, {'device_id': 'test-device', 'plan_id': 'test', 'email': 'felix@example.com'});
+      expect(server.lastStart, {'device_id': 'test-device', 'plan_id': 'test', 'email': 'felix@example.com', 'return_target': 'native'});
       expect(find.text('KSh 5 - Test plan'), findsOneWidget);
       await pass(tester, const Duration(seconds: 6));
       await tester.pumpAndSettle();
