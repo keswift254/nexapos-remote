@@ -24,14 +24,20 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      build: ${{ steps.version.outputs.build }}
     steps:
       - uses: actions/checkout@v4
       - id: version
         shell: bash
         run: |
-          VERSION="$(sed -n 's/^version: *\([^+]*\).*/\1/p' pubspec.yaml | head -n 1)"
+          RELEASE="$(sed -n 's/^version: *//p' pubspec.yaml | head -n 1)"
+          VERSION="${RELEASE%%+*}"
+          BUILD="${RELEASE##*+}"
           test -n "$VERSION"
+          test -n "$BUILD"
+          test "$RELEASE" != "$VERSION"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
 
   android-release:
     needs: metadata
@@ -50,8 +56,47 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Configure permanent Android signing
+        shell: bash
+        env:
+          NEXAPOS_ANDROID_KEYSTORE_BASE64: ${{ secrets.NEXAPOS_ANDROID_KEYSTORE_BASE64 }}
+          NEXAPOS_ANDROID_STORE_PASSWORD: ${{ secrets.NEXAPOS_ANDROID_STORE_PASSWORD }}
+          NEXAPOS_ANDROID_KEY_ALIAS: ${{ secrets.NEXAPOS_ANDROID_KEY_ALIAS }}
+          NEXAPOS_ANDROID_KEY_PASSWORD: ${{ secrets.NEXAPOS_ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in NEXAPOS_ANDROID_KEYSTORE_BASE64 NEXAPOS_ANDROID_STORE_PASSWORD NEXAPOS_ANDROID_KEY_ALIAS NEXAPOS_ANDROID_KEY_PASSWORD; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing required permanent Android signing secret: $name"
+              exit 1
+            fi
+          done
+          printf '%s' "$NEXAPOS_ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/nexapos-release.jks
+          cat > android/key.properties <<EOF
+          storePassword=$NEXAPOS_ANDROID_STORE_PASSWORD
+          keyPassword=$NEXAPOS_ANDROID_KEY_PASSWORD
+          keyAlias=$NEXAPOS_ANDROID_KEY_ALIAS
+          storeFile=nexapos-release.jks
+          EOF
+
       - run: flutter pub get
       - run: flutter build apk --release --no-pub
+
+      - name: Verify permanent Android signing certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          APKSIGNER="$(find "$SDK_ROOT/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          test -x "$APKSIGNER"
+          SIGNER="$("$APKSIGNER" verify --print-certs "$APK" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1 | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+          EXPECTED='a6f671d84bd85601d4c40f18eab6b42d3b4833deae7c7570489211fa827edfa9'
+          echo "Android signer SHA256: $SIGNER"
+          if [ "$SIGNER" != "$EXPECTED" ]; then
+            echo "::error::Android APK is not signed by the permanent NexaPOS certificate."
+            exit 1
+          fi
 
       - name: Verify Android release SHA-256
         shell: bash
@@ -238,7 +283,7 @@ jobs:
           }
 
           $newRuntime = 'build\windows\x64\runner\Release'
-          $repairedRuntime = Join-Path $env:RUNNER_TEMP 'legacy-1.0.53-repaired-runtime'
+          $repairedRuntime = Join-Path $env:RUNNER_TEMP 'legacy-current-repaired-runtime'
           [System.IO.Directory]::CreateDirectory($repairedRuntime) | Out-Null
           Copy-Item (Join-Path $oldRuntime '*') $repairedRuntime -Recurse -Force
 
@@ -248,7 +293,9 @@ jobs:
           Copy-Item (Join-Path $newRuntime 'data\app.so') (Join-Path $repairedRuntime 'data\app.so') -Force
           Remove-Item (Join-Path $repairedRuntime 'data\flutter_assets') -Recurse -Force
           Copy-Item (Join-Path $newRuntime 'data\flutter_assets') (Join-Path $repairedRuntime 'data\flutter_assets') -Recurse -Force
-          python release-tools/patch_legacy_runner_version.py (Join-Path $repairedRuntime 'nexapos_mobile.exe')
+          python release-tools/patch_legacy_runner_version.py (Join-Path $repairedRuntime 'nexapos_mobile.exe') `
+            --new "${{ needs.metadata.outputs.version }}" `
+            --new-build ${{ needs.metadata.outputs.build }}
           if ($LASTEXITCODE -ne 0) { throw 'Could not patch legacy runner version.' }
 
           foreach ($native in @('flutter_windows.dll','dartjni.dll','file_selector_windows_plugin.dll',

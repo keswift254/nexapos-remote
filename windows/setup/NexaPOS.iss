@@ -41,6 +41,11 @@ Source: "{#RuntimeDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubd
 Name: "{commondesktop}\NexaPOS"; Filename: "{app}\nexapos_mobile.exe"; WorkingDir: "{app}"
 Name: "{commonprograms}\NexaPOS\NexaPOS"; Filename: "{app}\nexapos_mobile.exe"; WorkingDir: "{app}"
 
+; Always start NexaPOS after setup completes, including silent in-app updates.
+; runasoriginaluser prevents the elevated installer from starting the POS as admin.
+[Run]
+Filename: "{app}\nexapos_mobile.exe"; WorkingDir: "{app}"; Flags: nowait runasoriginaluser
+
 ; Clean up the legacy setup copy and shortcut locations before recreating the
 ; current shortcuts. This prevents upgraded PCs from showing two NexaPOS icons.
 [InstallDelete]

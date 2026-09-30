@@ -348,7 +348,15 @@ class UpdateService {
       final checksumError = await _verifyChecksum(setupFile, sha256);
       if (checksumError != null) return Result.failure(checksumError);
       onProgress?.call(1.0);
-      installer_launcher.launchWindowsInstallerElevated(setupFile.path);
+      installer_launcher.launchWindowsInstallerElevated(
+        setupFile.path,
+        arguments:
+            '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS',
+      );
+      // The native installer now relaunches NexaPOS itself after the files have
+      // been replaced. Exit only after ShellExecute accepted the elevated
+      // handoff; otherwise the catch below keeps this process alive and shows
+      // the error instead of pretending the update succeeded.
       exit(0);
     } on UpdateOfflineException {
       return const Result.failure(
