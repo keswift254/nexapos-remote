@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
@@ -316,7 +317,7 @@ class _PurchaseSectionState extends ConsumerState<PurchaseSection>
     children.add(const SizedBox(height: 4));
     children.add(
       Text(
-        'Pay securely with Paystack - card or M-Pesa. This device activates '
+        'Pay securely with card or M-Pesa. This device activates '
         'by itself, no key to type.',
         style: theme.textTheme.bodySmall,
         textAlign: TextAlign.center,
@@ -616,7 +617,7 @@ class _EmailDialogState extends State<_EmailDialog> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Where should Paystack send your receipt? You will pay on the '
+              'Where should we send your receipt? You will pay on the '
               'next page, by card or M-Pesa.',
             ),
             const SizedBox(height: 12),
@@ -624,8 +625,31 @@ class _EmailDialogState extends State<_EmailDialog> {
               key: const Key('purchase-email'),
               controller: _controller,
               keyboardType: TextInputType.emailAddress,
+              enableInteractiveSelection: true,
               autofocus: true,
-              decoration: const InputDecoration(labelText: 'Email address'),
+              decoration: InputDecoration(
+                labelText: 'Email address',
+                suffixIcon: IconButton(
+                  tooltip: 'Paste email',
+                  icon: const Icon(Icons.content_paste),
+                  onPressed: () async {
+                    try {
+                      final data = await Clipboard.getData(Clipboard.kTextPlain);
+                      if (!mounted || data?.text == null) return;
+                      final email = data!.text!.trim();
+                      _controller.value = TextEditingValue(
+                        text: email,
+                        selection: TextSelection.collapsed(offset: email.length),
+                      );
+                    } catch (_) {
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Clipboard unavailable. Try long-pressing the email field.')),
+                      );
+                    }
+                  },
+                ),
+              ),
               validator: (value) {
                 final text = (value ?? '').trim();
                 if (text.isEmpty) return 'Enter your email address';
@@ -711,8 +735,8 @@ class _PaymentDialogState extends ConsumerState<_PaymentDialog> {
   String get _status => switch (_last.kind) {
     PurchaseCheckKind.pending || PurchaseCheckKind.none =>
       widget.openPageAtStart
-          ? 'Finish paying on the Paystack page that just opened. This updates by itself - no need to come back and tap anything.'
-          : 'Finish paying on the Paystack page (tap "Open payment page" if you closed it). This updates by itself.',
+          ? 'Finish paying on the secure page that just opened. This updates by itself - no need to come back and tap anything.'
+          : 'Finish paying on the secure page (tap "Open payment page" if you closed it). This updates by itself.',
     PurchaseCheckKind.offline => _last.message ?? 'Waiting for a connection...',
     PurchaseCheckKind.problem => _last.message ?? 'Something went wrong. Trying again...',
     PurchaseCheckKind.failed => _last.message ?? 'The payment did not go through.',
