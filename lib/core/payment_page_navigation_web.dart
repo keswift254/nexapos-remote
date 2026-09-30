@@ -1,6 +1,4 @@
 import 'dart:async';
-import 'dart:js_interop';
-
 import 'package:web/web.dart' as web;
 
 /// Navigate the current browser tab instead of opening a delayed popup.
