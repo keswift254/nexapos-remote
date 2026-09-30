@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - restore-cloudflare-release-path
+      - release-1.0.57-lan-support-payments
       - nexapos-1.0.12-safety
     paths:
       - 'lib/**'
