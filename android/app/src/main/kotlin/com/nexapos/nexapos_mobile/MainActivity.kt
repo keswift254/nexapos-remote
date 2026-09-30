@@ -1,6 +1,8 @@
 package com.nexapos.nexapos_mobile
 
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.provider.Settings
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterFragmentActivity
@@ -11,6 +13,7 @@ class MainActivity : FlutterFragmentActivity() {
     private var checkoutChannel: MethodChannel? = null
     private var downloadChannel: MethodChannel? = null
     private var appInfoChannel: MethodChannel? = null
+    private var updatePermissionChannel: MethodChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -41,6 +44,37 @@ class MainActivity : FlutterFragmentActivity() {
                 else -> result.notImplemented()
             }
         }
+        updatePermissionChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.nexapos/update_permissions"
+        )
+        updatePermissionChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "canInstallPackages" -> {
+                    val allowed = Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
+                        packageManager.canRequestPackageInstalls()
+                    result.success(allowed)
+                }
+                "openInstallPackageSettings" -> {
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+                        result.success(true)
+                    } else {
+                        try {
+                            val settings = Intent(
+                                Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                Uri.parse("package:$packageName")
+                            )
+                            startActivity(settings)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.success(false)
+                        }
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
+
         downloadChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.nexapos/download_service")
         downloadChannel?.setMethodCallHandler { call, result ->
             when (call.method) {
