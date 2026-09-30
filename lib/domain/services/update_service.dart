@@ -4,7 +4,7 @@ import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart';
-import 'package:flutter/services.dart' show MethodChannel;
+import 'package:flutter/services.dart' show MethodChannel, PlatformException;
 import 'package:flutter_riverpod/flutter_riverpod.dart' show Provider;
 import 'package:open_file/open_file.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -130,8 +130,40 @@ class UpdateAvailabilityNotifier extends _$UpdateAvailabilityNotifier {
 /// approving "install unknown apps" for NexaPOS at the OS level).
 class UpdateService {
   final Ref _ref;
+  static const _updatePermissionChannel =
+      MethodChannel('com.nexapos/update_permissions');
 
   UpdateService(this._ref);
+
+  /// Android 8+ requires one explicit per-source approval before an app may
+  /// hand its downloaded APK to Package Installer. The approval persists for
+  /// NexaPOS until the user/OS revokes it, so normal future updates need no
+  /// repeated Settings trip.
+  Future<bool> canInstallAndroidPackages() async {
+    if (!Platform.isAndroid) return true;
+    try {
+      return await _updatePermissionChannel.invokeMethod<bool>(
+            'canInstallPackages',
+          ) ??
+          false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
+  /// Opens the exact Android settings page for NexaPOS's one-time
+  /// "Install unknown apps / Allow from this source" approval.
+  Future<bool> openAndroidInstallPermissionSettings() async {
+    if (!Platform.isAndroid) return true;
+    try {
+      return await _updatePermissionChannel.invokeMethod<bool>(
+            'openInstallPackageSettings',
+          ) ??
+          false;
+    } on PlatformException {
+      return false;
+    }
+  }
 
   Future<UpdateCheckResult> checkForUpdate() async {
     final packageInfo = await PackageInfo.fromPlatform();
