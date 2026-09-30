@@ -91,7 +91,16 @@ void main() {
     if (settle) {
       await tester.pumpAndSettle();
     } else {
-      await tester.pump(const Duration(seconds: 1));
+      // Restoring a pending payment is asynchronous (secure storage read,
+      // setState, then a post-frame callback that opens the polling dialog).
+      // Do not pumpAndSettle here because the dialog owns a periodic timer and
+      // therefore intentionally never "settles" while payment is pending.
+      for (var i = 0; i < 20; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+        if (find.byKey(const Key('payment-dialog')).evaluate().isNotEmpty) {
+          break;
+        }
+      }
     }
   }
 
