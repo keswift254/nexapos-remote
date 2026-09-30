@@ -36,6 +36,9 @@ class _CountingLan implements LanSyncService {
   }
 
   @override
+  Future<void> refreshCredentials() async {}
+
+  @override
   Future<void> dispose() async {}
 }
 
