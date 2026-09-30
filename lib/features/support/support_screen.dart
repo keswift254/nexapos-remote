@@ -1,10 +1,28 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../data/payments/paystack_gateway.dart' show PaystackException;
+import '../../data/payments/paystack_gateway.dart'
+    show PaystackException, PaystackOfflineException;
 import '../../data/support/support_gateway.dart';
 import '../../domain/entities/paystack_credentials.dart';
 import '../../domain/services/paystack_credentials_service.dart';
+
+/// What to show for a failed Support call. [e] is a PaystackException (show
+/// its own message verbatim - a real answer from the server, e.g. a
+/// validation rejection), a PaystackOfflineException (the request could not
+/// reach the server at all, or reached it but got no answer in time - told
+/// apart so a real user report can be told apart too, instead of every
+/// network failure collapsing into one generic "check your connection"),
+/// or anything else (unexpected - [fallback] covers it).
+String supportErrorMessage(Object e, String fallback) {
+  if (e is PaystackException) return e.message;
+  if (e is PaystackOfflineException) {
+    return e.timedOut
+        ? 'The support server is taking too long to answer. Try again in a moment.'
+        : 'Could not reach the support server. Check your internet connection and try again.';
+  }
+  return fallback;
+}
 
 class SupportScreen extends ConsumerStatefulWidget {
   const SupportScreen({super.key});
@@ -49,9 +67,8 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = e is PaystackException
-            ? e.message
-            : 'Could not load Support. Check your connection and try again.';
+        _error = supportErrorMessage(
+          e, 'Could not load Support. Check your connection and try again.');
       });
     }
   }
@@ -89,7 +106,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(
-          e is PaystackException ? e.message : 'Could not open the ticket.',
+          supportErrorMessage(e, 'Could not open the ticket.'),
         )),
       );
     }
@@ -288,7 +305,7 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = e is PaystackException ? e.message : 'Could not load this ticket.';
+        _error = supportErrorMessage(e, 'Could not load this ticket.');
       });
     }
   }
@@ -311,7 +328,7 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(
-          e is PaystackException ? e.message : 'Could not send the message.',
+          supportErrorMessage(e, 'Could not send the message.'),
         )),
       );
     } finally {
