@@ -78,7 +78,7 @@ void main() {
   });
 
   group('startCheckout', () {
-    test('sends the device, the plan and the email - and never a price', () async {
+    test('sends device, plan, email and native return target - and never a price', () async {
       Map<String, dynamic>? sent;
       final gateway = LicenseGateway(MockClient((request) async {
         expect(request.url.queryParameters['action'], 'checkout_start');
@@ -95,7 +95,7 @@ void main() {
         baseUrl: _baseUrl, deviceId: 'dev-1', planId: 'm6', email: 'a@b.co',
       );
 
-      expect(sent, {'device_id': 'dev-1', 'plan_id': 'm6', 'email': 'a@b.co'});
+      expect(sent, {'device_id': 'dev-1', 'plan_id': 'm6', 'email': 'a@b.co', 'return_target': 'native'});
       expect(checkout.reference, 'nxl-abc');
       expect(checkout.paymentUrl, Uri.parse('https://checkout.paystack.com/xyz'));
       expect(checkout.plan!.amountKes, 3000);
