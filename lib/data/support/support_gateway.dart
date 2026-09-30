@@ -1,3 +1,4 @@
+import 'package:http/http.dart' as http;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../payments/platform_http_client.dart';
@@ -54,12 +55,14 @@ class SupportThread {
 }
 
 class SupportGateway {
+  SupportGateway([http.Client? client]) : _client = client ?? http.Client();
+  final http.Client _client;
   Future<List<SupportTicket>> list({
     required String baseUrl,
     required String apiKey,
   }) async {
     final response = await platformRequest(
-      null,
+      _client,
       'GET',
       'support_list',
       baseUrl,
@@ -84,7 +87,7 @@ class SupportGateway {
     required String message,
   }) async {
     final response = await platformRequest(
-      null,
+      _client,
       'POST',
       'support_open',
       baseUrl,
@@ -105,7 +108,7 @@ class SupportGateway {
     required int ticketId,
   }) async {
     final response = await platformRequest(
-      null,
+      _client,
       'GET',
       'support_thread',
       baseUrl,
@@ -138,7 +141,7 @@ class SupportGateway {
     required String message,
   }) async {
     final response = await platformRequest(
-      null,
+      _client,
       'POST',
       'support_reply',
       baseUrl,
