@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/services/session_service.dart';
@@ -17,6 +18,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _submitting = false;
+  bool _waitingForDeviceAuthentication = false;
   String? _error;
 
   @override
@@ -59,12 +61,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Future<void> _useDeviceAuthentication() async {
     setState(() {
       _submitting = true;
+      _waitingForDeviceAuthentication = true;
       _error = null;
     });
     final result = await ref
         .read(sessionProvider.notifier)
         .loginWithDeviceAuthentication();
     if (!mounted) return;
+    setState(() => _waitingForDeviceAuthentication = false);
     result.when(
       ok: (_) {},
       failure: (message) => setState(() {
@@ -156,6 +160,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           )
                         : const SizedBox.shrink(),
                   ),
+                  if (_waitingForDeviceAuthentication &&
+                      !kIsWeb &&
+                      defaultTargetPlatform == TargetPlatform.windows)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 12),
+                      child: Text(
+                        'Waiting for Windows Hello. If its prompt is hidden, '
+                        'select the Windows Security icon on the taskbar.',
+                        key: Key('windows-hello-taskbar-hint'),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
                   TextButton.icon(
                     onPressed: _submitting
                         ? null
