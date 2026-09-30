@@ -91,7 +91,7 @@ void main() {
     if (settle) {
       await tester.pumpAndSettle();
     } else {
-      await pass(tester, const Duration(seconds: 1));
+      await tester.pump(const Duration(seconds: 1));
     }
   }
 
