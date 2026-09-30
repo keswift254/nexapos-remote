@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/update/update_gateway.dart';
 import '../../domain/services/update_service.dart';
+import '../../domain/services/android_update_permission_service.dart';
 import 'web_update_button.dart';
 
 /// Reachable from the dashboard's Settings menu ("Check for Updates")
@@ -56,8 +57,8 @@ class _UpdateScreenState extends ConsumerState<UpdateScreen> with WidgetsBinding
 
   Future<void> _continueAfterInstallPermission() async {
     final allowed = await ref
-        .read(updateServiceProvider)
-        .canInstallAndroidPackages();
+        .read(androidUpdatePermissionServiceProvider)
+        .canInstallPackages();
     if (!mounted || !allowed) return;
     setState(() => _waitingForInstallPermission = false);
     _startInstall();
@@ -102,9 +103,9 @@ class _UpdateScreenState extends ConsumerState<UpdateScreen> with WidgetsBinding
     if (latest == null) return;
 
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-      final service = ref.read(updateServiceProvider);
-      if (!await service.canInstallAndroidPackages()) {
-        final opened = await service.openAndroidInstallPermissionSettings();
+      final permission = ref.read(androidUpdatePermissionServiceProvider);
+      if (!await permission.canInstallPackages()) {
+        final opened = await permission.openSettings();
         if (!mounted) return;
         if (!opened) {
           ScaffoldMessenger.of(context).showSnackBar(
