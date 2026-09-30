@@ -68,6 +68,7 @@ void main() {
     WidgetTester tester, {
     Future<void> Function()? beforeOpen,
     Size size = const Size(1000, 3000),
+    bool settle = true,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
@@ -87,7 +88,11 @@ void main() {
       container: container,
       child: const MaterialApp(home: ActivationScreen()),
     ));
-    await tester.pumpAndSettle();
+    if (settle) {
+      await tester.pumpAndSettle();
+    } else {
+      await pass(tester, const Duration(seconds: 1));
+    }
   }
 
   Future<void> close(WidgetTester tester) async {
@@ -365,7 +370,7 @@ void main() {
     });
 
     testWidgets('a payment left in progress resumes automatic checking when the screen opens', (tester) async {
-      await openScreen(tester, beforeOpen: () async {
+      await openScreen(tester, settle: false, beforeOpen: () async {
         await container.read(licensePurchaseServiceProvider).start(
           const PurchasePlan(id: 'm12', label: '1 year', months: 12, amountKes: 4800),
           'buyer@example.com',
