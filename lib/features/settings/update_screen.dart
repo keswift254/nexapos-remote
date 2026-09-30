@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -19,14 +19,16 @@ class UpdateScreen extends ConsumerStatefulWidget {
   ConsumerState<UpdateScreen> createState() => _UpdateScreenState();
 }
 
-class _UpdateScreenState extends ConsumerState<UpdateScreen> {
+class _UpdateScreenState extends ConsumerState<UpdateScreen> with WidgetsBindingObserver {
   bool _checking = true;
   String? _error;
   UpdateCheckResult? _result;
+  bool _waitingForInstallPermission = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // Skip the redundant re-check if a download from before navigating
     // away is already running - updateInstallProvider is
     // keepAlive and already carries what's being installed (see its
@@ -37,6 +39,28 @@ class _UpdateScreenState extends ConsumerState<UpdateScreen> {
     } else {
       _check();
     }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _waitingForInstallPermission) {
+      _continueAfterInstallPermission();
+    }
+  }
+
+  Future<void> _continueAfterInstallPermission() async {
+    final allowed = await ref
+        .read(updateServiceProvider)
+        .canInstallAndroidPackages();
+    if (!mounted || !allowed) return;
+    setState(() => _waitingForInstallPermission = false);
+    _startInstall();
   }
 
   Future<void> _check() async {
@@ -73,13 +97,37 @@ class _UpdateScreenState extends ConsumerState<UpdateScreen> {
     }
   }
 
-  void _install() {
+  Future<void> _install() async {
     final latest = _result?.latest ?? ref.read(updateInstallProvider).info;
     if (latest == null) return;
-    // Fire-and-forget: the notifier owns the Future from here, keeping it
-    // running (and its progress visible to whichever screen is watching
-    // it) no matter what this widget does next, including being disposed
-    // by navigating away.
+
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      final service = ref.read(updateServiceProvider);
+      if (!await service.canInstallAndroidPackages()) {
+        final opened = await service.openAndroidInstallPermissionSettings();
+        if (!mounted) return;
+        if (!opened) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Open Android Settings > Install unknown apps and allow NexaPOS.',
+              ),
+            ),
+          );
+          return;
+        }
+        setState(() => _waitingForInstallPermission = true);
+        return;
+      }
+    }
+    _startInstall();
+  }
+
+  void _startInstall() {
+    final latest = _result?.latest ?? ref.read(updateInstallProvider).info;
+    if (latest == null) return;
+    // The notifier owns the Future from here, so returning from Android
+    // Settings or navigating away cannot cancel the download.
     ref.read(updateInstallProvider.notifier).start(latest);
   }
 
@@ -189,9 +237,13 @@ class _UpdateScreenState extends ConsumerState<UpdateScreen> {
                     ),
                   ] else
                     FilledButton.icon(
-                      onPressed: _install,
+                      onPressed: () => _install(),
                       icon: const Icon(Icons.system_update_alt),
-                      label: const Text('Download & Install'),
+                      label: Text(
+                        _waitingForInstallPermission
+                            ? 'Waiting for install permission...'
+                            : 'Download & Install',
+                      ),
                     ),
                 ] else if (_result != null)
                   Row(
