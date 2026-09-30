@@ -30,13 +30,23 @@ jobs:
       - run: flutter build web --release --no-pub --base-href /app/
       - run: python3 tool/stamp_web_offline_cache.py build/web
       - name: Verify output version
+        id: verify
         shell: bash
         run: |
           test -s build/web/main.dart.js
           test -s build/web/version.json
-          grep -q '"version":"1.0.55"' build/web/version.json
+          VERSION="$(sed -n 's/^version: *\([^+]*\)+.*/\1/p' pubspec.yaml | head -n 1)"
+          test -n "$VERSION"
+          python3 - "$VERSION" <<'PY'
+          import json, sys
+          with open('build/web/version.json', encoding='utf-8') as file:
+              actual = json.load(file)['version']
+          if actual != sys.argv[1]:
+              raise SystemExit(f'Web version {actual} differs from {sys.argv[1]}')
+          PY
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
-          name: NexaPOS-Web-1.0.55-NameCrane
+          name: NexaPOS-Web-${{ steps.verify.outputs.version }}-NameCrane
           path: build/web/
           if-no-files-found: error
