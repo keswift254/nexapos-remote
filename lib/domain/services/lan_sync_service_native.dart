@@ -77,6 +77,30 @@ class NativeLanSyncService implements LanSyncService {
   Future<void> syncNow() =>
       _inFlight ??= _syncNow().whenComplete(() => _inFlight = null);
 
+  @override
+  Future<void> refreshCredentials() async {
+    // A never-before-seen device is registered into a temporary one-device
+    // shop before join_shop moves it into the invited shop. LAN credentials
+    // can already have been cached during that window. Cloud requests are not
+    // affected (the server resolves the API key's current shop), but LAN
+    // envelopes are encrypted with this cached shop id/key and therefore
+    // become undecryptable by the real shop. Drop the old credential
+    // deliberately; using no LAN key until this online refresh succeeds is
+    // safer than continuing to announce as the wrong shop.
+    _credentials = null;
+    _lastCredentialRefresh = DateTime.now();
+    _seenNonces.clear();
+    await _ref
+        .read(secureStorageProvider)
+        .delete(key: _credentialStorageKey);
+    await _refreshCredentials();
+    // Announce immediately with the replacement key so peers do not have to
+    // wait for the next two-second heartbeat after a join/switch.
+    if (_credentials != null) {
+      await syncNow();
+    }
+  }
+
   /// An announcement that is certain to include the newest change: one already
   /// being built may have been assembled before it, so wait for that one and send
   /// another.
