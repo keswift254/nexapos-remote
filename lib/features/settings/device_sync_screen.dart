@@ -14,6 +14,7 @@ import '../../data/sync/lan_discovery.dart';
 import '../../domain/entities/paystack_credentials.dart';
 import '../../domain/services/paystack_credentials_service.dart';
 import '../../domain/services/sync_service.dart';
+import '../../domain/services/lan_sync_service.dart';
 import '../../domain/services/license_service.dart';
 import '../../domain/services/auth_service.dart';
 import '../../domain/services/device_reconnect_service.dart';
@@ -199,6 +200,7 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
         },
       );
       if (needsDownload == null) return;
+      await ref.read(lanSyncServiceProvider).refreshCredentials();
       if (needsDownload) {
         // Let the screen rebuild into the live download progress view instead of
         // sitting behind this button's spinner for however long it takes.
@@ -287,6 +289,11 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
                 apiKey: registration.apiKey,
                 inviteCode: inviteCode,
               );
+          // registerDevice initially put this new client in a temporary shop.
+          // Replace that temporary shop's cached LAN key immediately after the
+          // server moves the device into the invited shop. Without this, cloud
+          // sync succeeds but encrypted LAN announcements are silently rejected.
+          await ref.read(lanSyncServiceProvider).refreshCredentials();
           await ref.read(licenseServiceProvider).confirmJoinedMembership();
         }
         await ref
@@ -1168,6 +1175,9 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
     // is the unconditionally-correct fix.
     ref.invalidate(dashboardDataProvider);
     await ref.read(sessionProvider.notifier).logout();
+    // changeShop/leaveShop changes the server-side shop behind the same API
+    // key. Never carry the old shop's LAN encryption key into the new shop.
+    await ref.read(lanSyncServiceProvider).refreshCredentials();
     await _safeSyncNow();
     ref.invalidate(hasAnyUsersProvider);
     if (mounted) context.go('/');
