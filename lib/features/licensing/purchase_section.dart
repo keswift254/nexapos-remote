@@ -633,6 +633,7 @@ class _EmailDialogState extends State<_EmailDialog> {
                   tooltip: 'Paste email',
                   icon: const Icon(Icons.content_paste),
                   onPressed: () async {
+                    final messenger = ScaffoldMessenger.of(context);
                     try {
                       final data = await Clipboard.getData(Clipboard.kTextPlain);
                       if (!mounted || data?.text == null) return;
@@ -643,7 +644,7 @@ class _EmailDialogState extends State<_EmailDialog> {
                       );
                     } catch (_) {
                       if (!mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      messenger.showSnackBar(
                         const SnackBar(content: Text('Clipboard unavailable. Try long-pressing the email field.')),
                       );
                     }
