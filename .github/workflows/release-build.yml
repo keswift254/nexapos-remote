@@ -90,7 +90,9 @@ jobs:
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
           APKSIGNER="$(find "$SDK_ROOT/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
           test -x "$APKSIGNER"
-          SIGNER="$("$APKSIGNER" verify --print-certs "$APK" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1 | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+          CERT_OUTPUT="$("$APKSIGNER" verify --print-certs "$APK" 2>&1)"
+          printf '%s\n' "$CERT_OUTPUT"
+          SIGNER="$(printf '%s\n' "$CERT_OUTPUT" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1 | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]:')"
           EXPECTED='a6f671d84bd85601d4c40f18eab6b42d3b4833deae7c7570489211fa827edfa9'
           echo "Android signer SHA256: $SIGNER"
           if [ "$SIGNER" != "$EXPECTED" ]; then
