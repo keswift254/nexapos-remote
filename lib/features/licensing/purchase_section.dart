@@ -61,7 +61,7 @@ class _PurchaseSectionState extends ConsumerState<PurchaseSection>
         _loadPlans(quiet: true);
       }
     });
-    _loadPending();
+    _loadPending(autoResume: true);
     _loadPlans();
   }
 
@@ -88,7 +88,7 @@ class _PurchaseSectionState extends ConsumerState<PurchaseSection>
     }
   }
 
-  Future<void> _loadPending() async {
+  Future<void> _loadPending({bool autoResume = false}) async {
     PendingPurchase? pending;
     try {
       pending = await ref.read(licensePurchaseServiceProvider).pending();
@@ -98,7 +98,7 @@ class _PurchaseSectionState extends ConsumerState<PurchaseSection>
     // A browser purchase leaves this tab for Paystack and is returned here by
     // the fixed server callback. Resume the remembered purchase automatically
     // instead of requiring a manual "Check payment" action.
-    if (pending != null && !_autoResumingPending) {
+    if (autoResume && pending != null && !_autoResumingPending) {
       _autoResumingPending = true;
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         if (!mounted) return;
@@ -265,7 +265,7 @@ class _PurchaseSectionState extends ConsumerState<PurchaseSection>
       builder: (context) => AlertDialog(
         title: const Text('Forget this payment?'),
         content: Text(
-          'If you have already paid, do not forget it - tap "Check payment" '
+          'If you have already paid, do not forget it - open the payment status '
           'instead. If you need help, contact NexaPOS with this reference:\n\n'
           '${purchase.reference}',
         ),
