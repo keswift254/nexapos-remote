@@ -81,7 +81,7 @@ void main() {
     test('asks the server for a checkout, and remembers the purchase', () async {
       final purchase = await service().start(_m6, ' buyer@example.com ');
 
-      expect(server.lastStart, {'device_id': 'test-device', 'plan_id': 'm6', 'email': 'buyer@example.com'});
+      expect(server.lastStart, {'device_id': 'test-device', 'plan_id': 'm6', 'email': 'buyer@example.com', 'return_target': 'native'});
       expect(purchase.reference, 'nxl-test0001');
       expect(purchase.planLabel, '6 months');
       expect(purchase.amountKes, 3000);

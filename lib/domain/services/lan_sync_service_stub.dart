@@ -9,5 +9,8 @@ class _NoLanSyncService implements LanSyncService {
   Future<void> syncNow() async {}
 
   @override
+  Future<void> refreshCredentials() async {}
+
+  @override
   Future<void> dispose() async {}
 }

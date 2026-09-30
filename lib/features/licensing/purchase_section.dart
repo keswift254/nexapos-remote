@@ -7,6 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../data/licensing/license_gateway.dart';
+import '../../core/payment_page_navigation.dart';
+import '../../core/checkout_return_bridge.dart';
 import '../../domain/services/license_purchase_service.dart';
 
 String _shillings(int amount) => 'KSh ${NumberFormat.decimalPattern().format(amount)}';
@@ -45,11 +47,13 @@ class _PurchaseSectionState extends ConsumerState<PurchaseSection>
   String? _error;
   Timer? _plansRefresh;
   bool _fetchingPlans = false;
+  bool _autoResumingPending = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    CheckoutReturnBridge.signal.addListener(_paymentReturned);
     // Keep an open activation screen in sync with edits made in generator.html.
     // A newly opened screen still fetches at once in _loadPlans below.
     _plansRefresh = Timer.periodic(const Duration(seconds: 20), (_) {
@@ -57,7 +61,7 @@ class _PurchaseSectionState extends ConsumerState<PurchaseSection>
         _loadPlans(quiet: true);
       }
     });
-    _loadPending();
+    _loadPending(autoResume: true);
     _loadPlans();
   }
 
@@ -69,17 +73,39 @@ class _PurchaseSectionState extends ConsumerState<PurchaseSection>
   @override
   void dispose() {
     _plansRefresh?.cancel();
+    CheckoutReturnBridge.signal.removeListener(_paymentReturned);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
-  Future<void> _loadPending() async {
+  void _paymentReturned() {
+    final pending = _pending;
+    if (pending != null && mounted && !_autoResumingPending) {
+      _autoResumingPending = true;
+      unawaited(_wait(pending, openPage: false).whenComplete(() {
+        _autoResumingPending = false;
+      }));
+    }
+  }
+
+  Future<void> _loadPending({bool autoResume = false}) async {
     PendingPurchase? pending;
     try {
       pending = await ref.read(licensePurchaseServiceProvider).pending();
     } catch (_) {}
     if (!mounted) return;
     setState(() => _pending = pending);
+    // A browser purchase leaves this tab for Paystack and is returned here by
+    // the fixed server callback. Resume the remembered purchase automatically
+    // instead of requiring a manual "Check payment" action.
+    if (autoResume && pending != null && !_autoResumingPending) {
+      _autoResumingPending = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted) return;
+        await _wait(pending!, openPage: false);
+        _autoResumingPending = false;
+      });
+    }
   }
 
   Future<void> _loadPlans({bool quiet = false}) async {
@@ -179,9 +205,14 @@ class _PurchaseSectionState extends ConsumerState<PurchaseSection>
         _startingPlanId = null;
         _pending = purchase;
       });
-      // A browser blocks a page opened after a wait; there the person opens it
-      // with a tap in the next step. Everywhere else it opens by itself.
-      await _wait(purchase, openPage: !kIsWeb);
+      if (kIsWeb) {
+        // Same-tab navigation is not subject to popup blocking. Paystack's
+        // callback returns this tab to /app/, where the remembered purchase is
+        // picked up and checked automatically.
+        await replaceWithPaymentPage(Uri.parse(purchase.paymentUrl));
+        return;
+      }
+      await _wait(purchase, openPage: true);
     } on LicenseOfflineException {
       if (!mounted) return;
       setState(() {
@@ -234,7 +265,7 @@ class _PurchaseSectionState extends ConsumerState<PurchaseSection>
       builder: (context) => AlertDialog(
         title: const Text('Forget this payment?'),
         content: Text(
-          'If you have already paid, do not forget it - tap "Check payment" '
+          'If you have already paid, do not forget it - open the payment status '
           'instead. If you need help, contact NexaPOS with this reference:\n\n'
           '${purchase.reference}',
         ),
@@ -290,7 +321,7 @@ class _PurchaseSectionState extends ConsumerState<PurchaseSection>
                     FilledButton(
                       key: const Key('check-payment'),
                       onPressed: () => _wait(pending, openPage: false),
-                      child: const Text('Check payment'),
+                      child: const Text('View payment status'),
                     ),
                     TextButton(
                       key: const Key('forget-payment'),
@@ -779,11 +810,6 @@ class _PaymentDialogState extends ConsumerState<_PaymentDialog> {
                 .read(licensePurchaseServiceProvider)
                 .openPaymentPage(widget.purchase),
             child: const Text('Open payment page'),
-          ),
-          TextButton(
-            key: const Key('check-now'),
-            onPressed: _check,
-            child: const Text('Check now'),
           ),
         ],
         TextButton(

@@ -130,7 +130,6 @@ class UpdateAvailabilityNotifier extends _$UpdateAvailabilityNotifier {
 /// approving "install unknown apps" for NexaPOS at the OS level).
 class UpdateService {
   final Ref _ref;
-
   UpdateService(this._ref);
 
   Future<UpdateCheckResult> checkForUpdate() async {

@@ -297,6 +297,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                 ),
               ],
             ),
+          // Support sits exactly between Settings and Users & Roles so it is
+          // reachable by every logged-in cashier/manager/admin without hiding
+          // inside administrator-only settings.
+          IconButton(
+            icon: const Icon(Icons.support_agent_outlined),
+            tooltip: 'Support',
+            onPressed: () => context.push('/support'),
+          ),
           if (user?.role == UserRole.admin)
             IconButton(
               icon: const Icon(Icons.manage_accounts),
