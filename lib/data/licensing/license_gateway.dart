@@ -1,6 +1,7 @@
 import 'package:http/http.dart' as http;
 
 import '../payments/platform_http_client.dart';
+import '../../core/is_web.dart';
 
 /// Central license API used by activation, renewal, and updates.
 const licenseServerBaseUrl = 'https://license.nexapos.cc/index.php';
@@ -264,7 +265,15 @@ class LicenseGateway {
       'POST',
       'checkout_start',
       baseUrl,
-      body: {'device_id': deviceId, 'plan_id': planId, 'email': email},
+      body: {
+        'device_id': deviceId,
+        'plan_id': planId,
+        'email': email,
+        // The server only accepts these two symbolic targets; it never trusts
+        // a client-provided redirect URL. Native returns through the registered
+        // nexapos:// scheme, while web returns to nexapos.cc/app/.
+        'return_target': isWeb ? 'web' : 'native',
+      },
     );
     if (response['success'] != true) {
       throw LicenseException(
