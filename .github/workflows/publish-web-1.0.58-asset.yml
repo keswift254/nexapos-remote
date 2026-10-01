@@ -1,0 +1,35 @@
+name: Attach verified NexaPOS 1.0.58 web bundle
+
+on:
+  push:
+    branches: [release-1.0.57-lan-support-payments]
+    paths:
+      - '.github/workflows/publish-web-1.0.58-asset.yml'
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: NexaPOS-Web-1.0.58-NameCrane
+          run-id: 36908126478
+          repository: keswift254/nexapos-remote
+          github-token: ${{ github.token }}
+          path: web
+
+      - name: Verify web build and attach it to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test -s web/main.dart.js
+          grep -q '"version":"1.0.58"' web/version.json
+          echo '9bbe3d181f17eb9367a6d7751d0715f68c261bfe33079616b93e10e758b43f70  web/main.dart.js' | sha256sum -c -
+          (cd web && zip -qr ../NexaPOS-Web-1.0.58-NameCrane.zip .)
+          gh release upload v1.0.58 NexaPOS-Web-1.0.58-NameCrane.zip --repo keswift254/nexapos-remote --clobber
