@@ -10,6 +10,7 @@ import 'package:intl/intl.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../core/providers.dart';
+import '../../data/support/support_gateway.dart';
 import '../../core/adaptive_pair.dart';
 import '../../core/utils/money.dart';
 import '../../domain/entities/user_role.dart';
@@ -17,6 +18,7 @@ import '../../domain/services/home_screen_install_service.dart';
 import '../../domain/services/pending_sales_notifier.dart';
 import '../../domain/services/product_service.dart';
 import '../../domain/services/reports_service.dart';
+import '../../domain/services/paystack_credentials_service.dart';
 import '../../domain/services/session_service.dart';
 import '../../domain/services/update_service.dart';
 import '../checkout/cart_notifier.dart';
@@ -135,12 +137,19 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   /// of midnight.
   static const _dayCheckEvery = Duration(seconds: 15);
   Timer? _dayTimer;
+  Timer? _supportTimer;
+  List<SupportTicket> _supportReplies = const [];
+  bool _checkingSupport = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _dayTimer = Timer.periodic(_dayCheckEvery, (_) => _refreshIfNewDay());
+    _supportTimer = Timer.periodic(const Duration(minutes: 1),
+        (_) => unawaited(_checkSupportReplies()));
+    WidgetsBinding.instance.addPostFrameCallback(
+        (_) => unawaited(_checkSupportReplies()));
     // Coming back to the dashboard after midnight (it keeps its figures while
     // other screens are open) must show the new day at once.
     WidgetsBinding.instance.addPostFrameCallback((_) => _refreshIfNewDay());
@@ -158,6 +167,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   @override
   void dispose() {
     _dayTimer?.cancel();
+    _supportTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -165,7 +175,35 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // A PC that slept through midnight fires no timers meanwhile.
-    if (state == AppLifecycleState.resumed) _refreshIfNewDay();
+    if (state == AppLifecycleState.resumed) {
+      _refreshIfNewDay();
+      unawaited(_checkSupportReplies());
+    }
+  }
+
+  Future<void> _checkSupportReplies() async {
+    if (!mounted || _checkingSupport || ref.read(sessionProvider) == null) return;
+    _checkingSupport = true;
+    try {
+      final credentials = await ref.read(paystackCredentialsServiceProvider).load();
+      if (!credentials.isConfigured) return;
+      final tickets = await ref.read(supportGatewayProvider).list(
+        baseUrl: credentials.baseUrl,
+        apiKey: credentials.apiKey,
+      );
+      if (!mounted) return;
+      setState(() => _supportReplies =
+          tickets.where((ticket) => ticket.status == 'pending').toList());
+    } catch (_) {
+      // Support is optional when offline; retain the last known replies.
+    } finally {
+      _checkingSupport = false;
+    }
+  }
+
+  Future<void> _openSupport() async {
+    await context.push('/support');
+    if (mounted) await _checkSupportReplies();
   }
 
   /// The dashboard's figures are kept (and refreshed on every write), so nothing
@@ -203,6 +241,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   void _refreshLocalFigures() {
     ref.invalidate(dashboardDataProvider);
     unawaited(ref.read(updateAvailabilityProvider.notifier).check());
+    unawaited(_checkSupportReplies());
   }
 
   @override
@@ -301,9 +340,15 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           // reachable by every logged-in cashier/manager/admin without hiding
           // inside administrator-only settings.
           IconButton(
-            icon: const Icon(Icons.support_agent_outlined),
-            tooltip: 'Support',
-            onPressed: () => context.push('/support'),
+            icon: Badge(
+              isLabelVisible: _supportReplies.isNotEmpty,
+              label: Text('${_supportReplies.length}'),
+              child: const Icon(Icons.support_agent_outlined),
+            ),
+            tooltip: _supportReplies.isEmpty
+                ? 'Support'
+                : '${_supportReplies.length} support ${_supportReplies.length == 1 ? 'reply' : 'replies'} waiting',
+            onPressed: _openSupport,
           ),
           if (user?.role == UserRole.admin)
             IconButton(
@@ -359,6 +404,23 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                         ),
                         subtitle: const Text('Go to cart to complete sale.'),
                         onTap: () => context.push('/checkout/cart'),
+                      ),
+                    ),
+                  ],
+                  if (_supportReplies.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Card(
+                      color: Theme.of(context).colorScheme.secondaryContainer,
+                      child: ListTile(
+                        leading: const Icon(Icons.mark_chat_unread_outlined),
+                        title: Text(_supportReplies.length == 1
+                            ? 'NexaPOS Support replied to your ticket'
+                            : 'NexaPOS Support replied to ${_supportReplies.length} tickets'),
+                        subtitle: Text(_supportReplies.length == 1
+                            ? _supportReplies.first.subject
+                            : 'Open Support to read the replies.'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: _openSupport,
                       ),
                     ),
                   ],
