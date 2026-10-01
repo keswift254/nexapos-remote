@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - fix-windows-hello-foreground
+      - fix-support-email-dashboard-hello
   workflow_dispatch:
 
 jobs:
