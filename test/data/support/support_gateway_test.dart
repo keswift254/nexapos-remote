@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:typed_data';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -83,4 +85,33 @@ void main() {
     );
     expect(actions, ['support_open', 'support_close']);
   });
+  test('shares pending list requests and isolates cached shops', () async {
+    final pending = Completer<http.Response>();
+    var calls = 0;
+    final gateway = SupportGateway(MockClient((request) { calls++; return pending.future; }));
+    final first = gateway.list(baseUrl: 'https://example.com/index.php', apiKey: 'shop-a');
+    final second = gateway.list(baseUrl: 'https://example.com/index.php', apiKey: 'shop-a');
+    pending.complete(http.Response('{"success":true,"tickets":[{"id":1,"subject":"Help","status":"pending","last_support_message_id":"7"}]}', 200));
+    await Future.wait([first, second]);
+    expect(calls, 1);
+    expect(gateway.cachedList('https://example.com/index.php', 'shop-a')!.single.replyToken, '1:7');
+    expect(gateway.cachedList('https://example.com/index.php', 'shop-b'), isNull);
+  });
+
+  test('sends photo bytes with a message and authenticates photo reads', () async {
+    final gateway = SupportGateway(MockClient((request) async {
+      expect(request.headers['Authorization'], 'Bearer shop-key');
+      if (request.method == 'POST') {
+        final body = jsonDecode(request.body) as Map<String, dynamic>;
+        expect(body['attachments'][0]['data'], base64Encode([1, 2, 3]));
+        return http.Response('{"success":true}', 200);
+      }
+      expect(request.url.queryParameters['action'], 'support_attachment');
+      return http.Response.bytes([1, 2, 3], 200, headers: {'content-type': 'image/png'});
+    }));
+    await gateway.reply(baseUrl: 'https://example.com/index.php', apiKey: 'shop-key',
+        ticketId: 1, message: '', photos: [Uint8List.fromList([1, 2, 3])]);
+    expect(await gateway.photo(baseUrl: 'https://example.com/index.php', apiKey: 'shop-key', id: 9), [1, 2, 3]);
+  });
+
 }
