@@ -36,10 +36,11 @@ class SupportPhotoPickerState extends State<SupportPhotoPicker> {
         images.add(image);
       } else {
         final result = await FilePicker.pickFiles(type: FileType.custom,
-          allowedExtensions: ['png', 'jpg', 'jpeg', 'webp'], withData: true);
+          allowedExtensions: ['png', 'jpg', 'jpeg', 'webp']);
         if (result.isEmpty) return;
         for (final file in result) {
-          if (file.bytes != null) images.add(file.bytes!);
+          if (file.size > 2 * 1024 * 1024) throw Exception('Each photo must be 2 MB or smaller.');
+          images.add(await file.readAsBytes());
         }
       }
       if (!mounted) return;
