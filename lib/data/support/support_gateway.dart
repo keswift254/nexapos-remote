@@ -19,7 +19,7 @@ class SupportTicket {
   final String updatedAt;
 
   factory SupportTicket.fromJson(Map<String, dynamic> json) => SupportTicket(
-        id: (json['id'] as num).toInt(),
+        id: _supportId(json['id']),
         subject: (json['subject'] as String? ?? '').trim(),
         status: (json['status'] as String? ?? 'open').trim(),
         createdAt: (json['created_at'] as String? ?? '').trim(),
@@ -41,11 +41,21 @@ class SupportMessage {
   final String createdAt;
 
   factory SupportMessage.fromJson(Map<String, dynamic> json) => SupportMessage(
-        id: (json['id'] as num).toInt(),
+        id: _supportId(json['id']),
         sender: (json['sender'] as String? ?? 'customer').trim(),
         body: (json['body'] as String? ?? '').trim(),
         createdAt: (json['created_at'] as String? ?? '').trim(),
       );
+}
+
+int _supportId(Object? value) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  if (value is String) {
+    final id = int.tryParse(value);
+    if (id != null) return id;
+  }
+  throw const FormatException('Invalid support ticket ID.');
 }
 
 class SupportThread {
@@ -99,7 +109,7 @@ class SupportGateway {
         platformResponseMessage(response, 'Could not open the support ticket.'),
       );
     }
-    return (response['ticket_id'] as num).toInt();
+    return _supportId(response['ticket_id']);
   }
 
   Future<SupportThread> thread({
