@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import 'package:nexapos_mobile/core/result.dart';
+import 'package:nexapos_mobile/data/payments/platform_http_client.dart';
 import 'package:nexapos_mobile/data/update/update_gateway.dart';
 import 'package:nexapos_mobile/domain/services/update_service.dart';
 import 'package:nexapos_mobile/features/settings/update_screen.dart';
@@ -21,6 +25,38 @@ class _Updates implements UpdateService {
 }
 
 void main() {
+  testWidgets('server suspension shows outage reassurance and can retry', (tester) async {
+    PackageInfo.setMockInitialValues(
+      appName: 'NexaPOS', packageName: 'nexapos_mobile', version: '1.0.57',
+      buildNumber: '58', buildSignature: '',
+    );
+    var requests = 0;
+    final client = MockClient((_) async {
+      requests++;
+      return requests == 1
+          ? http.Response('<html>Suspended</html>', 503)
+          : http.Response('{"success":true,"version":"1.0.57","android_url":""}', 200);
+    });
+    addTearDown(client.close);
+    final container = ProviderContainer(overrides: [
+      updateGatewayProvider.overrideWith((ref) => UpdateGateway(client)),
+    ]);
+    addTearDown(container.dispose);
+    await tester.pumpWidget(UncontrolledProviderScope(
+      container: container,
+      child: const MaterialApp(home: UpdateScreen()),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text(serverUnavailableMessage), findsOneWidget);
+    expect(find.textContaining('invalid response'), findsNothing);
+    await tester.tap(find.text('Check for Updates'));
+    await tester.pumpAndSettle();
+    expect(requests, 2);
+    expect(find.text(serverUnavailableMessage), findsNothing);
+    expect(find.text("You're on the latest version."), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   Future<ProviderContainer> open(WidgetTester tester, UpdateCheckResult result) async {
     final container = ProviderContainer(overrides: [
       updateServiceProvider.overrideWith((ref) => _Updates(result)),

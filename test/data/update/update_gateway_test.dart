@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:path/path.dart' as path;
+import 'package:nexapos_mobile/data/payments/platform_http_client.dart';
 import 'package:nexapos_mobile/data/update/update_gateway.dart';
 
 void main() {
@@ -146,6 +147,17 @@ void main() {
       expect(
         () => gateway.fetchLatestVersion(),
         throwsA(isA<UpdateException>().having((e) => e.message, 'message', 'Something broke.')),
+      );
+    });
+
+    test('a server outage with no explanation of its own shows the friendly notice', () async {
+      final gateway = UpdateGateway(MockClient((request) async {
+        return http.Response('<html>502 Bad Gateway</html>', 502);
+      }));
+
+      expect(
+        () => gateway.fetchLatestVersion(),
+        throwsA(isA<UpdateException>().having((e) => e.message, 'message', serverUnavailableMessage)),
       );
     });
 
