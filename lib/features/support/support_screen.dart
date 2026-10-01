@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/payments/paystack_gateway.dart' show PaystackException;
+import '../../data/payments/platform_http_client.dart' show PaystackOfflineException;
 import '../../data/support/support_gateway.dart';
 import '../../domain/entities/paystack_credentials.dart';
 import '../../domain/services/paystack_credentials_service.dart';
@@ -51,7 +52,11 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
         _loading = false;
         _error = e is PaystackException
             ? e.message
-            : 'Could not load Support. Check your connection and try again.';
+            : e is PaystackOfflineException
+                ? e.timedOut
+                    ? 'The support server did not answer in time. Try again.'
+                    : 'Could not connect to the support server. Check your connection and try again.'
+                : 'Could not read the support response. Try again or contact NexaPOS support.';
       });
     }
   }
