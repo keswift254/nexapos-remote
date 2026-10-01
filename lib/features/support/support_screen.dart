@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -5,6 +6,7 @@ import '../../data/payments/paystack_gateway.dart' show PaystackException;
 import '../../data/payments/platform_http_client.dart' show PaystackOfflineException;
 import '../../data/support/support_gateway.dart';
 import '../../domain/entities/paystack_credentials.dart';
+import 'support_photos.dart';
 import '../../domain/services/paystack_credentials_service.dart';
 
 class SupportScreen extends ConsumerStatefulWidget {
@@ -26,7 +28,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
   }
 
   Future<void> _load() async {
-    if (mounted) setState(() { _loading = true; _error = null; });
+    if (mounted) setState(() { _error = null; });
     try {
       final credentials =
           await ref.read(paystackCredentialsServiceProvider).load();
@@ -36,6 +38,11 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
           'Open Settings > Device Sync while online, then try again.',
         );
       }
+      final cached = ref.read(supportGatewayProvider).cachedList(credentials.baseUrl, credentials.apiKey);
+      if (mounted) setState(() {
+        _credentials = credentials;
+        if (cached != null) { _tickets = cached; _loading = false; }
+      });
       final tickets = await ref.read(supportGatewayProvider).list(
             baseUrl: credentials.baseUrl,
             apiKey: credentials.apiKey,
@@ -76,6 +83,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
             subject: draft.subject,
             message: draft.message,
             email: draft.email,
+            photos: draft.photos,
           );
       await _load();
       if (!mounted) return;
@@ -220,10 +228,11 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
 }
 
 class _TicketDraft {
-  const _TicketDraft(this.subject, this.message, this.email);
+  const _TicketDraft(this.subject, this.message, this.email, this.photos);
   final String subject;
   final String message;
   final String? email;
+  final List<Uint8List> photos;
 }
 
 String _ticketStatusLabel(String status) => switch (status) {
@@ -243,6 +252,7 @@ class _NewTicketDialogState extends State<_NewTicketDialog> {
   final _message = TextEditingController();
   final _email = TextEditingController();
   String? _emailError;
+  List<Uint8List> _photos = [];
 
   @override
   void dispose() {
@@ -256,14 +266,14 @@ class _NewTicketDialogState extends State<_NewTicketDialog> {
     final subject = _subject.text.trim();
     final message = _message.text.trim();
     final email = _email.text.trim();
-    if (subject.length < 3 || message.isEmpty) return;
+    if (subject.length < 3 || (message.isEmpty && _photos.isEmpty)) return;
     if (email.isNotEmpty &&
         !RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email)) {
       setState(() => _emailError = 'Enter a valid email address.');
       return;
     }
     Navigator.pop(context, _TicketDraft(subject, message,
-        email.isEmpty ? null : email));
+        email.isEmpty ? null : email, _photos));
   }
 
   @override
@@ -294,6 +304,7 @@ class _NewTicketDialogState extends State<_NewTicketDialog> {
           ),
         ),
         const SizedBox(height: 8),
+        SupportPhotoPicker(onChanged: (photos) => _photos = photos),
         TextField(
           controller: _email,
           keyboardType: TextInputType.emailAddress,
@@ -333,6 +344,8 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
   bool _loading = true;
   bool _sending = false;
   bool _closing = false;
+  final _photoPicker = GlobalKey<SupportPhotoPickerState>();
+  List<Uint8List> _photos = [];
   String? _error;
 
   @override
@@ -350,6 +363,10 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
   Future<void> _load() async {
     try {
       final credentials = await ref.read(paystackCredentialsServiceProvider).load();
+      final cached = ref.read(supportGatewayProvider).cachedThread(credentials.baseUrl, credentials.apiKey, widget.ticket.id);
+      if (cached != null && mounted && _thread == null) setState(() {
+        _thread = cached; _credentials = credentials; _loading = false;
+      });
       final thread = await ref.read(supportGatewayProvider).thread(
         baseUrl: credentials.baseUrl,
         apiKey: credentials.apiKey,
@@ -374,7 +391,7 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
   Future<void> _send() async {
     final credentials = _credentials;
     final message = _reply.text.trim();
-    if (credentials == null || message.isEmpty || _sending) return;
+    if (credentials == null || (message.isEmpty && _photos.isEmpty) || _sending || _closing) return;
     setState(() => _sending = true);
     try {
       await ref.read(supportGatewayProvider).reply(
@@ -382,8 +399,11 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
         apiKey: credentials.apiKey,
         ticketId: widget.ticket.id,
         message: message,
+        photos: _photos,
       );
+      if (!mounted) return;
       _reply.clear();
+      _photoPicker.currentState?.clear();
       await _load();
     } catch (e) {
       if (!mounted) return;
@@ -399,7 +419,7 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
 
   Future<void> _close() async {
     final credentials = _credentials;
-    if (credentials == null || _closing) return;
+    if (credentials == null || _closing || _sending) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -441,7 +461,7 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
         actions: [
           if (thread != null && thread.ticket.status != 'closed')
             TextButton.icon(
-              onPressed: _closing ? null : _close,
+              onPressed: _closing || _sending ? null : _close,
               icon: const Icon(Icons.task_alt),
               label: const Text('Close'),
             ),
@@ -503,7 +523,9 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
                                           ?.copyWith(fontWeight: FontWeight.w700),
                                     ),
                                     const SizedBox(height: 4),
-                                    SelectableText(message.body),
+                                    if (message.body.isNotEmpty) SelectableText(message.body),
+                                    for (final id in message.attachments)
+                                      SupportPhoto(id: id, credentials: _credentials!),
                                     const SizedBox(height: 6),
                                     Text(message.createdAt,
                                         style: Theme.of(context).textTheme.bodySmall),
@@ -516,6 +538,8 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
                       },
                     ),
                   ),
+                  SupportPhotoPicker(key: _photoPicker, enabled: !_sending && !_closing,
+                      onChanged: (photos) => _photos = photos),
                   SafeArea(
                     top: false,
                     child: Padding(
