@@ -128,8 +128,20 @@ jobs:
 
       - run: flutter pub get
       - run: flutter config --enable-windows-desktop
+
+      - name: Require the Google Drive Windows client secret
+        shell: bash
+        env:
+          NEXAPOS_GOOGLE_WINDOWS_CLIENT_SECRET: ${{ secrets.NEXAPOS_GOOGLE_WINDOWS_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NEXAPOS_GOOGLE_WINDOWS_CLIENT_SECRET:-}" ]; then
+            echo "::error::Missing required secret: NEXAPOS_GOOGLE_WINDOWS_CLIENT_SECRET. Without it, Google Drive backup compiles disabled on Windows (google_drive_backup_service_native.dart throws the moment a user tries to connect)."
+            exit 1
+          fi
+
       - name: Build Windows release
-        run: flutter build windows --release --no-pub
+        run: flutter build windows --release --no-pub --dart-define=NEXAPOS_GOOGLE_WINDOWS_CLIENT_SECRET=${{ secrets.NEXAPOS_GOOGLE_WINDOWS_CLIENT_SECRET }}
         env:
           CL: /D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
 
@@ -193,9 +205,20 @@ jobs:
             throw 'Windows Hello plugin is still registered in the legacy build.'
           }
 
+      - name: Require the Google Drive Windows client secret
+        shell: bash
+        env:
+          NEXAPOS_GOOGLE_WINDOWS_CLIENT_SECRET: ${{ secrets.NEXAPOS_GOOGLE_WINDOWS_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NEXAPOS_GOOGLE_WINDOWS_CLIENT_SECRET:-}" ]; then
+            echo "::error::Missing required secret: NEXAPOS_GOOGLE_WINDOWS_CLIENT_SECRET. Without it, Google Drive backup compiles disabled on Windows (google_drive_backup_service_native.dart throws the moment a user tries to connect)."
+            exit 1
+          fi
+
       - name: Build Windows 7/8 release
         shell: pwsh
-        run: flutter build windows --release --no-pub --dart-define=NEXAPOS_LEGACY_WINDOWS=true
+        run: flutter build windows --release --no-pub --dart-define=NEXAPOS_LEGACY_WINDOWS=true --dart-define=NEXAPOS_GOOGLE_WINDOWS_CLIENT_SECRET=${{ secrets.NEXAPOS_GOOGLE_WINDOWS_CLIENT_SECRET }}
         env:
           CL: /D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
 
