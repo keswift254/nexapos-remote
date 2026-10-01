@@ -53,4 +53,34 @@ void main() {
     expect(thread.ticket.id, 42);
     expect(thread.messages.single.id, 99);
   });
+
+  test('sends an optional contact email and closes a shop ticket', () async {
+    final actions = <String>[];
+    final gateway = SupportGateway(MockClient((request) async {
+      final action = request.url.queryParameters['action']!;
+      actions.add(action);
+      final body = jsonDecode(request.body) as Map<String, dynamic>;
+      if (action == 'support_open') {
+        expect(body['email'], 'owner@example.com');
+        expect(body['subject'], 'Printer issue');
+        return http.Response('{"success":true,"ticket_id":"42"}', 201);
+      }
+      expect(action, 'support_close');
+      expect(body['ticket_id'], 42);
+      return http.Response('{"success":true}', 200);
+    }));
+    final id = await gateway.open(
+      baseUrl: 'https://example.com/index.php',
+      apiKey: 'test-key',
+      subject: 'Printer issue',
+      message: 'It stopped printing.',
+      email: 'owner@example.com',
+    );
+    await gateway.close(
+      baseUrl: 'https://example.com/index.php',
+      apiKey: 'test-key',
+      ticketId: id,
+    );
+    expect(actions, ['support_open', 'support_close']);
+  });
 }
