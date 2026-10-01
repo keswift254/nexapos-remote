@@ -32,13 +32,13 @@ class SupportPhotoPickerState extends State<SupportPhotoPicker> {
       final images = <Uint8List>[];
       if (paste) {
         final image = await Pasteboard.image;
-        if (image == null) throw Exception('Copy a photo first, or use Add photos.');
+        if (image == null) throw Exception('Copy a photo first, or use Add photos.'); }
         images.add(image);
       } else {
-        final result = await FilePicker.platform.pickFiles(type: FileType.custom,
-          allowedExtensions: ['png', 'jpg', 'jpeg', 'webp'], allowMultiple: true, withData: true);
-        if (result == null) return;
-        for (final file in result.files) {
+        final result = await FilePicker.pickFiles(type: FileType.custom,
+          allowedExtensions: ['png', 'jpg', 'jpeg', 'webp'], withData: true);
+        if (result.isEmpty) return;
+        for (final file in result) {
           if (file.bytes != null) images.add(file.bytes!);
         }
       }
@@ -53,9 +53,9 @@ class SupportPhotoPickerState extends State<SupportPhotoPicker> {
       setState(() => _photos.addAll(images));
       widget.onChanged(List.of(_photos));
     } catch (e) {
-      if (mounted) setState(() => _error = e.toString().startsWith('Exception: ')
+      if (mounted) { setState(() => _error = e.toString().startsWith('Exception: ')
           ? e.toString().substring(11)
-          : 'Could not paste this image. Allow clipboard access or use Add photos.');
+          : 'Could not paste this image. Allow clipboard access or use Add photos.'); }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -112,8 +112,8 @@ class _SupportPhotoState extends ConsumerState<SupportPhoto> {
   @override
   Widget build(BuildContext context) => Padding(padding: const EdgeInsets.only(top: 8),
     child: FutureBuilder<Uint8List>(future: _bytes, builder: (context, snapshot) {
-      if (snapshot.hasError) return TextButton.icon(onPressed: () => setState(() => _bytes = _load()),
-        icon: const Icon(Icons.refresh), label: const Text('Retry photo'));
+      if (snapshot.hasError) { return TextButton.icon(onPressed: () => setState(() => _bytes = _load()),
+        icon: const Icon(Icons.refresh), label: const Text('Retry photo')); }
       final bytes = snapshot.data;
       if (bytes == null) return const SizedBox(height: 100, width: 160, child: Center(child: CircularProgressIndicator()));
       return InkWell(onTap: () => showDialog<void>(context: context, builder: (context) => Dialog(
