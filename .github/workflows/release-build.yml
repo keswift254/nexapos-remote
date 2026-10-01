@@ -351,11 +351,12 @@ jobs:
           if-no-files-found: error
 
   publish-github-release:
-    if: github.ref == 'refs/heads/nexapos-1.0.12-safety'
+    if: github.ref == 'refs/heads/nexapos-1.0.12-safety' || github.ref == 'refs/heads/release-1.0.57-lan-support-payments'
     needs:
       - metadata
       - android-release
       - windows-release
+      - windows-legacy-release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -370,6 +371,11 @@ jobs:
           name: NexaPOS-Windows-${{ needs.metadata.outputs.version }}
           path: artifacts/windows
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: NexaPOS-Windows7-8-${{ needs.metadata.outputs.version }}
+          path: artifacts/windows-legacy
+
       - name: Prepare release assets
         shell: bash
         run: |
@@ -377,8 +383,9 @@ jobs:
           VERSION="${{ needs.metadata.outputs.version }}"
           mkdir -p release
           cp artifacts/android/app-release.apk "release/NexaPOS-$VERSION.apk"
-          cp "artifacts/windows/NexaPOS-Setup-$VERSION.exe" "release/NexaPOS-Setup-$VERSION.exe"
-          sha256sum "release/NexaPOS-$VERSION.apk" "release/NexaPOS-Setup-$VERSION.exe" > "release/SHA256SUMS-$VERSION.txt"
+          cp "artifacts/windows/NexaPOS-Setup-$VERSION-native.exe" "release/NexaPOS-Setup-$VERSION.exe"
+          cp "artifacts/windows-legacy/NexaPOS-Setup-Windows7-8-$VERSION-native.exe" "release/NexaPOS-Setup-Windows7-8-$VERSION.exe"
+          sha256sum "release/NexaPOS-$VERSION.apk" "release/NexaPOS-Setup-$VERSION.exe" "release/NexaPOS-Setup-Windows7-8-$VERSION.exe" > "release/SHA256SUMS-$VERSION.txt"
 
       - name: Publish GitHub release
         shell: bash
