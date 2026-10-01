@@ -10,6 +10,7 @@ class SupportTicket {
     required this.status,
     required this.createdAt,
     required this.updatedAt,
+    this.customerEmail,
   });
 
   final int id;
@@ -17,6 +18,7 @@ class SupportTicket {
   final String status;
   final String createdAt;
   final String updatedAt;
+  final String? customerEmail;
 
   factory SupportTicket.fromJson(Map<String, dynamic> json) => SupportTicket(
         id: _supportId(json['id']),
@@ -24,6 +26,7 @@ class SupportTicket {
         status: (json['status'] as String? ?? 'open').trim(),
         createdAt: (json['created_at'] as String? ?? '').trim(),
         updatedAt: (json['updated_at'] as String? ?? '').trim(),
+        customerEmail: (json['customer_email'] as String?)?.trim(),
       );
 }
 
@@ -95,6 +98,7 @@ class SupportGateway {
     required String apiKey,
     required String subject,
     required String message,
+    String? email,
   }) async {
     final response = await platformRequest(
       _client,
@@ -102,7 +106,11 @@ class SupportGateway {
       'support_open',
       baseUrl,
       apiKey: apiKey,
-      body: {'subject': subject, 'message': message},
+      body: {
+        'subject': subject,
+        'message': message,
+        if (email != null && email.isNotEmpty) 'email': email,
+      },
     );
     if (response['success'] != true) {
       throw PaystackException(
@@ -161,6 +169,26 @@ class SupportGateway {
     if (response['success'] != true) {
       throw PaystackException(
         platformResponseMessage(response, 'Could not send your support message.'),
+      );
+    }
+  }
+
+  Future<void> close({
+    required String baseUrl,
+    required String apiKey,
+    required int ticketId,
+  }) async {
+    final response = await platformRequest(
+      _client,
+      'POST',
+      'support_close',
+      baseUrl,
+      apiKey: apiKey,
+      body: {'ticket_id': ticketId},
+    );
+    if (response['success'] != true) {
+      throw PaystackException(
+        platformResponseMessage(response, 'Could not close this ticket.'),
       );
     }
   }
