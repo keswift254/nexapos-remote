@@ -1,0 +1,29 @@
+name: Windows Hello preview build
+
+on:
+  push:
+    branches:
+      - fix-windows-hello-foreground
+  workflow_dispatch:
+
+jobs:
+  windows-preview:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.1"
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter config --enable-windows-desktop
+      - name: Build Windows desktop app
+        run: flutter build windows --release --no-pub
+        env:
+          CL: /D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NexaPOS-WindowsHello-Preview
+          path: build/windows/x64/runner/Release/
+          if-no-files-found: error
