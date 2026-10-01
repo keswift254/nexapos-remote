@@ -28,3 +28,20 @@ jobs:
           name: NexaPOS-WindowsHello-Preview
           path: build/windows/x64/runner/Release/
           if-no-files-found: error
+
+  web-preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.1"
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter build web --release --base-href /app/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NexaPOS-Support-Web-Preview
+          path: build/web/
+          if-no-files-found: error
