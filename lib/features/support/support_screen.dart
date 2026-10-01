@@ -39,10 +39,10 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
         );
       }
       final cached = ref.read(supportGatewayProvider).cachedList(credentials.baseUrl, credentials.apiKey);
-      if (mounted) setState(() {
+      if (mounted) { setState(() {
         _credentials = credentials;
         if (cached != null) { _tickets = cached; _loading = false; }
-      });
+      }); }
       final tickets = await ref.read(supportGatewayProvider).list(
             baseUrl: credentials.baseUrl,
             apiKey: credentials.apiKey,
@@ -364,9 +364,9 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
     try {
       final credentials = await ref.read(paystackCredentialsServiceProvider).load();
       final cached = ref.read(supportGatewayProvider).cachedThread(credentials.baseUrl, credentials.apiKey, widget.ticket.id);
-      if (cached != null && mounted && _thread == null) setState(() {
+      if (cached != null && mounted && _thread == null) { setState(() {
         _thread = cached; _credentials = credentials; _loading = false;
-      });
+      }); }
       final thread = await ref.read(supportGatewayProvider).thread(
         baseUrl: credentials.baseUrl,
         apiKey: credentials.apiKey,
