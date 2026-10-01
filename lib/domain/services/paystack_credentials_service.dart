@@ -32,15 +32,19 @@ class PaystackCredentialsService {
   PaystackCredentialsService(this._storage);
 
   Future<PaystackCredentials> load() async {
-    final storedBaseUrl = await _storage.read(key: _baseUrlKey) ?? '';
+    final values = await Future.wait([
+      _storage.read(key: _baseUrlKey), _storage.read(key: _apiKeyKey),
+      _storage.read(key: _currencyKey), _storage.read(key: _defaultEmailKey),
+    ]);
+    final storedBaseUrl = values[0] ?? '';
     // Existing registered devices keep their API key. Redirect only the
     // former central endpoint; preserve any custom server address.
     final baseUrl = storedBaseUrl.trim() == _previousPlatformBaseUrl
         ? nexaposPlatformBaseUrl
         : storedBaseUrl;
-    final apiKey = await _storage.read(key: _apiKeyKey) ?? '';
-    final currency = await _storage.read(key: _currencyKey) ?? _defaultCurrency;
-    final email = await _storage.read(key: _defaultEmailKey) ?? _defaultEmail;
+    final apiKey = values[1] ?? '';
+    final currency = values[2] ?? _defaultCurrency;
+    final email = values[3] ?? _defaultEmail;
     return PaystackCredentials(baseUrl: baseUrl, apiKey: apiKey, currency: currency, defaultEmail: email);
   }
 
