@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
+import '../../core/secure_storage_provider.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -140,6 +143,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   Timer? _supportTimer;
   List<SupportTicket> _supportReplies = const [];
   bool _checkingSupport = false;
+  Set<String> _dismissedSupportReplies = {};
+  String? _supportBannerKey;
+  List<SupportTicket> get _supportBannerReplies => _supportReplies
+      .where((ticket) => !_dismissedSupportReplies.contains(ticket.replyToken)).toList();
 
   @override
   void initState() {
@@ -186,7 +193,18 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     _checkingSupport = true;
     try {
       final credentials = await ref.read(paystackCredentialsServiceProvider).load();
-      if (!credentials.isConfigured) return;
+      if (!credentials.isConfigured) {
+        if (mounted) setState(() { _supportReplies = []; _dismissedSupportReplies = {}; _supportBannerKey = null; });
+        return;
+      }
+      final bannerKey = 'nexapos.support.banner.${sha256.convert(utf8.encode('${credentials.baseUrl}|${credentials.apiKey}'))}';
+      if (_supportBannerKey != bannerKey) {
+        final stored = await ref.read(secureStorageProvider).read(key: bannerKey);
+        if (!mounted) return;
+        Set<String> dismissed = {};
+        try { dismissed = (jsonDecode(stored ?? '[]') as List).cast<String>().toSet(); } catch (_) {}
+        setState(() { _supportBannerKey = bannerKey; _dismissedSupportReplies = dismissed; _supportReplies = []; });
+      }
       final tickets = await ref.read(supportGatewayProvider).list(
         baseUrl: credentials.baseUrl,
         apiKey: credentials.apiKey,
@@ -202,6 +220,15 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
   }
 
   Future<void> _openSupport() async {
+    final key = _supportBannerKey;
+    final dismissed = {..._dismissedSupportReplies, ..._supportReplies.map((ticket) => ticket.replyToken)};
+    setState(() => _dismissedSupportReplies = dismissed);
+    if (key != null) {
+      // Best effort persistence; an unavailable store must never block Support.
+      unawaited(ref.read(secureStorageProvider).write(key: key,
+          value: jsonEncode(dismissed.toList().reversed.take(200).toList()))
+          .catchError((Object _) {}));
+    }
     await context.push('/support');
     if (mounted) await _checkSupportReplies();
   }
@@ -407,17 +434,17 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                       ),
                     ),
                   ],
-                  if (_supportReplies.isNotEmpty) ...[
+                  if (_supportBannerReplies.isNotEmpty) ...[
                     const SizedBox(height: 12),
                     Card(
                       color: Theme.of(context).colorScheme.secondaryContainer,
                       child: ListTile(
                         leading: const Icon(Icons.mark_chat_unread_outlined),
-                        title: Text(_supportReplies.length == 1
+                        title: Text(_supportBannerReplies.length == 1
                             ? 'NexaPOS Support replied to your ticket'
-                            : 'NexaPOS Support replied to ${_supportReplies.length} tickets'),
-                        subtitle: Text(_supportReplies.length == 1
-                            ? _supportReplies.first.subject
+                            : 'NexaPOS Support replied to ${_supportBannerReplies.length} tickets'),
+                        subtitle: Text(_supportBannerReplies.length == 1
+                            ? _supportBannerReplies.first.subject
                             : 'Open Support to read the replies.'),
                         trailing: const Icon(Icons.chevron_right),
                         onTap: _openSupport,
