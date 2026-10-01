@@ -10,6 +10,14 @@ const platformRequestTimeout = Duration(seconds: 25);
 /// so allow longer requests for a large initial snapshot.
 const platformSyncRequestTimeout = Duration(seconds: 55);
 
+/// Shared by updates, licensing and payments. An outage does not grant
+/// offline access to a device whose license/access is already locked.
+const serverUnavailableMessage =
+    'Our servers are currently unavailable. We apologize for the inconvenience. '
+    'We are working to restore services.\n\n'
+    'Offline sales and cash payments continue to work normally on devices '
+    'with valid offline access.';
+
 /// nexapos_platform now runs as a single central server this vendor
 /// operates, same as nexapos_license (see license_gateway.dart's
 /// licenseServerBaseUrl) - not something each shop self-hosts, which
@@ -131,25 +139,32 @@ Future<Map<String, dynamic>> platformRequest(
   // FormatException - callers like PaystackPaymentService.poll() only
   // catch PaystackException/PaystackOfflineException by type, so an
   // uncaught FormatException here would propagate out of a polling
-  // Timer's callback uncaught.
+  // Timer's callback uncaught. A proxy's HTML 401/403/409 is not a trusted
+  // API rejection either - this is the server/proxy failing to answer
+  // meaningfully, not the backend actually reviewing and rejecting the
+  // request, so it gets the same "can't reach it properly" wording as a
+  // 5xx with no message below, not a made-up specific reason.
   Object? decoded;
   try {
     decoded = jsonDecode(response.body);
   } on FormatException {
-    throw const PaystackException(
-      'The payments server sent back an invalid response.',
-    );
+    throw const PaystackException(serverUnavailableMessage);
   }
   if (decoded is! Map<String, dynamic>) {
-    throw const PaystackException(
-      'The payments server sent back an invalid response.',
-    );
+    throw const PaystackException(serverUnavailableMessage);
   }
   if (response.statusCode >= 400) {
+    // A well-formed JSON answer's own 'message' is still shown verbatim
+    // (e.g. PurchaseCheckService's "paid, but the license could not be
+    // created yet - retrying" relies on exactly this) - only the FALLBACK,
+    // for a 5xx that said nothing useful, calls it what it almost always
+    // is: the server, not the request.
     throw PaystackException(
       platformResponseMessage(
         decoded,
-        'The payments server rejected the request.',
+        response.statusCode >= 500
+            ? serverUnavailableMessage
+            : 'The payments server rejected the request.',
       ),
       statusCode: response.statusCode,
     );
