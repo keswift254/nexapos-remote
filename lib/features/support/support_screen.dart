@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -5,10 +6,14 @@ import '../../data/payments/paystack_gateway.dart' show PaystackException;
 import '../../data/payments/platform_http_client.dart' show PaystackOfflineException;
 import '../../data/support/support_gateway.dart';
 import '../../domain/entities/paystack_credentials.dart';
+import 'support_photos.dart';
 import '../../domain/services/paystack_credentials_service.dart';
 
 class SupportScreen extends ConsumerStatefulWidget {
-  const SupportScreen({super.key});
+  const SupportScreen({super.key, this.initialTicketId});
+
+  final int? initialTicketId;
+
   @override
   ConsumerState<SupportScreen> createState() => _SupportScreenState();
 }
@@ -18,6 +23,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
   String? _error;
   List<SupportTicket> _tickets = const [];
   PaystackCredentials? _credentials;
+  bool _openedInitialTicket = false;
 
   @override
   void initState() {
@@ -26,7 +32,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
   }
 
   Future<void> _load() async {
-    if (mounted) setState(() { _loading = true; _error = null; });
+    if (mounted) setState(() { _error = null; });
     try {
       final credentials =
           await ref.read(paystackCredentialsServiceProvider).load();
@@ -36,6 +42,17 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
           'Open Settings > Device Sync while online, then try again.',
         );
       }
+      final cached = ref.read(supportGatewayProvider).cachedList(credentials.baseUrl, credentials.apiKey);
+      if (mounted) { setState(() {
+        _credentials = credentials;
+        if (cached != null) {
+          _tickets = cached;
+          _loading = false;
+          WidgetsBinding.instance.addPostFrameCallback(
+            (_) => _openInitialTicketIfAvailable(),
+          );
+        }
+      }); }
       final tickets = await ref.read(supportGatewayProvider).list(
             baseUrl: credentials.baseUrl,
             apiKey: credentials.apiKey,
@@ -46,6 +63,9 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
         _tickets = tickets;
         _loading = false;
       });
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _openInitialTicketIfAvailable(),
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -59,6 +79,28 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                 : 'Could not read the support response. Try again or contact NexaPOS support.';
       });
     }
+  }
+
+  Future<void> _openInitialTicketIfAvailable() async {
+    final ticketId = widget.initialTicketId;
+    if (_openedInitialTicket || ticketId == null || !mounted) return;
+
+    SupportTicket? target;
+    for (final ticket in _tickets) {
+      if (ticket.id == ticketId) {
+        target = ticket;
+        break;
+      }
+    }
+    if (target == null) return;
+
+    _openedInitialTicket = true;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _SupportThreadScreen(ticket: target!),
+      ),
+    );
+    if (mounted) await _load();
   }
 
   Future<void> _newTicket() async {
@@ -75,6 +117,8 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
             apiKey: credentials.apiKey,
             subject: draft.subject,
             message: draft.message,
+            email: draft.email,
+            photos: draft.photos,
           );
       await _load();
       if (!mounted) return;
@@ -112,7 +156,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
         ),
       ],
     ),
-    floatingActionButton: _credentials == null ? null : FloatingActionButton.extended(
+    floatingActionButton: _credentials == null || _loading ? null : FloatingActionButton.extended(
       onPressed: _newTicket,
       icon: const Icon(Icons.add_comment_outlined),
       label: const Text('New ticket'),
@@ -158,15 +202,50 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                 : RefreshIndicator(
                     onRefresh: _load,
                     child: ListView.separated(
-                      padding: const EdgeInsets.all(16),
-                      itemCount: _tickets.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 8),
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
+                      itemCount: _tickets.length + 1,
+                      separatorBuilder: (_, _) => const SizedBox(height: 10),
                       itemBuilder: (context, index) {
-                        final ticket = _tickets[index];
-                        return Card(child: ListTile(
-                          leading: const Icon(Icons.confirmation_number_outlined),
-                          title: Text(ticket.subject),
-                          subtitle: Text('#${ticket.id} • ${ticket.status.toUpperCase()}'),
+                        if (index == 0) {
+                          final replies = _tickets.where((t) => t.status == 'pending').length;
+                          return Padding(
+                            padding: const EdgeInsets.fromLTRB(4, 4, 4, 10),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('Your conversations',
+                                    style: Theme.of(context).textTheme.headlineSmall),
+                                const SizedBox(height: 5),
+                                Text(replies == 0
+                                    ? 'Follow your requests and messages from NexaPOS Support.'
+                                    : '${replies == 1 ? '1 reply' : '$replies replies'} waiting for your shop.',
+                                    style: Theme.of(context).textTheme.bodyMedium),
+                              ],
+                            ),
+                          );
+                        }
+                        final ticket = _tickets[index - 1];
+                        final scheme = Theme.of(context).colorScheme;
+                        final hasReply = ticket.status == 'pending';
+                        return Card(
+                          color: hasReply ? scheme.secondaryContainer : null,
+                          child: ListTile(
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                          leading: CircleAvatar(
+                            backgroundColor: hasReply ? scheme.secondary : scheme.surfaceContainerHighest,
+                            foregroundColor: hasReply ? scheme.onSecondary : scheme.onSurface,
+                            child: Icon(hasReply ? Icons.mark_chat_unread_outlined
+                                : ticket.status == 'closed' ? Icons.task_alt
+                                : Icons.support_agent_outlined),
+                          ),
+                          title: Text(ticket.subject,
+                              maxLines: 2, overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontWeight: hasReply ? FontWeight.w700 : FontWeight.w600)),
+                          subtitle: Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Text('#${ticket.id}  •  ${_ticketStatusLabel(ticket.status)}'
+                                '${ticket.updatedAt.isEmpty ? '' : '  •  ${ticket.updatedAt}'}'),
+                          ),
                           trailing: const Icon(Icons.chevron_right),
                           onTap: () async {
                             await Navigator.of(context).push(
@@ -184,10 +263,18 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
 }
 
 class _TicketDraft {
-  const _TicketDraft(this.subject, this.message);
+  const _TicketDraft(this.subject, this.message, this.email, this.photos);
   final String subject;
   final String message;
+  final String? email;
+  final List<Uint8List> photos;
 }
+
+String _ticketStatusLabel(String status) => switch (status) {
+  'pending' => 'Reply from support',
+  'closed' => 'Closed',
+  _ => 'Waiting for support',
+};
 
 class _NewTicketDialog extends StatefulWidget {
   const _NewTicketDialog();
@@ -198,19 +285,30 @@ class _NewTicketDialog extends StatefulWidget {
 class _NewTicketDialogState extends State<_NewTicketDialog> {
   final _subject = TextEditingController();
   final _message = TextEditingController();
+  final _email = TextEditingController();
+  String? _emailError;
+  List<Uint8List> _photos = [];
 
   @override
   void dispose() {
     _subject.dispose();
     _message.dispose();
+    _email.dispose();
     super.dispose();
   }
 
   void _submit() {
     final subject = _subject.text.trim();
     final message = _message.text.trim();
-    if (subject.length < 3 || message.isEmpty) return;
-    Navigator.pop(context, _TicketDraft(subject, message));
+    final email = _email.text.trim();
+    if (subject.length < 3 || (message.isEmpty && _photos.isEmpty)) return;
+    if (email.isNotEmpty &&
+        !RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email)) {
+      setState(() => _emailError = 'Enter a valid email address.');
+      return;
+    }
+    Navigator.pop(context, _TicketDraft(subject, message,
+        email.isEmpty ? null : email, _photos));
   }
 
   @override
@@ -218,7 +316,9 @@ class _NewTicketDialogState extends State<_NewTicketDialog> {
     title: const Text('Open support ticket'),
     content: SizedBox(
       width: 460,
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
+      child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const Text('Tell us what happened. Your shop can follow this conversation in NexaPOS.'),
+        const SizedBox(height: 14),
         TextField(
           controller: _subject,
           maxLength: 160,
@@ -238,7 +338,25 @@ class _NewTicketDialogState extends State<_NewTicketDialog> {
             alignLabelWithHint: true,
           ),
         ),
-      ]),
+        const SizedBox(height: 8),
+        SupportPhotoPicker(onChanged: (photos) => _photos = photos),
+        TextField(
+          controller: _email,
+          keyboardType: TextInputType.emailAddress,
+          autofillHints: const [AutofillHints.email],
+          maxLength: 254,
+          onChanged: (_) {
+            if (_emailError != null) setState(() => _emailError = null);
+          },
+          decoration: InputDecoration(
+            labelText: 'Email for ticket updates (optional)',
+            hintText: 'you@example.com',
+            helperText: 'We can email you when support replies.',
+            errorText: _emailError,
+            prefixIcon: const Icon(Icons.email_outlined),
+          ),
+        ),
+      ])),
     ),
     actions: [
       TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
@@ -260,6 +378,9 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
   PaystackCredentials? _credentials;
   bool _loading = true;
   bool _sending = false;
+  bool _closing = false;
+  final _photoPicker = GlobalKey<SupportPhotoPickerState>();
+  List<Uint8List> _photos = [];
   String? _error;
 
   @override
@@ -277,6 +398,10 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
   Future<void> _load() async {
     try {
       final credentials = await ref.read(paystackCredentialsServiceProvider).load();
+      final cached = ref.read(supportGatewayProvider).cachedThread(credentials.baseUrl, credentials.apiKey, widget.ticket.id);
+      if (cached != null && mounted && _thread == null) { setState(() {
+        _thread = cached; _credentials = credentials; _loading = false;
+      }); }
       final thread = await ref.read(supportGatewayProvider).thread(
         baseUrl: credentials.baseUrl,
         apiKey: credentials.apiKey,
@@ -301,7 +426,7 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
   Future<void> _send() async {
     final credentials = _credentials;
     final message = _reply.text.trim();
-    if (credentials == null || message.isEmpty || _sending) return;
+    if (credentials == null || (message.isEmpty && _photos.isEmpty) || _sending || _closing) return;
     setState(() => _sending = true);
     try {
       await ref.read(supportGatewayProvider).reply(
@@ -309,8 +434,11 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
         apiKey: credentials.apiKey,
         ticketId: widget.ticket.id,
         message: message,
+        photos: _photos,
       );
+      if (!mounted) return;
       _reply.clear();
+      _photoPicker.currentState?.clear();
       await _load();
     } catch (e) {
       if (!mounted) return;
@@ -324,18 +452,56 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
     }
   }
 
+  Future<void> _close() async {
+    final credentials = _credentials;
+    if (credentials == null || _closing || _sending) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Close this ticket?'),
+        content: const Text('You can reopen it later by sending another reply.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false),
+              child: const Text('Keep open')),
+          FilledButton(onPressed: () => Navigator.pop(context, true),
+              child: const Text('Close ticket')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _closing = true);
+    try {
+      await ref.read(supportGatewayProvider).close(
+        baseUrl: credentials.baseUrl,
+        apiKey: credentials.apiKey,
+        ticketId: widget.ticket.id,
+      );
+      await _load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(e is PaystackException ? e.message : 'Could not close the ticket.'),
+      ));
+    } finally {
+      if (mounted) setState(() => _closing = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final thread = _thread;
     return Scaffold(
       appBar: AppBar(
-        title: Text('#${widget.ticket.id} ${widget.ticket.subject}'),
+        title: Text('Ticket #${widget.ticket.id}'),
         actions: [
-          if (thread != null)
-            Padding(
-              padding: const EdgeInsets.only(right: 12),
-              child: Center(child: Text(thread.ticket.status.toUpperCase())),
+          if (thread != null && thread.ticket.status != 'closed')
+            TextButton.icon(
+              onPressed: _closing || _sending ? null : _close,
+              icon: const Icon(Icons.task_alt),
+              label: const Text('Close'),
             ),
+          IconButton(tooltip: 'Refresh conversation',
+              onPressed: _load, icon: const Icon(Icons.refresh)),
         ],
       ),
       body: _loading
@@ -345,14 +511,40 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
               : Column(children: [
                   Expanded(
                     child: ListView.builder(
-                      padding: const EdgeInsets.all(16),
-                      itemCount: thread!.messages.length,
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                      itemCount: thread!.messages.length + 1,
                       itemBuilder: (context, index) {
-                        final message = thread.messages[index];
+                        if (index == 0) {
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 20),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(thread.ticket.subject,
+                                    style: Theme.of(context).textTheme.titleLarge),
+                                const SizedBox(height: 8),
+                                Chip(
+                                  avatar: Icon(thread.ticket.status == 'pending'
+                                      ? Icons.mark_chat_unread_outlined
+                                      : thread.ticket.status == 'closed'
+                                          ? Icons.task_alt : Icons.schedule_outlined,
+                                      size: 18),
+                                  label: Text(_ticketStatusLabel(thread.ticket.status)),
+                                ),
+                                if (thread.ticket.customerEmail?.isNotEmpty == true)
+                                  Text('Email updates: ${thread.ticket.customerEmail}',
+                                      style: Theme.of(context).textTheme.bodySmall),
+                              ],
+                            ),
+                          );
+                        }
+                        final message = thread.messages[index - 1];
                         final support = message.sender == 'support';
+                        final scheme = Theme.of(context).colorScheme;
                         return Align(
                           alignment: support ? Alignment.centerLeft : Alignment.centerRight,
                           child: Card(
+                            color: support ? scheme.secondaryContainer : scheme.primaryContainer,
                             child: ConstrainedBox(
                               constraints: const BoxConstraints(maxWidth: 520),
                               child: Padding(
@@ -362,10 +554,16 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
                                   children: [
                                     Text(
                                       support ? 'NexaPOS Support' : 'Your shop',
-                                      style: Theme.of(context).textTheme.labelMedium,
+                                      style: Theme.of(context).textTheme.labelMedium
+                                          ?.copyWith(fontWeight: FontWeight.w700),
                                     ),
                                     const SizedBox(height: 4),
-                                    SelectableText(message.body),
+                                    if (message.body.isNotEmpty) SelectableText(message.body),
+                                    for (final id in message.attachments)
+                                      SupportPhoto(id: id, credentials: _credentials!),
+                                    const SizedBox(height: 6),
+                                    Text(message.createdAt,
+                                        style: Theme.of(context).textTheme.bodySmall),
                                   ],
                                 ),
                               ),
@@ -375,6 +573,8 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
                       },
                     ),
                   ),
+                  SupportPhotoPicker(key: _photoPicker, enabled: !_sending && !_closing,
+                      onChanged: (photos) => _photos = photos),
                   SafeArea(
                     top: false,
                     child: Padding(
@@ -386,7 +586,12 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
                             minLines: 1,
                             maxLines: 5,
                             maxLength: 8000,
-                            decoration: const InputDecoration(hintText: 'Reply to this ticket…'),
+                            decoration: InputDecoration(
+                              hintText: thread.ticket.status == 'closed'
+                                  ? 'Reply to reopen this ticket…'
+                                  : 'Reply to this ticket…',
+                              border: const OutlineInputBorder(),
+                            ),
                             onSubmitted: (_) => _send(),
                           ),
                         ),
