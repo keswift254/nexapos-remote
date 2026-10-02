@@ -176,7 +176,10 @@ GoRouter router(Ref ref) {
       GoRoute(path: '/users', builder: (context, state) => const UsersScreen()),
       GoRoute(
         path: '/support',
-        builder: (context, state) => const SupportScreen(),
+        builder: (context, state) => SupportScreen(
+          initialTicketId:
+              int.tryParse(state.uri.queryParameters['ticket'] ?? ''),
+        ),
       ),
       GoRoute(
         path: '/categories',
