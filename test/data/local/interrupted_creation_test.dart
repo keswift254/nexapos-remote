@@ -18,8 +18,8 @@ void main() {
         [RoleIds.admin],
       );
       await first.customStatement(
-        "INSERT INTO categories (id, name, created_at, updated_at, local_rev, created_by_device_id, is_deleted) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        ['saved-category', 'Saved stock', '2026-10-02', '2026-10-02', 100, identity.deviceId, 0],
+        "INSERT INTO categories (id, name, created_at, updated_at, local_rev, created_by_device_id) VALUES (?, ?, ?, ?, ?, ?)",
+        ['saved-category', 'Saved stock', '2026-10-02', '2026-10-02', 100, identity.deviceId],
       );
       final adminBefore = (await (first.select(first.roles)
             ..where((t) => t.id.equals(RoleIds.admin))).getSingle()).toJson();
