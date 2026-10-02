@@ -99,7 +99,7 @@ class SupportGateway {
   Future<List<SupportTicket>> list({required String baseUrl, required String apiKey}) {
     final key = _key(baseUrl, apiKey);
     return _requests.putIfAbsent(key, () => _fetchList(baseUrl: baseUrl, apiKey: apiKey)
-      .whenComplete(() => _requests.remove(key)));
+      .whenComplete(() { _requests.remove(key); }));
   }
 
   Future<List<SupportTicket>> _fetchList({
