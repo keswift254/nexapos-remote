@@ -6,6 +6,7 @@ on:
     branches:
       - restore-cloudflare-release-path
       - release-1.0.57-lan-support-payments
+      - fix-support-email-dashboard-hello
       - nexapos-1.0.12-safety
     paths:
       - 'lib/**'
