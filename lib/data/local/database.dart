@@ -283,6 +283,9 @@ class AppDatabase extends _$AppDatabase {
           localRev: rev,
           createdByDeviceId: deviceId,
         ),
+        // Another opener can persist this fixed id after the read above.
+        // Preserve its row and metadata instead of failing activation.
+        mode: InsertMode.insertOrIgnore,
       );
     }
   }

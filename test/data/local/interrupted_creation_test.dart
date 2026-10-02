@@ -7,6 +7,58 @@ import 'package:nexapos_mobile/data/local/tables/roles_table.dart';
 import 'package:sqlite3/sqlite3.dart' as raw;
 
 void main() {
+  test(
+    'preserves a role inserted between recovery check and seed write',
+    () async {
+      final dir = await Directory.systemTemp.createTemp(
+        'nexapos_creation_race',
+      );
+      final file = File('${dir.path}/app.db');
+      final first = AppDatabase(NativeDatabase(file));
+      final identity = (await first.select(first.deviceMeta).get()).single;
+      await first.close();
+
+      final handle = raw.sqlite3.open(file.path);
+      handle.execute('DELETE FROM roles WHERE id = ?', [RoleIds.admin]);
+      handle.execute('PRAGMA user_version = 0');
+      handle.execute('''
+      CREATE TRIGGER insert_admin_during_recovery
+      AFTER UPDATE OF next_local_rev ON device_meta
+      WHEN NOT EXISTS (SELECT 1 FROM roles WHERE id = '${RoleIds.admin}')
+      BEGIN
+        INSERT INTO roles
+          (id, name, description, created_at, updated_at, local_rev,
+           created_by_device_id, sync_state)
+        VALUES
+          ('${RoleIds.admin}', 'admin', 'Preserve this role',
+           '2026-10-03', '2026-10-03', OLD.next_local_rev,
+           NEW.device_id, 'local_only');
+      END;
+    ''');
+      handle.close();
+
+      final recovered = AppDatabase(NativeDatabase(file));
+      addTearDown(() async {
+        await recovered.close();
+        await dir.delete(recursive: true);
+      });
+      final roles = await recovered.select(recovered.roles).get();
+      expect(roles, hasLength(3));
+      final admin = roles.singleWhere((role) => role.id == RoleIds.admin);
+      expect(admin.description, 'Preserve this role');
+      expect(admin.createdByDeviceId, identity.deviceId);
+      final device =
+          (await recovered.select(recovered.deviceMeta).get()).single;
+      expect(device.deviceId, identity.deviceId);
+      expect(device.nextLocalRev, identity.nextLocalRev + 1);
+      expect(
+        (await recovered.customSelect('PRAGMA user_version').getSingle())
+            .read<int>('user_version'),
+        recovered.schemaVersion,
+      );
+    },
+  );
+
   for (final partial in [false, true]) {
     test('resumes interrupted creation (partial: $partial) preserving data', () async {
       final dir = await Directory.systemTemp.createTemp('nexapos_creation');
