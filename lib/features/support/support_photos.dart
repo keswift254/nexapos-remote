@@ -32,15 +32,23 @@ class SupportPhotoPickerState extends State<SupportPhotoPicker> {
       final images = <Uint8List>[];
       if (paste) {
         final image = await Pasteboard.image;
-        if (image == null) throw Exception('Copy a photo first, or use Add photos.'); }
+        if (image == null) {
+          throw Exception('Copy a photo first, or use Add photos.');
+        }
         images.add(image);
       } else {
         final result = await FilePicker.pickFiles(type: FileType.custom,
           allowedExtensions: ['png', 'jpg', 'jpeg', 'webp']);
         if (result.isEmpty) return;
         for (final file in result) {
-          if (file.size > 2 * 1024 * 1024) throw Exception('Each photo must be 2 MB or smaller.');
-          images.add(await file.readAsBytes());
+          final buffer = BytesBuilder(copy: false);
+          await for (final chunk in file.readAsByteStream()) {
+            if (buffer.length + chunk.length > 2 * 1024 * 1024) {
+              throw Exception('Each photo must be 2 MB or smaller.');
+            }
+            buffer.add(chunk);
+          }
+          images.add(buffer.takeBytes());
         }
       }
       if (!mounted) return;
