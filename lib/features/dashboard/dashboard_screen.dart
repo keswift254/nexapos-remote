@@ -219,17 +219,25 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     }
   }
 
-  Future<void> _openSupport() async {
+  Future<void> _openSupport({SupportTicket? ticket}) async {
     final key = _supportBannerKey;
-    final dismissed = {..._dismissedSupportReplies, ..._supportReplies.map((ticket) => ticket.replyToken)};
+    final dismissed = {
+      ..._dismissedSupportReplies,
+      ..._supportReplies.map((ticket) => ticket.replyToken),
+    };
     setState(() => _dismissedSupportReplies = dismissed);
     if (key != null) {
       // Best effort persistence; an unavailable store must never block Support.
-      unawaited(ref.read(secureStorageProvider).write(key: key,
-          value: jsonEncode(dismissed.toList().reversed.take(200).toList()))
+      unawaited(ref
+          .read(secureStorageProvider)
+          .write(
+            key: key,
+            value: jsonEncode(dismissed.toList().reversed.take(200).toList()),
+          )
           .catchError((Object _) {}));
     }
-    await context.push('/support');
+    final path = ticket == null ? '/support' : '/support?ticket=${ticket.id}';
+    await context.push(path);
     if (mounted) await _checkSupportReplies();
   }
 
@@ -375,7 +383,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
             tooltip: _supportReplies.isEmpty
                 ? 'Support'
                 : '${_supportReplies.length} support ${_supportReplies.length == 1 ? 'reply' : 'replies'} waiting',
-            onPressed: _openSupport,
+            onPressed: () => _openSupport(
+              ticket: _supportBannerReplies.length == 1
+                  ? _supportBannerReplies.first
+                  : null,
+            ),
           ),
           if (user?.role == UserRole.admin)
             IconButton(
@@ -447,7 +459,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                             ? _supportBannerReplies.first.subject
                             : 'Open Support to read the replies.'),
                         trailing: const Icon(Icons.chevron_right),
-                        onTap: _openSupport,
+                        onTap: () => _openSupport(
+                          ticket: _supportBannerReplies.length == 1
+                              ? _supportBannerReplies.first
+                              : null,
+                        ),
                       ),
                     ),
                   ],
