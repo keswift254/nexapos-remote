@@ -1,0 +1,92 @@
+name: Publish GitHub release 1.0.59
+
+on:
+  push:
+    branches:
+      - release-1.0.57-lan-support-payments
+    paths:
+      - '.github/workflows/publish-github-1.0.59.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_RUN_ID: '36987919281'
+      WEB_RUN_ID: '36987919211'
+      RELEASE_TAG: 'v1.0.59'
+      RELEASE_VERSION: '1.0.59'
+      RELEASE_COMMIT: 'd504cdf73cc016cca899dc1c242cda04ba7d7969'
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d504cdf73cc016cca899dc1c242cda04ba7d7969
+
+      - name: Wait for exact merged artifact runs
+        shell: bash
+        run: |
+          set -euo pipefail
+          wait_run() {
+            local run_id="$1"
+            for attempt in $(seq 1 90); do
+              status="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" --jq .status)"
+              conclusion="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" --jq '.conclusion // ""')"
+              echo "run ${run_id}: ${status}/${conclusion}"
+              if [ "$status" = completed ]; then
+                test "$conclusion" = success
+                return 0
+              fi
+              sleep 10
+            done
+            echo "::error::Timed out waiting for workflow run ${run_id}"
+            return 1
+          }
+          wait_run "$RELEASE_RUN_ID"
+          wait_run "$WEB_RUN_ID"
+
+      - name: Download exact merged artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf out downloads
+          mkdir -p out downloads
+          gh run download "$RELEASE_RUN_ID" -R "$GITHUB_REPOSITORY" --dir downloads
+          gh run download "$WEB_RUN_ID" -R "$GITHUB_REPOSITORY" --dir downloads
+
+          ANDROID="$(find downloads -type f -name 'app-release.apk' -print -quit)"
+          WIN="$(find downloads -type f -name 'NexaPOS-Setup-1.0.59.exe' -print -quit)"
+          WIN7="$(find downloads -type f -name 'NexaPOS-Setup-Windows7-8-1.0.59.exe' -print -quit)"
+          test -n "$ANDROID" && test -n "$WIN" && test -n "$WIN7"
+
+          cp "$ANDROID" "out/NexaPOS-1.0.59.apk"
+          cp "$WIN" "out/NexaPOS-Setup-1.0.59.exe"
+          cp "$WIN7" "out/NexaPOS-Setup-Windows7-8-1.0.59.exe"
+
+          WEB_DIR="$(find downloads -type f -name version.json -path '*NexaPOS-Web-1.0.59-NameCrane*' -printf '%h\n' | head -n1)"
+          if [ -z "$WEB_DIR" ]; then
+            WEB_DIR="$(find downloads -type f -name version.json -printf '%h\n' | head -n1)"
+          fi
+          test -n "$WEB_DIR"
+          grep -q '"version":"1.0.59"' "$WEB_DIR/version.json"
+          (cd "$WEB_DIR" && zip -qr "$OLDPWD/out/NexaPOS-Web-1.0.59-NameCrane.zip" .)
+
+          (
+            cd out
+            sha256sum               NexaPOS-1.0.59.apk               NexaPOS-Setup-1.0.59.exe               NexaPOS-Setup-Windows7-8-1.0.59.exe               NexaPOS-Web-1.0.59-NameCrane.zip               > SHA256SUMS-1.0.59.txt
+            cat SHA256SUMS-1.0.59.txt
+          )
+
+      - name: Create immutable GitHub release
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Release $RELEASE_TAG already exists; refusing to overwrite immutable release assets."
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG"             -R "$GITHUB_REPOSITORY"             --target "$RELEASE_COMMIT"             --title "NexaPOS 1.0.59"             --notes-file docs/release-1.0.59.md             out/NexaPOS-1.0.59.apk             out/NexaPOS-Setup-1.0.59.exe             out/NexaPOS-Setup-Windows7-8-1.0.59.exe             out/NexaPOS-Web-1.0.59-NameCrane.zip             out/SHA256SUMS-1.0.59.txt
