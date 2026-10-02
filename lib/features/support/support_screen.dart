@@ -10,7 +10,10 @@ import 'support_photos.dart';
 import '../../domain/services/paystack_credentials_service.dart';
 
 class SupportScreen extends ConsumerStatefulWidget {
-  const SupportScreen({super.key});
+  const SupportScreen({super.key, this.initialTicketId});
+
+  final int? initialTicketId;
+
   @override
   ConsumerState<SupportScreen> createState() => _SupportScreenState();
 }
@@ -20,6 +23,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
   String? _error;
   List<SupportTicket> _tickets = const [];
   PaystackCredentials? _credentials;
+  bool _openedInitialTicket = false;
 
   @override
   void initState() {
@@ -41,7 +45,13 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
       final cached = ref.read(supportGatewayProvider).cachedList(credentials.baseUrl, credentials.apiKey);
       if (mounted) { setState(() {
         _credentials = credentials;
-        if (cached != null) { _tickets = cached; _loading = false; }
+        if (cached != null) {
+          _tickets = cached;
+          _loading = false;
+          WidgetsBinding.instance.addPostFrameCallback(
+            (_) => _openInitialTicketIfAvailable(),
+          );
+        }
       }); }
       final tickets = await ref.read(supportGatewayProvider).list(
             baseUrl: credentials.baseUrl,
@@ -53,6 +63,9 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
         _tickets = tickets;
         _loading = false;
       });
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _openInitialTicketIfAvailable(),
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -66,6 +79,28 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                 : 'Could not read the support response. Try again or contact NexaPOS support.';
       });
     }
+  }
+
+  Future<void> _openInitialTicketIfAvailable() async {
+    final ticketId = widget.initialTicketId;
+    if (_openedInitialTicket || ticketId == null || !mounted) return;
+
+    SupportTicket? target;
+    for (final ticket in _tickets) {
+      if (ticket.id == ticketId) {
+        target = ticket;
+        break;
+      }
+    }
+    if (target == null) return;
+
+    _openedInitialTicket = true;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _SupportThreadScreen(ticket: target!),
+      ),
+    );
+    if (mounted) await _load();
   }
 
   Future<void> _newTicket() async {
