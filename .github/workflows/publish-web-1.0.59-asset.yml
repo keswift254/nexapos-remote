@@ -1,0 +1,43 @@
+name: Attach verified NexaPOS 1.0.59 web bundle
+
+on:
+  push:
+    branches: [release-1.0.57-lan-support-payments]
+    paths:
+      - '.github/workflows/publish-web-1.0.59-asset.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: NexaPOS-Web-1.0.59-NameCrane
+          run-id: 36987919211
+          repository: keswift254/nexapos-remote
+          github-token: ${{ github.token }}
+          path: web
+
+      - name: Verify web build and attach it to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test -s web/main.dart.js
+          grep -q '"version":"1.0.59"' web/version.json
+          echo '54e8a9f5b1de6812d508e66ff7552073dd03144140f1dee8e5282f10e242ac0a  web/main.dart.js' | sha256sum -c -
+          (cd web && zip -qr ../NexaPOS-Web-1.0.59-NameCrane.zip .)
+
+          existing="$(gh release view v1.0.59 --repo keswift254/nexapos-remote --json assets --jq '.assets[].name' || true)"
+          if printf '%s\n' "$existing" | grep -Fxq 'NexaPOS-Web-1.0.59-NameCrane.zip'; then
+            echo "::error::Web asset already exists; refusing to overwrite immutable release bytes."
+            exit 1
+          fi
+
+          gh release upload v1.0.59 NexaPOS-Web-1.0.59-NameCrane.zip --repo keswift254/nexapos-remote
