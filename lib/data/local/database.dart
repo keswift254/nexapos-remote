@@ -114,13 +114,15 @@ class AppDatabase extends _$AppDatabase {
   @override
   MigrationStrategy get migration => MigrationStrategy(
         onCreate: (m) async {
-          await m.createAll();
-          await _createUpdatedAtTriggers();
-          // Device id must exist before anything else, since roles and
-          // business_settings stamp createdByDeviceId from it.
-          await _seedDeviceMeta();
-          await _seedRoles();
-          await _seedDefaultBusinessSettings();
+          // A browser can close before Drift records user_version. Existing
+          // seed rows must survive a retry, and new seed writes are atomic.
+          await transaction(() async {
+            await m.createAll();
+            await _createUpdatedAtTriggers();
+            await _seedDeviceMeta();
+            await _seedRoles();
+            await _seedDefaultBusinessSettings();
+          });
         },
         onUpgrade: (m, from, to) async {
           if (from < 2) {
@@ -265,6 +267,11 @@ class AppDatabase extends _$AppDatabase {
       (RoleIds.cashier, 'cashier', 'Sales terminal only'),
     ];
     for (final (id, name, description) in seedRoles) {
+      // Resume an interrupted first open without replacing roles or advancing
+      // their sync revisions. Keep the existing device identity and data.
+      final existing = await (select(roles)..where((t) => t.id.equals(id)))
+          .getSingleOrNull();
+      if (existing != null) continue;
       final rev = await syncMeta.nextLocalRev();
       await into(roles).insert(
         RolesCompanion.insert(
@@ -276,6 +283,9 @@ class AppDatabase extends _$AppDatabase {
           localRev: rev,
           createdByDeviceId: deviceId,
         ),
+        // Another opener can persist this fixed id after the read above.
+        // Preserve its row and metadata instead of failing activation.
+        mode: InsertMode.insertOrIgnore,
       );
     }
   }
