@@ -85,6 +85,20 @@ void main() {
     );
     expect(actions, ['support_open', 'support_close']);
   });
+  test('includes selected photos when opening a new ticket', () async {
+    final gateway = SupportGateway(MockClient((request) async {
+      expect(request.url.queryParameters['action'], 'support_open');
+      final body = jsonDecode(request.body) as Map<String, dynamic>;
+      expect(body['attachments'], [{'data': base64Encode([1, 2, 3])}]);
+      return http.Response('{"success":true,"ticket_id":"73"}', 201);
+    }));
+    final id = await gateway.open(
+      baseUrl: 'https://example.com/index.php', apiKey: 'shop-key',
+      subject: 'Receipt photo', message: 'See attached',
+      photos: [Uint8List.fromList([1, 2, 3])],
+    );
+    expect(id, 73);
+  });
   test('shares pending list requests and isolates cached shops', () async {
     final pending = Completer<http.Response>();
     var calls = 0;

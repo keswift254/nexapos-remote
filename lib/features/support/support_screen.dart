@@ -1,10 +1,13 @@
 import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/payments/paystack_gateway.dart' show PaystackException;
-import '../../data/payments/platform_http_client.dart' show PaystackOfflineException;
+import '../../data/payments/platform_http_client.dart'
+    show PaystackOfflineException;
 import '../../data/support/support_gateway.dart';
+import '../../data/repositories/business_settings_repository_impl.dart';
 import '../../domain/entities/paystack_credentials.dart';
 import 'support_photos.dart';
 import '../../domain/services/paystack_credentials_service.dart';
@@ -32,31 +35,38 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
   }
 
   Future<void> _load() async {
-    if (mounted) setState(() { _error = null; });
+    if (mounted)
+      setState(() {
+        _error = null;
+      });
     try {
-      final credentials =
-          await ref.read(paystackCredentialsServiceProvider).load();
+      final credentials = await ref
+          .read(paystackCredentialsServiceProvider)
+          .load();
       if (!credentials.isConfigured) {
         throw const PaystackException(
           'This device is not connected to the shop sync service yet. '
           'Open Settings > Device Sync while online, then try again.',
         );
       }
-      final cached = ref.read(supportGatewayProvider).cachedList(credentials.baseUrl, credentials.apiKey);
-      if (mounted) { setState(() {
-        _credentials = credentials;
-        if (cached != null) {
-          _tickets = cached;
-          _loading = false;
-          WidgetsBinding.instance.addPostFrameCallback(
-            (_) => _openInitialTicketIfAvailable(),
-          );
-        }
-      }); }
-      final tickets = await ref.read(supportGatewayProvider).list(
-            baseUrl: credentials.baseUrl,
-            apiKey: credentials.apiKey,
-          );
+      final cached = ref
+          .read(supportGatewayProvider)
+          .cachedList(credentials.baseUrl, credentials.apiKey);
+      if (mounted) {
+        setState(() {
+          _credentials = credentials;
+          if (cached != null) {
+            _tickets = cached;
+            _loading = false;
+            WidgetsBinding.instance.addPostFrameCallback(
+              (_) => _openInitialTicketIfAvailable(),
+            );
+          }
+        });
+      }
+      final tickets = await ref
+          .read(supportGatewayProvider)
+          .list(baseUrl: credentials.baseUrl, apiKey: credentials.apiKey);
       if (!mounted) return;
       setState(() {
         _credentials = credentials;
@@ -73,10 +83,10 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
         _error = e is PaystackException
             ? e.message
             : e is PaystackOfflineException
-                ? e.timedOut
-                    ? 'The support server did not answer in time. Try again.'
-                    : 'Could not connect to the support server. Check your connection and try again.'
-                : 'Could not read the support response. Try again or contact NexaPOS support.';
+            ? e.timedOut
+                  ? 'The support server did not answer in time. Try again.'
+                  : 'Could not connect to the support server. Check your connection and try again.'
+            : 'Could not read the support response. Try again or contact NexaPOS support.';
       });
     }
   }
@@ -112,7 +122,9 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
     );
     if (draft == null || !mounted) return;
     try {
-      final id = await ref.read(supportGatewayProvider).open(
+      final id = await ref
+          .read(supportGatewayProvider)
+          .open(
             baseUrl: credentials.baseUrl,
             apiKey: credentials.apiKey,
             subject: draft.subject,
@@ -120,26 +132,33 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
             email: draft.email,
             photos: draft.photos,
           );
-      await _load();
       if (!mounted) return;
-      SupportTicket? opened;
-      for (final ticket in _tickets) {
-        if (ticket.id == id) { opened = ticket; break; }
-      }
-      if (opened != null) {
-        await Navigator.of(context).push(
-          MaterialPageRoute<void>(
-            builder: (_) => _SupportThreadScreen(ticket: opened!),
-          ),
-        );
-        await _load();
-      }
+      final opened = SupportTicket(
+        id: id,
+        subject: draft.subject,
+        status: 'open',
+        createdAt: '',
+        updatedAt: '',
+        customerEmail: draft.email,
+      );
+      setState(
+        () =>
+            _tickets = [opened, ..._tickets.where((ticket) => ticket.id != id)],
+      );
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => _SupportThreadScreen(ticket: opened),
+        ),
+      );
+      if (mounted) _load();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(
-          e is PaystackException ? e.message : 'Could not open the ticket.',
-        )),
+        SnackBar(
+          content: Text(
+            e is PaystackException ? e.message : 'Could not open the ticket.',
+          ),
+        ),
       );
     }
   }
@@ -156,17 +175,22 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
         ),
       ],
     ),
-    floatingActionButton: _credentials == null || _loading ? null : FloatingActionButton.extended(
-      onPressed: _newTicket,
-      icon: const Icon(Icons.add_comment_outlined),
-      label: const Text('New ticket'),
-    ),
+    floatingActionButton: _credentials == null || _loading
+        ? null
+        : FloatingActionButton.extended(
+            onPressed: _newTicket,
+            icon: const Icon(Icons.add_comment_outlined),
+            label: const Text('New ticket'),
+          ),
     body: _loading
         ? const Center(child: CircularProgressIndicator())
         : _error != null
-            ? Center(child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
+        ? Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
                   const Icon(Icons.support_agent, size: 48),
                   const SizedBox(height: 12),
                   Text(_error!, textAlign: TextAlign.center),
@@ -176,89 +200,126 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                     icon: const Icon(Icons.refresh),
                     label: const Text('Try again'),
                   ),
-                ]),
-              ))
-            : _tickets.isEmpty
-                ? Center(child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      const Icon(Icons.support_agent, size: 56),
-                      const SizedBox(height: 12),
-                      Text('Need help?', style: Theme.of(context).textTheme.titleLarge),
-                      const SizedBox(height: 6),
-                      const Text(
-                        'Open a support ticket and describe the issue. '
-                        'Your shop can return here to follow the conversation.',
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 16),
-                      FilledButton.icon(
-                        onPressed: _newTicket,
-                        icon: const Icon(Icons.add_comment_outlined),
-                        label: const Text('Open a ticket'),
-                      ),
-                    ]),
-                  ))
-                : RefreshIndicator(
-                    onRefresh: _load,
-                    child: ListView.separated(
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
-                      itemCount: _tickets.length + 1,
-                      separatorBuilder: (_, _) => const SizedBox(height: 10),
-                      itemBuilder: (context, index) {
-                        if (index == 0) {
-                          final replies = _tickets.where((t) => t.status == 'pending').length;
-                          return Padding(
-                            padding: const EdgeInsets.fromLTRB(4, 4, 4, 10),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text('Your conversations',
-                                    style: Theme.of(context).textTheme.headlineSmall),
-                                const SizedBox(height: 5),
-                                Text(replies == 0
-                                    ? 'Follow your requests and messages from NexaPOS Support.'
-                                    : '${replies == 1 ? '1 reply' : '$replies replies'} waiting for your shop.',
-                                    style: Theme.of(context).textTheme.bodyMedium),
-                              ],
-                            ),
-                          );
-                        }
-                        final ticket = _tickets[index - 1];
-                        final scheme = Theme.of(context).colorScheme;
-                        final hasReply = ticket.status == 'pending';
-                        return Card(
-                          color: hasReply ? scheme.secondaryContainer : null,
-                          child: ListTile(
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-                          leading: CircleAvatar(
-                            backgroundColor: hasReply ? scheme.secondary : scheme.surfaceContainerHighest,
-                            foregroundColor: hasReply ? scheme.onSecondary : scheme.onSurface,
-                            child: Icon(hasReply ? Icons.mark_chat_unread_outlined
-                                : ticket.status == 'closed' ? Icons.task_alt
-                                : Icons.support_agent_outlined),
-                          ),
-                          title: Text(ticket.subject,
-                              maxLines: 2, overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontWeight: hasReply ? FontWeight.w700 : FontWeight.w600)),
-                          subtitle: Padding(
-                            padding: const EdgeInsets.only(top: 6),
-                            child: Text('#${ticket.id}  •  ${_ticketStatusLabel(ticket.status)}'
-                                '${ticket.updatedAt.isEmpty ? '' : '  •  ${ticket.updatedAt}'}'),
-                          ),
-                          trailing: const Icon(Icons.chevron_right),
-                          onTap: () async {
-                            await Navigator.of(context).push(
-                              MaterialPageRoute<void>(
-                                builder: (_) => _SupportThreadScreen(ticket: ticket),
-                              ),
-                            );
-                            await _load();
-                          },
-                        ));
-                      },
-                    ),
+                ],
+              ),
+            ),
+          )
+        : _tickets.isEmpty
+        ? Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.support_agent, size: 56),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Need help?',
+                    style: Theme.of(context).textTheme.titleLarge,
                   ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Open a support ticket and describe the issue. '
+                    'Your shop can return here to follow the conversation.',
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 16),
+                  FilledButton.icon(
+                    onPressed: _newTicket,
+                    icon: const Icon(Icons.add_comment_outlined),
+                    label: const Text('Open a ticket'),
+                  ),
+                ],
+              ),
+            ),
+          )
+        : RefreshIndicator(
+            onRefresh: _load,
+            child: ListView.separated(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
+              itemCount: _tickets.length + 1,
+              separatorBuilder: (_, _) => const SizedBox(height: 10),
+              itemBuilder: (context, index) {
+                if (index == 0) {
+                  final replies = _tickets
+                      .where((t) => t.status == 'pending')
+                      .length;
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 4, 4, 10),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Your conversations',
+                          style: Theme.of(context).textTheme.headlineSmall,
+                        ),
+                        const SizedBox(height: 5),
+                        Text(
+                          replies == 0
+                              ? 'Follow your requests and messages from NexaPOS Support.'
+                              : '${replies == 1 ? '1 reply' : '$replies replies'} waiting for your shop.',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                      ],
+                    ),
+                  );
+                }
+                final ticket = _tickets[index - 1];
+                final scheme = Theme.of(context).colorScheme;
+                final hasReply = ticket.status == 'pending';
+                return Card(
+                  color: hasReply ? scheme.secondaryContainer : null,
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 18,
+                      vertical: 8,
+                    ),
+                    leading: CircleAvatar(
+                      backgroundColor: hasReply
+                          ? scheme.secondary
+                          : scheme.surfaceContainerHighest,
+                      foregroundColor: hasReply
+                          ? scheme.onSecondary
+                          : scheme.onSurface,
+                      child: Icon(
+                        hasReply
+                            ? Icons.mark_chat_unread_outlined
+                            : ticket.status == 'closed'
+                            ? Icons.task_alt
+                            : Icons.support_agent_outlined,
+                      ),
+                    ),
+                    title: Text(
+                      ticket.subject,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontWeight: hasReply
+                            ? FontWeight.w700
+                            : FontWeight.w600,
+                      ),
+                    ),
+                    subtitle: Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        '#${ticket.id}  •  ${_ticketStatusLabel(ticket.status)}'
+                        '${ticket.updatedAt.isEmpty ? '' : '  •  ${ticket.updatedAt}'}',
+                      ),
+                    ),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () async {
+                      await Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => _SupportThreadScreen(ticket: ticket),
+                        ),
+                      );
+                      await _load();
+                    },
+                  ),
+                );
+              },
+            ),
+          ),
   );
 }
 
@@ -307,8 +368,10 @@ class _NewTicketDialogState extends State<_NewTicketDialog> {
       setState(() => _emailError = 'Enter a valid email address.');
       return;
     }
-    Navigator.pop(context, _TicketDraft(subject, message,
-        email.isEmpty ? null : email, _photos));
+    Navigator.pop(
+      context,
+      _TicketDraft(subject, message, email.isEmpty ? null : email, _photos),
+    );
   }
 
   @override
@@ -316,50 +379,60 @@ class _NewTicketDialogState extends State<_NewTicketDialog> {
     title: const Text('Open support ticket'),
     content: SizedBox(
       width: 460,
-      child: SingleChildScrollView(child: Column(mainAxisSize: MainAxisSize.min, children: [
-        const Text('Tell us what happened. Your shop can follow this conversation in NexaPOS.'),
-        const SizedBox(height: 14),
-        TextField(
-          controller: _subject,
-          maxLength: 160,
-          decoration: const InputDecoration(
-            labelText: 'Subject',
-            hintText: 'What do you need help with?',
-          ),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Tell us what happened. Your shop can follow this conversation in NexaPOS.',
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _subject,
+              maxLength: 160,
+              decoration: const InputDecoration(
+                labelText: 'Subject',
+                hintText: 'What do you need help with?',
+              ),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _message,
+              maxLength: 8000,
+              minLines: 4,
+              maxLines: 8,
+              decoration: const InputDecoration(
+                labelText: 'Describe the issue',
+                alignLabelWithHint: true,
+              ),
+            ),
+            const SizedBox(height: 8),
+            SupportPhotoPicker(onChanged: (photos) => _photos = photos),
+            TextField(
+              controller: _email,
+              keyboardType: TextInputType.emailAddress,
+              autofillHints: const [AutofillHints.email],
+              maxLength: 254,
+              onChanged: (_) {
+                if (_emailError != null) setState(() => _emailError = null);
+              },
+              decoration: InputDecoration(
+                labelText: 'Email for ticket updates (optional)',
+                hintText: 'you@example.com',
+                helperText: 'We can email you when support replies.',
+                errorText: _emailError,
+                prefixIcon: const Icon(Icons.email_outlined),
+              ),
+            ),
+          ],
         ),
-        const SizedBox(height: 8),
-        TextField(
-          controller: _message,
-          maxLength: 8000,
-          minLines: 4,
-          maxLines: 8,
-          decoration: const InputDecoration(
-            labelText: 'Describe the issue',
-            alignLabelWithHint: true,
-          ),
-        ),
-        const SizedBox(height: 8),
-        SupportPhotoPicker(onChanged: (photos) => _photos = photos),
-        TextField(
-          controller: _email,
-          keyboardType: TextInputType.emailAddress,
-          autofillHints: const [AutofillHints.email],
-          maxLength: 254,
-          onChanged: (_) {
-            if (_emailError != null) setState(() => _emailError = null);
-          },
-          decoration: InputDecoration(
-            labelText: 'Email for ticket updates (optional)',
-            hintText: 'you@example.com',
-            helperText: 'We can email you when support replies.',
-            errorText: _emailError,
-            prefixIcon: const Icon(Icons.email_outlined),
-          ),
-        ),
-      ])),
+      ),
     ),
     actions: [
-      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
       FilledButton(onPressed: _submit, child: const Text('Send ticket')),
     ],
   );
@@ -369,7 +442,8 @@ class _SupportThreadScreen extends ConsumerStatefulWidget {
   const _SupportThreadScreen({required this.ticket});
   final SupportTicket ticket;
   @override
-  ConsumerState<_SupportThreadScreen> createState() => _SupportThreadScreenState();
+  ConsumerState<_SupportThreadScreen> createState() =>
+      _SupportThreadScreenState();
 }
 
 class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
@@ -382,11 +456,22 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
   final _photoPicker = GlobalKey<SupportPhotoPickerState>();
   List<Uint8List> _photos = [];
   String? _error;
+  String? _shopName;
 
   @override
   void initState() {
     super.initState();
     _load();
+    _loadShopName();
+  }
+
+  Future<void> _loadShopName() async {
+    try {
+      final settings = await ref.read(businessSettingsRepositoryProvider).get();
+      if (mounted) setState(() => _shopName = settings.businessName.trim());
+    } catch (_) {
+      // A local settings error must not prevent the ticket from loading.
+    }
   }
 
   @override
@@ -397,16 +482,30 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
 
   Future<void> _load() async {
     try {
-      final credentials = await ref.read(paystackCredentialsServiceProvider).load();
-      final cached = ref.read(supportGatewayProvider).cachedThread(credentials.baseUrl, credentials.apiKey, widget.ticket.id);
-      if (cached != null && mounted && _thread == null) { setState(() {
-        _thread = cached; _credentials = credentials; _loading = false;
-      }); }
-      final thread = await ref.read(supportGatewayProvider).thread(
-        baseUrl: credentials.baseUrl,
-        apiKey: credentials.apiKey,
-        ticketId: widget.ticket.id,
-      );
+      final credentials = await ref
+          .read(paystackCredentialsServiceProvider)
+          .load();
+      final cached = ref
+          .read(supportGatewayProvider)
+          .cachedThread(
+            credentials.baseUrl,
+            credentials.apiKey,
+            widget.ticket.id,
+          );
+      if (cached != null && mounted && _thread == null) {
+        setState(() {
+          _thread = cached;
+          _credentials = credentials;
+          _loading = false;
+        });
+      }
+      final thread = await ref
+          .read(supportGatewayProvider)
+          .thread(
+            baseUrl: credentials.baseUrl,
+            apiKey: credentials.apiKey,
+            ticketId: widget.ticket.id,
+          );
       if (!mounted) return;
       setState(() {
         _credentials = credentials;
@@ -418,7 +517,9 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = e is PaystackException ? e.message : 'Could not load this ticket.';
+        _error = e is PaystackException
+            ? e.message
+            : 'Could not load this ticket.';
       });
     }
   }
@@ -426,16 +527,22 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
   Future<void> _send() async {
     final credentials = _credentials;
     final message = _reply.text.trim();
-    if (credentials == null || (message.isEmpty && _photos.isEmpty) || _sending || _closing) return;
+    if (credentials == null ||
+        (message.isEmpty && _photos.isEmpty) ||
+        _sending ||
+        _closing)
+      return;
     setState(() => _sending = true);
     try {
-      await ref.read(supportGatewayProvider).reply(
-        baseUrl: credentials.baseUrl,
-        apiKey: credentials.apiKey,
-        ticketId: widget.ticket.id,
-        message: message,
-        photos: _photos,
-      );
+      await ref
+          .read(supportGatewayProvider)
+          .reply(
+            baseUrl: credentials.baseUrl,
+            apiKey: credentials.apiKey,
+            ticketId: widget.ticket.id,
+            message: message,
+            photos: _photos,
+          );
       if (!mounted) return;
       _reply.clear();
       _photoPicker.currentState?.clear();
@@ -443,9 +550,11 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(
-          e is PaystackException ? e.message : 'Could not send the message.',
-        )),
+        SnackBar(
+          content: Text(
+            e is PaystackException ? e.message : 'Could not send the message.',
+          ),
+        ),
       );
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -459,29 +568,41 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Close this ticket?'),
-        content: const Text('You can reopen it later by sending another reply.'),
+        content: const Text(
+          'You can reopen it later by sending another reply.',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false),
-              child: const Text('Keep open')),
-          FilledButton(onPressed: () => Navigator.pop(context, true),
-              child: const Text('Close ticket')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Keep open'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Close ticket'),
+          ),
         ],
       ),
     );
     if (confirmed != true || !mounted) return;
     setState(() => _closing = true);
     try {
-      await ref.read(supportGatewayProvider).close(
-        baseUrl: credentials.baseUrl,
-        apiKey: credentials.apiKey,
-        ticketId: widget.ticket.id,
-      );
+      await ref
+          .read(supportGatewayProvider)
+          .close(
+            baseUrl: credentials.baseUrl,
+            apiKey: credentials.apiKey,
+            ticketId: widget.ticket.id,
+          );
       await _load();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(e is PaystackException ? e.message : 'Could not close the ticket.'),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            e is PaystackException ? e.message : 'Could not close the ticket.',
+          ),
+        ),
+      );
     } finally {
       if (mounted) setState(() => _closing = false);
     }
@@ -500,86 +621,125 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
               icon: const Icon(Icons.task_alt),
               label: const Text('Close'),
             ),
-          IconButton(tooltip: 'Refresh conversation',
-              onPressed: _load, icon: const Icon(Icons.refresh)),
+          IconButton(
+            tooltip: 'Refresh conversation',
+            onPressed: _load,
+            icon: const Icon(Icons.refresh),
+          ),
         ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? Center(child: Text(_error!))
-              : Column(children: [
-                  Expanded(
-                    child: ListView.builder(
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-                      itemCount: thread!.messages.length + 1,
-                      itemBuilder: (context, index) {
-                        if (index == 0) {
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 20),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(thread.ticket.subject,
-                                    style: Theme.of(context).textTheme.titleLarge),
-                                const SizedBox(height: 8),
-                                Chip(
-                                  avatar: Icon(thread.ticket.status == 'pending'
+          ? Center(child: Text(_error!))
+          : Column(
+              children: [
+                Expanded(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                    itemCount: thread!.messages.length + 1,
+                    itemBuilder: (context, index) {
+                      if (index == 0) {
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 20),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                thread.ticket.subject,
+                                style: Theme.of(context).textTheme.titleLarge,
+                              ),
+                              const SizedBox(height: 8),
+                              Chip(
+                                avatar: Icon(
+                                  thread.ticket.status == 'pending'
                                       ? Icons.mark_chat_unread_outlined
                                       : thread.ticket.status == 'closed'
-                                          ? Icons.task_alt : Icons.schedule_outlined,
-                                      size: 18),
-                                  label: Text(_ticketStatusLabel(thread.ticket.status)),
+                                      ? Icons.task_alt
+                                      : Icons.schedule_outlined,
+                                  size: 18,
                                 ),
-                                if (thread.ticket.customerEmail?.isNotEmpty == true)
-                                  Text('Email updates: ${thread.ticket.customerEmail}',
-                                      style: Theme.of(context).textTheme.bodySmall),
-                              ],
-                            ),
-                          );
-                        }
-                        final message = thread.messages[index - 1];
-                        final support = message.sender == 'support';
-                        final scheme = Theme.of(context).colorScheme;
-                        return Align(
-                          alignment: support ? Alignment.centerLeft : Alignment.centerRight,
-                          child: Card(
-                            color: support ? scheme.secondaryContainer : scheme.primaryContainer,
-                            child: ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 520),
-                              child: Padding(
-                                padding: const EdgeInsets.all(12),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      support ? 'NexaPOS Support' : 'Your shop',
-                                      style: Theme.of(context).textTheme.labelMedium
-                                          ?.copyWith(fontWeight: FontWeight.w700),
+                                label: Text(
+                                  _ticketStatusLabel(thread.ticket.status),
+                                ),
+                              ),
+                              if (thread.ticket.customerEmail?.isNotEmpty ==
+                                  true)
+                                Text(
+                                  'Email updates: ${thread.ticket.customerEmail}',
+                                  style: Theme.of(context).textTheme.bodySmall,
+                                ),
+                            ],
+                          ),
+                        );
+                      }
+                      final message = thread.messages[index - 1];
+                      final support = message.sender == 'support';
+                      final scheme = Theme.of(context).colorScheme;
+                      return Align(
+                        alignment: support
+                            ? Alignment.centerLeft
+                            : Alignment.centerRight,
+                        child: Card(
+                          color: support
+                              ? scheme.surfaceContainerHighest
+                              : scheme.brightness == Brightness.dark
+                                  ? const Color(0xFF174A7C)
+                                  : const Color(0xFFD7E9FF),
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 520),
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    support
+                                        ? 'NexaPOS Support'
+                                        : (_shopName?.isNotEmpty == true
+                                              ? _shopName!
+                                              : 'Your shop'),
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelMedium
+                                        ?.copyWith(fontWeight: FontWeight.w700),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  if (message.body.isNotEmpty)
+                                    SelectableText(message.body),
+                                  for (final id in message.attachments)
+                                    SupportPhoto(
+                                      id: id,
+                                      credentials: _credentials!,
                                     ),
-                                    const SizedBox(height: 4),
-                                    if (message.body.isNotEmpty) SelectableText(message.body),
-                                    for (final id in message.attachments)
-                                      SupportPhoto(id: id, credentials: _credentials!),
-                                    const SizedBox(height: 6),
-                                    Text(message.createdAt,
-                                        style: Theme.of(context).textTheme.bodySmall),
-                                  ],
-                                ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    message.createdAt,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall,
+                                  ),
+                                ],
                               ),
                             ),
                           ),
-                        );
-                      },
-                    ),
+                        ),
+                      );
+                    },
                   ),
-                  SupportPhotoPicker(key: _photoPicker, enabled: !_sending && !_closing,
-                      onChanged: (photos) => _photos = photos),
-                  SafeArea(
-                    top: false,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                      child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                ),
+                SupportPhotoPicker(
+                  key: _photoPicker,
+                  enabled: !_sending && !_closing,
+                  onChanged: (photos) => _photos = photos,
+                ),
+                SafeArea(
+                  top: false,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
                         Expanded(
                           child: TextField(
                             controller: _reply,
@@ -603,14 +763,18 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
                               ? const SizedBox(
                                   width: 18,
                                   height: 18,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
                                 )
                               : const Icon(Icons.send),
                         ),
-                      ]),
+                      ],
                     ),
                   ),
-                ]),
+                ),
+              ],
+            ),
     );
   }
 }
