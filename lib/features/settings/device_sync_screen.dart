@@ -8,7 +8,7 @@ import '../../core/is_web.dart';
 import '../../core/providers.dart';
 import '../../data/payments/paystack_gateway.dart' show PaystackException;
 import '../../data/payments/platform_http_client.dart'
-    show nexaposPlatformBaseUrl;
+    show PaystackOfflineException, nexaposPlatformBaseUrl;
 import '../../data/payments/platform_onboarding_gateway.dart';
 import '../../data/sync/lan_discovery.dart';
 import '../../domain/entities/paystack_credentials.dart';
@@ -136,6 +136,15 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  String _onboardingError(Object error) {
+    if (error is PaystackOfflineException) {
+      return error.timedOut
+          ? 'The shop server did not answer in time. Check the connection and try again.'
+          : 'Could not reach the shop server. Check this device\'s connection and try again.';
+    }
+    return error is PaystackException ? error.message : '$error';
   }
 
   // --- First-time registration (not yet connected to any server) ---
@@ -359,7 +368,7 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
         } catch (_) {}
       }
       ref.invalidate(currentPaymentCredentialsProvider);
-      _showMessage(e is PaystackException ? e.message : '$e');
+      _showMessage(_onboardingError(e));
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -405,7 +414,7 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
         );
       }
     } catch (e) {
-      _showMessage(e is PaystackException ? e.message : '$e');
+      _showMessage(_onboardingError(e));
     } finally {
       if (mounted) setState(() => _generating = false);
     }
@@ -476,7 +485,7 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
           );
       if (changed) await _afterShopChange();
     } catch (e) {
-      _showMessage(e is PaystackException ? e.message : '$e');
+      _showMessage(_onboardingError(e));
     } finally {
       if (mounted) setState(() => _submittingOther = false);
     }
@@ -572,7 +581,7 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
           );
       if (changed) await _afterShopChange();
     } catch (e) {
-      _showMessage(e is PaystackException ? e.message : '$e');
+      _showMessage(_onboardingError(e));
     } finally {
       if (mounted) setState(() => _leaving = false);
     }
