@@ -75,8 +75,9 @@ class SupportPhotoPickerState extends State<SupportPhotoPicker> {
         );
       }
       if (!mounted) return;
-      if (_photos.length + images.length > 4)
+      if (_photos.length + images.length > 4) {
         throw Exception('Attach up to 4 photos per message.');
+      }
       if (images.any(
         (image) => image.isEmpty || image.length > 2 * 1024 * 1024,
       )) {
@@ -214,8 +215,9 @@ class _SupportPhotoState extends ConsumerState<SupportPhoto> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.id != widget.id ||
         oldWidget.credentials.apiKey != widget.credentials.apiKey ||
-        oldWidget.credentials.baseUrl != widget.credentials.baseUrl)
+        oldWidget.credentials.baseUrl != widget.credentials.baseUrl) {
       _bytes = _load();
+    }
   }
 
   @override
@@ -232,12 +234,13 @@ class _SupportPhotoState extends ConsumerState<SupportPhoto> {
           );
         }
         final bytes = snapshot.data;
-        if (bytes == null)
+        if (bytes == null) {
           return const SizedBox(
             height: 100,
             width: 160,
             child: Center(child: CircularProgressIndicator()),
           );
+        }
         return InkWell(
           onTap: () => showDialog<void>(
             context: context,

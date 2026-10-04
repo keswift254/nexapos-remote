@@ -35,10 +35,11 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
   }
 
   Future<void> _load() async {
-    if (mounted)
+    if (mounted) {
       setState(() {
         _error = null;
       });
+    }
     try {
       final credentials = await ref
           .read(paystackCredentialsServiceProvider)
@@ -530,8 +531,9 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
     if (credentials == null ||
         (message.isEmpty && _photos.isEmpty) ||
         _sending ||
-        _closing)
+        _closing) {
       return;
+    }
     setState(() => _sending = true);
     try {
       await ref
@@ -684,8 +686,8 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
                           color: support
                               ? scheme.surfaceContainerHighest
                               : scheme.brightness == Brightness.dark
-                                  ? const Color(0xFF174A7C)
-                                  : const Color(0xFFD7E9FF),
+                              ? const Color(0xFF174A7C)
+                              : const Color(0xFFD7E9FF),
                           child: ConstrainedBox(
                             constraints: const BoxConstraints(maxWidth: 520),
                             child: Padding(
