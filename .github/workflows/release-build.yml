@@ -8,6 +8,7 @@ on:
       - release-1.0.57-lan-support-payments
       - fix-support-email-dashboard-hello
       - nexapos-1.0.12-safety
+      - improve-support-app
     paths:
       - 'lib/**'
       - 'android/**'
@@ -40,6 +41,32 @@ jobs:
           test "$RELEASE" != "$VERSION"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "build=$BUILD" >> "$GITHUB_OUTPUT"
+
+  web-release:
+    needs: metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.1"
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter build web --release --no-pub --base-href /app/
+      - run: python3 tool/stamp_web_offline_cache.py build/web
+      - name: Package NameCrane web build
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq '<base href="/app/">' build/web/index.html
+          grep -Fq '"version":"${{ needs.metadata.outputs.version }}"' build/web/version.json
+          (cd build/web && zip -qr "$RUNNER_TEMP/NexaPOS-Web-${{ needs.metadata.outputs.version }}-NameCrane.zip" .)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NexaPOS-Web-${{ needs.metadata.outputs.version }}
+          path: ${{ runner.temp }}/NexaPOS-Web-${{ needs.metadata.outputs.version }}-NameCrane.zip
+          if-no-files-found: error
 
   android-release:
     needs: metadata
@@ -352,12 +379,13 @@ jobs:
           if-no-files-found: error
 
   publish-github-release:
-    if: github.ref == 'refs/heads/nexapos-1.0.12-safety' || github.ref == 'refs/heads/release-1.0.57-lan-support-payments'
+    if: github.ref == 'refs/heads/nexapos-1.0.12-safety' || github.ref == 'refs/heads/release-1.0.57-lan-support-payments' || github.ref == 'refs/heads/improve-support-app'
     needs:
       - metadata
       - android-release
       - windows-release
       - windows-legacy-release
+      - web-release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -377,6 +405,11 @@ jobs:
           name: NexaPOS-Windows7-8-${{ needs.metadata.outputs.version }}
           path: artifacts/windows-legacy
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: NexaPOS-Web-${{ needs.metadata.outputs.version }}
+          path: artifacts/web
+
       - name: Prepare release assets
         shell: bash
         run: |
@@ -386,7 +419,8 @@ jobs:
           cp artifacts/android/app-release.apk "release/NexaPOS-$VERSION.apk"
           cp "artifacts/windows/NexaPOS-Setup-$VERSION-native.exe" "release/NexaPOS-Setup-$VERSION.exe"
           cp "artifacts/windows-legacy/NexaPOS-Setup-Windows7-8-$VERSION-native.exe" "release/NexaPOS-Setup-Windows7-8-$VERSION.exe"
-          sha256sum "release/NexaPOS-$VERSION.apk" "release/NexaPOS-Setup-$VERSION.exe" "release/NexaPOS-Setup-Windows7-8-$VERSION.exe" > "release/SHA256SUMS-$VERSION.txt"
+          cp "artifacts/web/NexaPOS-Web-$VERSION-NameCrane.zip" "release/NexaPOS-Web-$VERSION-NameCrane.zip"
+          sha256sum "release/NexaPOS-$VERSION.apk" "release/NexaPOS-Setup-$VERSION.exe" "release/NexaPOS-Setup-Windows7-8-$VERSION.exe" "release/NexaPOS-Web-$VERSION-NameCrane.zip" > "release/SHA256SUMS-$VERSION.txt"
 
       - name: Publish GitHub release
         shell: bash
