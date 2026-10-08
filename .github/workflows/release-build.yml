@@ -9,6 +9,7 @@ on:
       - fix-support-email-dashboard-hello
       - nexapos-1.0.12-safety
       - improve-support-app
+      - hotfix-activation-reporting-1.0.62
     paths:
       - 'lib/**'
       - 'android/**'
@@ -379,7 +380,7 @@ jobs:
           if-no-files-found: error
 
   publish-github-release:
-    if: github.ref == 'refs/heads/nexapos-1.0.12-safety' || github.ref == 'refs/heads/release-1.0.57-lan-support-payments' || github.ref == 'refs/heads/improve-support-app'
+    if: github.ref == 'refs/heads/nexapos-1.0.12-safety' || github.ref == 'refs/heads/release-1.0.57-lan-support-payments' || github.ref == 'refs/heads/improve-support-app' || github.ref == 'refs/heads/hotfix-activation-reporting-1.0.62'
     needs:
       - metadata
       - android-release

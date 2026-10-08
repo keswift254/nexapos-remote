@@ -254,19 +254,41 @@ class _ActivationScreenState extends ConsumerState<ActivationScreen> {
       _error = null;
     });
 
-    final result = await ref
-        .read(licenseServiceProvider)
-        .activate(_codeController.text);
-    result.when(
-      ok: (_) => unawaited(_registerPrimaryDevice()),
-      failure: (message) => setState(() {
+    try {
+      final result = await ref
+          .read(licenseServiceProvider)
+          .activate(_codeController.text)
+          .timeout(const Duration(seconds: 45));
+      if (!mounted) return;
+      result.when(
+        ok: (_) => unawaited(_registerPrimaryDevice()),
+        failure: (message) => setState(() {
+          _submitting = false;
+          _error = message.contains('another device')
+              ? '$message\n\nReinstalled or changed phone? Tap "Already paid? '
+                    'Restore my license" above to move it to this device.'
+              : message;
+        }),
+      );
+    } on TimeoutException {
+      if (!mounted) return;
+      setState(() {
         _submitting = false;
-        _error = message.contains('another device')
-            ? '$message\n\nReinstalled or changed phone? Tap "Already paid? '
-                  'Restore my license" above to move it to this device.'
-            : message;
-      }),
-    );
+        _error =
+            'Activation is taking too long on this PC. Close and reopen '
+            'NexaPOS once, then check its date, time, and internet connection. '
+            'Keep NexaPOS installed and contact support if this continues.';
+      });
+    } catch (error) {
+      debugPrint('Activation failed before completion: ${error.runtimeType}');
+      if (!mounted) return;
+      setState(() {
+        _submitting = false;
+        _error =
+            'Activation could not complete on this PC. Keep NexaPOS '
+            'installed and contact support for help.';
+      });
+    }
   }
 
   Future<void> _restore() async {
@@ -282,19 +304,19 @@ class _ActivationScreenState extends ConsumerState<ActivationScreen> {
       final credentials = await credentialsService.load();
       if (credentials.isConfigured) return;
       final registration = await onboarding.registerDevice(
-            baseUrl: nexaposPlatformBaseUrl,
-            deviceId: await syncMetadata.deviceId(),
-            deviceLabel: 'Primary device',
-            registrationSecret: await syncMetadata.registrationSecret(),
-          );
+        baseUrl: nexaposPlatformBaseUrl,
+        deviceId: await syncMetadata.deviceId(),
+        deviceLabel: 'Primary device',
+        registrationSecret: await syncMetadata.registrationSecret(),
+      );
       await credentialsService.save(
-            PaystackCredentials(
-              baseUrl: nexaposPlatformBaseUrl,
-              apiKey: registration.apiKey,
-              currency: 'KES',
-              defaultEmail: '',
-            ),
-          );
+        PaystackCredentials(
+          baseUrl: nexaposPlatformBaseUrl,
+          apiKey: registration.apiKey,
+          currency: 'KES',
+          defaultEmail: '',
+        ),
+      );
       await credentialsService.saveDeviceLabel('Primary device');
     } catch (_) {
       // Setup remains usable offline; Device Sync can retry registration later.
