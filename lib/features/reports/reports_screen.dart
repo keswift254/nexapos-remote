@@ -455,6 +455,17 @@ class _ReportPdfPreviewScreenState extends State<ReportPdfPreviewScreen> {
         .showSnackBar(SnackBar(content: Text('Saved to ${uri.toFilePath()}')));
   }
 
+  Future<void> _share(BuildContext context) async {
+    try {
+      await Printing.sharePdf(bytes: widget.bytes, filename: widget.fileName);
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open sharing for this PDF.')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -479,6 +490,11 @@ class _ReportPdfPreviewScreenState extends State<ReportPdfPreviewScreen> {
             onPressed: () => _save(context),
             icon: const Icon(Icons.save_outlined),
             tooltip: 'Save PDF',
+          ),
+          IconButton(
+            onPressed: () => _share(context),
+            icon: const Icon(Icons.share_outlined),
+            tooltip: 'Share PDF',
           ),
         ],
       ),
