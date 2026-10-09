@@ -11,6 +11,7 @@ on:
       - improve-support-app
       - hotfix-activation-reporting-1.0.62
       - release-activation-share-1.0.63
+      - release-activation-share-1.0.64
     paths:
       - 'lib/**'
       - 'android/**'
@@ -381,7 +382,7 @@ jobs:
           if-no-files-found: error
 
   publish-github-release:
-    if: github.ref == 'refs/heads/nexapos-1.0.12-safety' || github.ref == 'refs/heads/release-1.0.57-lan-support-payments' || github.ref == 'refs/heads/improve-support-app' || github.ref == 'refs/heads/hotfix-activation-reporting-1.0.62' || github.ref == 'refs/heads/release-activation-share-1.0.63'
+    if: github.ref == 'refs/heads/nexapos-1.0.12-safety' || github.ref == 'refs/heads/release-1.0.57-lan-support-payments' || github.ref == 'refs/heads/improve-support-app' || github.ref == 'refs/heads/hotfix-activation-reporting-1.0.62' || github.ref == 'refs/heads/release-activation-share-1.0.63' || github.ref == 'refs/heads/release-activation-share-1.0.64'
     needs:
       - metadata
       - android-release

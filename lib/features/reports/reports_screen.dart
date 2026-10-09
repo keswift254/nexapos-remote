@@ -1,12 +1,12 @@
-import 'dart:typed_data';
-
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../core/utils/money.dart';
 import '../../domain/entities/business_settings.dart';
@@ -457,11 +457,34 @@ class _ReportPdfPreviewScreenState extends State<ReportPdfPreviewScreen> {
 
   Future<void> _share(BuildContext context) async {
     try {
-      await Printing.sharePdf(bytes: widget.bytes, filename: widget.fileName);
+      final box = context.findRenderObject() as RenderBox?;
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [
+            XFile.fromData(
+              widget.bytes,
+              mimeType: 'application/pdf',
+              name: widget.fileName,
+            ),
+          ],
+          fileNameOverrides: [widget.fileName],
+          sharePositionOrigin: box == null
+              ? null
+              : box.localToGlobal(Offset.zero) & box.size,
+          // Keep unsupported browsers from silently downloading a PDF
+          // when the user asked to share it.
+          downloadFallbackEnabled: false,
+        ),
+      );
     } catch (_) {
       if (!context.mounted) return;
+      final message = kIsWeb
+          ? 'This browser cannot share PDF files directly. Save the PDF, then attach it in the app you choose.'
+          : defaultTargetPlatform == TargetPlatform.windows
+          ? 'This Windows version cannot share PDF files directly. Save the PDF, then attach it in the app you choose.'
+          : 'Could not open sharing for this PDF.';
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not open sharing for this PDF.')),
+        SnackBar(content: Text(message)),
       );
     }
   }
