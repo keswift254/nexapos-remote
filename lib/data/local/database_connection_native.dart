@@ -30,9 +30,9 @@ DatabaseConnection openConnection() {
   return DatabaseConnection.delayed(
     Future(() async {
       const storage = FlutterSecureStorage();
-      final key = await getOrCreateEncryptionKey(storage);
       final dir = await getApplicationDocumentsDirectory();
       final dbFile = File(p.join(dir.path, 'nexapos.sqlite'));
+      final key = await keyForDatabaseFile(storage, dbFile);
       await migrateToEncryptedIfNeeded(dbFile, key);
 
       return driftDatabase(
@@ -44,3 +44,10 @@ DatabaseConnection openConnection() {
     }),
   );
 }
+
+/// The key [dbFile] must be opened with. A key may only be CREATED when no
+/// encrypted database exists for it to open: a missing key beside an encrypted
+/// file means the key was lost, and a new one would silently orphan that data
+/// for good - so this throws [DatabaseKeyMissingException] instead.
+Future<String> keyForDatabaseFile(FlutterSecureStorage storage, File dbFile) async =>
+    getOrCreateEncryptionKey(storage, allowCreate: !await databaseFileIsEncrypted(dbFile));

@@ -63,3 +63,46 @@ Future<void> migrateToEncryptedIfNeeded(File dbFile, String key) async {
 
   await backup.delete();
 }
+
+/// True when [dbFile] exists and is NOT a plain SQLite file, i.e. it holds an
+/// encrypted database that only its own key can open. An empty or tiny file
+/// has nothing worth protecting and counts as not encrypted.
+Future<bool> databaseFileIsEncrypted(File dbFile) async {
+  if (!await dbFile.exists()) return false;
+  final raf = await dbFile.open();
+  try {
+    final header = await raf.read(16);
+    if (header.length < 16) return false;
+    return !String.fromCharCodes(header).startsWith('SQLite format 3');
+  } finally {
+    await raf.close();
+  }
+}
+
+enum DatabaseOpenResult {
+  /// The key opens the database.
+  opens,
+
+  /// SQLite reports "file is not a database" (code 26): wrong key, or damage.
+  notADatabase,
+
+  /// Some other condition (locked, unreadable...) - not evidence of a lost key.
+  unknown,
+}
+
+/// Opens [dbFile] with [key] and reads its schema, nothing else.
+DatabaseOpenResult checkDatabaseOpens(File dbFile, String key) {
+  Database? db;
+  try {
+    db = sqlite3.open(dbFile.path, mode: OpenMode.readWrite);
+    db.execute("PRAGMA key = '$key';");
+    db.select('SELECT count(*) FROM sqlite_master;');
+    return DatabaseOpenResult.opens;
+  } on SqliteException catch (error) {
+    final notADatabase =
+        error.resultCode == 26 || error.message.toLowerCase().contains('not a database');
+    return notADatabase ? DatabaseOpenResult.notADatabase : DatabaseOpenResult.unknown;
+  } finally {
+    db?.close();
+  }
+}
