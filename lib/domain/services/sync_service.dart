@@ -45,6 +45,38 @@ class _PendingChange {
   const _PendingChange(this.tableName, this.json);
 }
 
+/// Counts how much of a cycle's budget for isolating refused rows is left.
+class _Isolation {
+  _Isolation(this.requestsLeft);
+  int requestsLeft;
+  int quarantinedThisCycle = 0;
+}
+
+/// Rows of one table the shop server refused for the same reason.
+class QuarantineGroup {
+  final String tableName;
+  final String reason;
+  final int count;
+  const QuarantineGroup(this.tableName, this.reason, this.count);
+}
+
+/// How well this device's data is reaching the cloud.
+class SyncHealth {
+  final int pendingChanges;
+  final int quarantined;
+  final DateTime? lastSuccess;
+
+  /// When this device first checked: the reference for "no upload for a day"
+  /// on a device that has no recorded upload at all yet.
+  final DateTime baseline;
+  const SyncHealth({
+    required this.pendingChanges,
+    required this.quarantined,
+    required this.lastSuccess,
+    required this.baseline,
+  });
+}
+
 class LanSyncChange {
   final String sourceDeviceId;
   final String tableName;
@@ -374,6 +406,11 @@ class SyncService {
       }
       lastError = null;
       lastSuccess = DateTime.now();
+      try {
+        await _persistLastSuccess();
+      } on Object {
+        // Bookkeeping for the dashboard warning only - never fail a sync over it.
+      }
     } on SyncRequestAbandoned {
       // A change from another device on the LAN took priority. Not an error and
       // not "offline": the cycle just runs again on its next turn.
@@ -605,6 +642,188 @@ class SyncService {
   /// (e.g. a product); a per-table push loop could send them out of
   /// that order and violate the invariant every other device's pull
   /// relies on to never see a child before its parent.
+  /// How many extra requests one cycle may spend isolating rejected rows, and
+  /// how many rows in all may be set aside: a server that is refusing
+  /// EVERYTHING (its clock, a bad deploy) must not make the app quietly set
+  /// aside a whole shop's data one row at a time.
+  static const _isolationRequestsPerCycle = 120;
+  static const _quarantineCycleLimit = 25;
+  static const _quarantineTotalLimit = 500;
+
+  List<Map<String, dynamic>> _batchOf(List<_PendingChange> slice) => slice
+      .map(
+        (change) => {
+          'table_name': change.tableName,
+          'row_id': change.json['id'],
+          'local_rev': change.json['localRev'],
+          'updated_at': change.json['updatedAt'],
+          'payload': change.json,
+        },
+      )
+      .toList();
+
+  /// The server answers a batch all-or-nothing (one bad row rolls back the other
+  /// 199), and this device used to retry that same batch forever - so one row
+  /// the server refused kept every later row of the shop, thousands of sales,
+  /// off the cloud without a word. Now a refused batch is split until the
+  /// offending row is found; that row is set aside (and shown to the person),
+  /// and everything else goes through. Only a refusal that names a validation
+  /// reason counts: offline, 5xx and the server's generic "Could not record
+  /// changes." (which a momentary database hiccup also produces) are retried
+  /// as before and never cost a row its place.
+  Future<void> _pushResolving(
+    String baseUrl,
+    String apiKey,
+    List<_PendingChange> slice,
+    _Isolation isolation,
+  ) async {
+    try {
+      await _gateway.pushChanges(
+        baseUrl: baseUrl,
+        apiKey: apiKey,
+        changes: _batchOf(slice),
+      );
+      await _syncMeta.setLastPushedLocalRev(slice.last.json['localRev'] as int);
+    } on PaystackException catch (error) {
+      if (!_isValidationRefusal(error)) rethrow;
+      if (slice.length == 1) {
+        if (!await _canQuarantineMore(isolation)) rethrow;
+        await _quarantine(slice.single, error.message);
+        isolation.quarantinedThisCycle++;
+        await _syncMeta.setLastPushedLocalRev(
+          slice.single.json['localRev'] as int,
+        );
+        return;
+      }
+      if (isolation.requestsLeft <= 0) rethrow;
+      isolation.requestsLeft--;
+      final middle = slice.length ~/ 2;
+      await _pushResolving(baseUrl, apiKey, slice.sublist(0, middle), isolation);
+      await _pushResolving(baseUrl, apiKey, slice.sublist(middle), isolation);
+    }
+  }
+
+  static const _refusalPrefix = 'Could not record changes: ';
+
+  static bool _isValidationRefusal(PaystackException error) =>
+      error.statusCode == 422 && error.message.startsWith(_refusalPrefix);
+
+  Future<bool> _canQuarantineMore(_Isolation isolation) async {
+    if (isolation.quarantinedThisCycle >= _quarantineCycleLimit) return false;
+    return await quarantinedCount() < _quarantineTotalLimit;
+  }
+
+  Future<void> _ensureQuarantineTable() => _db.customStatement(
+    'CREATE TABLE IF NOT EXISTS local_sync_quarantine ('
+    'table_name TEXT NOT NULL, row_id TEXT NOT NULL, local_rev INTEGER NOT NULL, '
+    'reason TEXT NOT NULL, quarantined_at TEXT NOT NULL, '
+    'PRIMARY KEY(table_name, row_id, local_rev))',
+  );
+
+  Future<void> _quarantine(_PendingChange change, String reason) async {
+    await _ensureQuarantineTable();
+    final cleaned = reason.startsWith(_refusalPrefix)
+        ? reason.substring(_refusalPrefix.length)
+        : reason;
+    await _db.customStatement(
+      'INSERT OR REPLACE INTO local_sync_quarantine'
+      '(table_name, row_id, local_rev, reason, quarantined_at) VALUES (?, ?, ?, ?, ?)',
+      [
+        change.tableName,
+        change.json['id'] as String,
+        change.json['localRev'] as int,
+        cleaned,
+        DateTime.now().toUtc().toIso8601String(),
+      ],
+    );
+  }
+
+  /// Rows the shop server refused for a reason of their own, set aside here so
+  /// the rest could be uploaded. They are still on this device and in its backups.
+  Future<int> quarantinedCount() async {
+    await _ensureQuarantineTable();
+    final row = await _db
+        .customSelect('SELECT COUNT(*) AS n FROM local_sync_quarantine')
+        .getSingle();
+    return row.read<int>('n');
+  }
+
+  /// The set-aside rows grouped by table and reason, biggest group first.
+  Future<List<QuarantineGroup>> quarantineGroups() async {
+    await _ensureQuarantineTable();
+    final rows = await _db
+        .customSelect(
+          'SELECT table_name, reason, COUNT(*) AS n FROM local_sync_quarantine '
+          'GROUP BY table_name, reason ORDER BY n DESC, table_name',
+        )
+        .get();
+    return [
+      for (final row in rows)
+        QuarantineGroup(
+          row.read<String>('table_name'),
+          row.read<String>('reason'),
+          row.read<int>('n'),
+        ),
+    ];
+  }
+
+  DateTime? _lastSuccessWrittenAt;
+
+  Future<void> _persistLastSuccess() async {
+    final now = DateTime.now().toUtc();
+    final written = _lastSuccessWrittenAt;
+    if (written != null && now.difference(written) < const Duration(minutes: 5)) {
+      return;
+    }
+    _lastSuccessWrittenAt = now;
+    await _db.customStatement(
+      "INSERT OR REPLACE INTO local_safety_state(id,value) VALUES('last_sync_success',?)",
+      [now.toIso8601String()],
+    );
+  }
+
+  Future<DateTime?> _storedTime(String id) async {
+    final row = await _db
+        .customSelect(
+          'SELECT value FROM local_safety_state WHERE id = ?',
+          variables: [Variable<String>(id)],
+        )
+        .getSingleOrNull();
+    return row == null ? null : DateTime.tryParse(row.read<String>('value'));
+  }
+
+  /// What the dashboard needs to tell a person their data is not reaching the
+  /// cloud: rows waiting to upload, rows set aside, and when an upload last worked.
+  Future<SyncHealth> health() async {
+    final deviceId = await _syncMeta.deviceId();
+    final since = await _syncMeta.lastPushedLocalRev();
+    var pending = 0;
+    for (final adapter in syncTableAdapters.values) {
+      final row = await _db
+          .customSelect(
+            'SELECT COUNT(*) AS n FROM "${adapter.tableName}" '
+            'WHERE created_by_device_id = ? AND local_rev > ?',
+            variables: [Variable<String>(deviceId), Variable<int>(since)],
+          )
+          .getSingle();
+      pending += row.read<int>('n');
+    }
+    var baseline = await _storedTime('sync_health_baseline');
+    if (baseline == null) {
+      baseline = DateTime.now().toUtc();
+      await _db.customStatement(
+        "INSERT OR REPLACE INTO local_safety_state(id,value) VALUES('sync_health_baseline',?)",
+        [baseline.toIso8601String()],
+      );
+    }
+    return SyncHealth(
+      pendingChanges: pending,
+      quarantined: await quarantinedCount(),
+      lastSuccess: lastSuccess ?? await _storedTime('last_sync_success'),
+      baseline: baseline,
+    );
+  }
+
   Future<void> pushLocalChanges(String baseUrl, String apiKey) async {
     final deviceId = await _syncMeta.deviceId();
     final sinceRev = await _syncMeta.lastPushedLocalRev();
@@ -626,27 +845,15 @@ class SyncService {
     // cursor after each acknowledged batch: if batch N+1 fails, the
     // next cycle safely resumes there instead of retransmitting every
     // earlier row or skipping anything that was not accepted.
+    final isolation = _Isolation(_isolationRequestsPerCycle);
     for (var offset = 0; offset < pending.length; offset += _pushBatchSize) {
       final end = (offset + _pushBatchSize).clamp(0, pending.length);
-      final slice = pending.sublist(offset, end);
-      final batch = slice
-          .map(
-            (change) => {
-              'table_name': change.tableName,
-              'row_id': change.json['id'],
-              'local_rev': change.json['localRev'],
-              'updated_at': change.json['updatedAt'],
-              'payload': change.json,
-            },
-          )
-          .toList();
-
-      await _gateway.pushChanges(
-        baseUrl: baseUrl,
-        apiKey: apiKey,
-        changes: batch,
+      await _pushResolving(
+        baseUrl,
+        apiKey,
+        pending.sublist(offset, end),
+        isolation,
       );
-      await _syncMeta.setLastPushedLocalRev(slice.last.json['localRev'] as int);
     }
 
     // Best-effort, deliberately not awaited into a rethrow: this device's

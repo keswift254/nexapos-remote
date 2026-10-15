@@ -372,6 +372,8 @@ class AppDatabase extends _$AppDatabase {
       await delete(users).go();
       await delete(categories).go();
       await delete(businessSettings).go();
+      // Rows set aside by an upload that no longer exist here.
+      await customStatement('DROP TABLE IF EXISTS local_sync_quarantine');
       await _seedDefaultBusinessSettings();
     });
   }

@@ -17,6 +17,48 @@ import 'sync_service.dart';
 const automaticBackupInterval = Duration(hours: 6);
 const automaticBackupRetention = 7;
 
+/// Beyond the newest [automaticBackupRetention], one backup per day is kept for
+/// this many days. Seven six-hour backups only reach back about a day and a
+/// half, so a problem noticed after a weekend would already have rotated every
+/// good backup away.
+const automaticBackupDailyKeepDays = 14;
+
+final _backupName = RegExp(r'^NexaPOS-auto-(\d+)\.nexabackup$');
+
+/// Which of [files] the rotation may delete: everything except the newest
+/// [automaticBackupRetention], the newest backup of each of the last
+/// [automaticBackupDailyKeepDays] days, and any file whose name is not one of
+/// ours (never deleted).
+List<File> backupFilesToDelete(List<File> files, DateTime now) {
+  final dated = <({File file, DateTime time})>[];
+  final keep = <String>{};
+  for (final file in files) {
+    final match = _backupName.firstMatch(p.basename(file.path));
+    if (match == null) {
+      keep.add(file.path);
+      continue;
+    }
+    final millis = int.tryParse(match.group(1)!);
+    if (millis == null) {
+      keep.add(file.path);
+      continue;
+    }
+    dated.add((file: file, time: DateTime.fromMillisecondsSinceEpoch(millis, isUtc: true)));
+  }
+  dated.sort((a, b) => b.time.compareTo(a.time));
+  for (final entry in dated.take(automaticBackupRetention)) {
+    keep.add(entry.file.path);
+  }
+  final days = <String>{};
+  final cutoff = now.subtract(const Duration(days: automaticBackupDailyKeepDays));
+  for (final entry in dated) {
+    if (entry.time.isBefore(cutoff)) continue;
+    final day = '${entry.time.year}-${entry.time.month}-${entry.time.day}';
+    if (days.add(day)) keep.add(entry.file.path);
+  }
+  return [for (final file in files) if (!keep.contains(file.path)) file];
+}
+
 final automaticBackupServiceProvider = Provider<AutomaticBackupService>(
   (ref) => AutomaticBackupService(
     ref.watch(appDatabaseProvider),
@@ -118,10 +160,8 @@ class AutomaticBackupService {
   }
 
   Future<void> _rotate(Directory directory) async {
-    final files =
-        (await directory.list().where((e) => e is File).cast<File>().toList())
-          ..sort((a, b) => b.path.compareTo(a.path));
-    for (final file in files.skip(automaticBackupRetention)) {
+    final files = await directory.list().where((e) => e is File).cast<File>().toList();
+    for (final file in backupFilesToDelete(files, DateTime.now().toUtc())) {
       try {
         await file.delete();
       } on FileSystemException {
