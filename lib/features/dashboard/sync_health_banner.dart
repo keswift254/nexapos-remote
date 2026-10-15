@@ -74,7 +74,7 @@ class _SyncHealthBannerState extends ConsumerState<SyncHealthBanner> {
                       ),
                   ],
                   const SizedBox(height: 12),
-                  const Text('Nothing has been deleted. Tell NexaPOS support if this stays.'),
+                  const Text('Nothing has been deleted. If this is still here after a day, tell NexaPOS support.'),
                 ],
               );
             },
@@ -104,13 +104,17 @@ class _SyncHealthBannerState extends ConsumerState<SyncHealthBanner> {
   Widget build(BuildContext context) {
     final notice = ref.watch(syncNoticeProvider).asData?.value;
     if (notice == null) return const SizedBox.shrink();
+    // Data that is not reaching the cloud at all is urgent; a few records the
+    // server has not accepted yet are retried by the app and only need a calm note.
+    final urgent = notice.kind == SyncNoticeKind.notUploading;
+    final colors = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.only(top: 12),
       child: Card(
         key: const Key('sync-health-banner'),
-        color: Theme.of(context).colorScheme.errorContainer,
+        color: urgent ? colors.errorContainer : colors.secondaryContainer,
         child: ListTile(
-          leading: Icon(notice.kind == SyncNoticeKind.notUploading ? Icons.cloud_off : Icons.error_outline),
+          leading: Icon(urgent ? Icons.cloud_off : Icons.schedule),
           title: Text(notice.title),
           subtitle: Text(notice.message),
           onTap: () => _showDetails(context, notice),

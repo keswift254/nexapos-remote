@@ -42,12 +42,14 @@ SyncNotice? syncNoticeFor(
   }
   if (health.quarantined > 0) {
     final count = health.quarantined;
+    final one = count == 1;
     return SyncNotice(
       SyncNoticeKind.rowsRefused,
-      '$count record${count == 1 ? '' : 's'} could not be uploaded',
-      'The shop server refused ${count == 1 ? 'it' : 'them'}. '
-          '${count == 1 ? 'It is' : 'They are'} still on this device and in its backups; '
-          'everything else is uploading normally. Tap for details.',
+      '$count record${one ? '' : 's'} still to be uploaded',
+      'The shop server has not accepted ${one ? 'it' : 'them'} yet. '
+          '${one ? 'It is' : 'They are'} safe on this device and in its backups, '
+          'and NexaPOS tries again every few hours. '
+          'Everything else is uploading normally. Tap for details.',
     );
   }
   return null;

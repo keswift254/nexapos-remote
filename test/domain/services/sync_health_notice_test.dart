@@ -48,13 +48,17 @@ void main() {
   test('refused rows are reported even while uploads are working', () {
     final notice = syncNoticeFor(health(quarantined: 3, last: now.subtract(const Duration(minutes: 2))), now)!;
     expect(notice.kind, SyncNoticeKind.rowsRefused);
-    expect(notice.title, '3 records could not be uploaded');
-    expect(notice.message, contains('still on this device'));
+    expect(notice.title, '3 records still to be uploaded');
+    expect(notice.message, contains('has not accepted them yet'));
+    expect(notice.message, contains('safe on this device'));
+    expect(notice.message, contains('tries again every few hours'));
+    expect(notice.message, isNot(contains('refused')), reason: 'calm wording, nothing here is lost');
   });
 
   test('a single refused row is worded in the singular', () {
     final notice = syncNoticeFor(health(quarantined: 1, last: now), now)!;
-    expect(notice.title, '1 record could not be uploaded');
+    expect(notice.title, '1 record still to be uploaded');
+    expect(notice.message, contains('has not accepted it yet. It is safe'));
   });
 
   test('not uploading at all outranks a few refused rows', () {

@@ -235,6 +235,172 @@ void main() {
     expect(await server.service.quarantinedCount(), 0);
   });
 
+  group('set-aside rows are tried again', () {
+    // The wait before a set-aside row is asked about again is hours; tests make
+    // the rows "old" instead of waiting.
+    Future<void> age() => db.customStatement(
+      "UPDATE local_sync_quarantine SET quarantined_at = '2000-01-01T00:00:00.000Z'",
+    );
+
+    test('once the server accepts it, the row is sent, the list empties and the cursor stays put', () async {
+      final ids = await makeCategories(8);
+      final poison = {ids[3]};
+      final server = build(poison);
+      await server.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+      expect(await server.service.quarantinedCount(), 1);
+      final cursor = await syncMeta.lastPushedLocalRev();
+
+      poison.clear();
+      await age();
+      server.requests.clear();
+      await server.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+
+      expect(server.requests, [
+        [ids[3]],
+      ], reason: 'exactly the one set-aside row, nothing else re-sent');
+      expect(server.accepted.contains(ids[3]), isTrue);
+      expect(await server.service.quarantinedCount(), 0);
+      expect(await syncMeta.lastPushedLocalRev(), cursor, reason: 'an older row must never pull the cursor back');
+    });
+
+    test('not before the wait is over - a refusal a moment ago is not asked about again', () async {
+      final ids = await makeCategories(6);
+      final poison = {ids[2]};
+      final server = build(poison);
+      await server.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+
+      poison.clear();
+      server.requests.clear();
+      await server.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+
+      expect(server.requests, isEmpty);
+      expect(await server.service.quarantinedCount(), 1);
+    });
+
+    test('rows set aside by an older app version (no recent attempt) are retried on the first cycle', () async {
+      final ids = await makeCategories(5);
+      final poison = {ids[1]};
+      final server = build(poison);
+      await server.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+      await age(); // what 1.0.65 left behind: set aside hours ago
+      poison.clear();
+
+      await server.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+
+      expect(await server.service.quarantinedCount(), 0);
+    });
+
+    test('a row the server still refuses stays listed, with a fresh wait, and costs one request', () async {
+      final ids = await makeCategories(6);
+      final server = build({ids[4]});
+      await server.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+      await age();
+      server.requests.clear();
+
+      await server.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+      expect(server.requests, [
+        [ids[4]],
+      ]);
+      expect(await server.service.quarantinedCount(), 1);
+
+      server.requests.clear();
+      await server.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+      expect(server.requests, isEmpty, reason: 'the wait started over');
+    });
+
+    test('some accepted, some still refused: only the accepted ones leave the list', () async {
+      final ids = await makeCategories(10);
+      final poison = {ids[1], ids[5], ids[8]};
+      final server = build(poison);
+      await server.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+      expect(await server.service.quarantinedCount(), 3);
+
+      poison
+        ..clear()
+        ..add(ids[5]);
+      await age();
+      await server.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+
+      expect(await server.service.quarantinedCount(), 1);
+      expect((await server.service.quarantineGroups()).single.count, 1);
+      expect(server.accepted.containsAll({ids[1], ids[8]}), isTrue);
+      expect(server.accepted.contains(ids[5]), isFalse);
+    });
+
+    test('a row edited since is dropped from the list - its newer revision uploads by itself', () async {
+      final ids = await makeCategories(5);
+      final poison = {ids[2]};
+      final server = build(poison);
+      await server.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+      final repository = CategoryRepositoryImpl(db, db.categoriesDao, syncMeta, const SystemClock(), UuidIdGenerator());
+      final row = (await db.select(db.categories).get()).firstWhere((c) => c.id == ids[2]);
+      await repository.update(Category(id: row.id, name: 'Renamed', status: 'active'));
+
+      poison.clear();
+      await age();
+      server.requests.clear();
+      await server.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+
+      expect(server.requests, [
+        [ids[2]],
+      ], reason: 'one request: the edited row, sent as an ordinary new change, not a second time as a retry');
+      expect(await server.service.quarantinedCount(), 0);
+    });
+
+    test('an entry for a table this app does not know is dropped, not retried forever', () async {
+      await makeCategories(2);
+      final server = build({});
+      await server.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+      await db.customStatement(
+        "INSERT INTO local_sync_quarantine(table_name,row_id,local_rev,reason,quarantined_at) "
+        "VALUES('no_such_table','x',1,'old','2000-01-01T00:00:00.000Z')",
+      );
+      expect(await server.service.quarantinedCount(), 1);
+      server.requests.clear();
+
+      await server.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+
+      expect(await server.service.quarantinedCount(), 0);
+      expect(server.requests, isEmpty);
+    });
+
+    test('losing the connection during a retry neither fails the upload nor loses the row', () async {
+      final ids = await makeCategories(5);
+      final first = build({ids[3]});
+      await first.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+      await age();
+
+      final offline = build({}, offline: true);
+      await offline.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+
+      expect(await offline.service.quarantinedCount(), 1);
+    });
+
+    test("a server error during a retry keeps the row and doesn't fail the upload", () async {
+      final ids = await makeCategories(5);
+      final first = build({ids[3]});
+      await first.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+      await age();
+
+      final broken = build({}, status: 500, message: 'Internal error');
+      await broken.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+
+      expect(await broken.service.quarantinedCount(), 1);
+    });
+
+    test('force retries rows that are not yet due', () async {
+      final ids = await makeCategories(5);
+      final poison = {ids[0]};
+      final server = build(poison);
+      await server.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+      poison.clear();
+
+      await server.service.retryQuarantined(configured.baseUrl, configured.apiKey, force: true);
+
+      expect(await server.service.quarantinedCount(), 0);
+    });
+  });
+
   group('health()', () {
     test('counts rows waiting to upload, then none after a successful upload', () async {
       await makeCategories(7);

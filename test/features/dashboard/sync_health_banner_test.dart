@@ -60,8 +60,8 @@ void main() {
   );
   const refused = SyncNotice(
     SyncNoticeKind.rowsRefused,
-    '3 records could not be uploaded',
-    'The shop server refused them. They are still on this device and in its backups; everything else is uploading normally. Tap for details.',
+    '3 records still to be uploaded',
+    'The shop server has not accepted them yet. They are safe on this device and in its backups, and NexaPOS tries again every few hours. Everything else is uploading normally. Tap for details.',
   );
 
   testWidgets('shows nothing while all is well', (tester) async {
@@ -80,6 +80,20 @@ void main() {
     expect(find.byKey(bannerKey), findsOneWidget);
     expect(find.text('Your data is not reaching the cloud'), findsOneWidget);
     expect(find.textContaining('3 days ago'), findsOneWidget);
+  });
+
+  testWidgets('a refused-rows note is calm, not an alarm', (tester) async {
+    await show(tester, notice: refused);
+    final scheme = Theme.of(tester.element(find.byKey(bannerKey))).colorScheme;
+    expect(find.byIcon(Icons.schedule), findsOneWidget);
+    expect(tester.widget<Card>(find.byKey(bannerKey)).color, scheme.secondaryContainer);
+  });
+
+  testWidgets('a stalled upload is the alarm', (tester) async {
+    await show(tester, notice: stale);
+    final scheme = Theme.of(tester.element(find.byKey(bannerKey))).colorScheme;
+    expect(find.byIcon(Icons.cloud_off), findsOneWidget);
+    expect(tester.widget<Card>(find.byKey(bannerKey)).color, scheme.errorContainer);
   });
 
   testWidgets('tapping a refused-rows warning lists what the server said, grouped', (tester) async {

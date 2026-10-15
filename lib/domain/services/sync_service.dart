@@ -767,6 +767,127 @@ class SyncService {
     ];
   }
 
+  /// How long a set-aside row waits before the server is asked about it again.
+  static const quarantineRetryAfter = Duration(hours: 3);
+  static const _quarantineRetryRows = 25;
+
+  Future<void> _forgetQuarantined(String tableName, String rowId, int localRev) =>
+      _db.customStatement(
+        'DELETE FROM local_sync_quarantine '
+        'WHERE table_name = ? AND row_id = ? AND local_rev = ?',
+        [tableName, rowId, localRev],
+      );
+
+  /// Gives rows the server once refused another chance. A refusal is often
+  /// temporary - the server was fixed, the device's clock was corrected - and a
+  /// set-aside row is otherwise never looked at again, so the dashboard warning
+  /// about it would stay for good. Each row is retried at most every
+  /// [quarantineRetryAfter]; accepted rows leave the set-aside list, rows still
+  /// refused stay in it. This never moves the upload cursor: these rows are older
+  /// than it. A row edited since (it then has a newer revision that uploads on
+  /// its own) or no longer present is simply dropped from the list.
+  Future<void> retryQuarantined(
+    String baseUrl,
+    String apiKey, {
+    bool force = false,
+  }) async {
+    await _ensureQuarantineTable();
+    final cutoff = force
+        ? '9999'
+        : DateTime.now().toUtc().subtract(quarantineRetryAfter).toIso8601String();
+    final due = await _db
+        .customSelect(
+          'SELECT table_name, row_id, local_rev FROM local_sync_quarantine '
+          'WHERE quarantined_at <= ? ORDER BY local_rev LIMIT ?',
+          variables: [
+            Variable<String>(cutoff),
+            Variable<int>(_quarantineRetryRows),
+          ],
+        )
+        .get();
+    if (due.isEmpty) return;
+
+    final deviceId = await _syncMeta.deviceId();
+    final byTable = <String, List<({String id, int rev})>>{};
+    for (final row in due) {
+      byTable
+          .putIfAbsent(row.read<String>('table_name'), () => [])
+          .add((id: row.read<String>('row_id'), rev: row.read<int>('local_rev')));
+    }
+    final retry = <_PendingChange>[];
+    for (final entry in byTable.entries) {
+      final adapter = syncTableAdapters[entry.key];
+      if (adapter == null) {
+        for (final item in entry.value) {
+          await _forgetQuarantined(entry.key, item.id, item.rev);
+        }
+        continue;
+      }
+      var lowest = entry.value.first.rev;
+      for (final item in entry.value) {
+        if (item.rev < lowest) lowest = item.rev;
+      }
+      final rows = await adapter.pendingRowsJson(_db, deviceId, lowest - 1);
+      final current = {
+        for (final json in rows) '${json['id']}@${json['localRev']}': json,
+      };
+      for (final item in entry.value) {
+        final json = current['${item.id}@${item.rev}'];
+        if (json == null) {
+          await _forgetQuarantined(entry.key, item.id, item.rev);
+        } else {
+          retry.add(_PendingChange(entry.key, json));
+        }
+      }
+    }
+    retry.sort(
+      (a, b) =>
+          (a.json['localRev'] as int).compareTo(b.json['localRev'] as int),
+    );
+    await _retryResolving(
+      baseUrl,
+      apiKey,
+      retry,
+      _Isolation(_isolationRequestsPerCycle),
+    );
+  }
+
+  Future<void> _retryResolving(
+    String baseUrl,
+    String apiKey,
+    List<_PendingChange> slice,
+    _Isolation isolation,
+  ) async {
+    if (slice.isEmpty) return;
+    try {
+      await _gateway.pushChanges(
+        baseUrl: baseUrl,
+        apiKey: apiKey,
+        changes: _batchOf(slice),
+      );
+      for (final change in slice) {
+        await _forgetQuarantined(
+          change.tableName,
+          change.json['id'] as String,
+          change.json['localRev'] as int,
+        );
+      }
+    } on PaystackException catch (error) {
+      if (!_isValidationRefusal(error)) rethrow;
+      if (slice.length == 1) {
+        // Still refused: keep it, with the server's latest words and a fresh
+        // clock so it is not asked about again for another few hours.
+        await _quarantine(slice.single, error.message);
+        return;
+      }
+      if (isolation.requestsLeft <= 0) return;
+      isolation.requestsLeft--;
+      final middle = slice.length ~/ 2;
+      await _retryResolving(baseUrl, apiKey, slice.sublist(0, middle), isolation);
+      await _retryResolving(baseUrl, apiKey, slice.sublist(middle), isolation);
+    }
+  }
+
   DateTime? _lastSuccessWrittenAt;
 
   Future<void> _persistLastSuccess() async {
@@ -855,6 +976,13 @@ class SyncService {
         isolation,
       );
     }
+
+    // Rows set aside earlier get another chance every few hours. Best-effort
+    // like the relay below: this device's new changes are already uploaded, so
+    // a failure here must not make the whole upload look failed.
+    try {
+      await retryQuarantined(baseUrl, apiKey);
+    } catch (_) {}
 
     // Best-effort, deliberately not awaited into a rethrow: this device's
     // OWN changes are already safely recorded on the server by this point.
