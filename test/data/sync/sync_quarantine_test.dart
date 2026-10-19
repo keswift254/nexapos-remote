@@ -33,6 +33,9 @@ class _Credentials implements PaystackCredentialsService {
 const _futureDated =
     "Could not record changes: Change is dated more than a day in the future - check this device's date and time.";
 
+/// A refusal no new revision of the row can cure, for tests about rows that stay set aside.
+const _tooLarge = 'Could not record changes: Change payload is too large.';
+
 void main() {
   late AppDatabase db;
   late SyncMetadataService syncMeta;
@@ -292,7 +295,7 @@ void main() {
 
     test('a row the server still refuses stays listed, with a fresh wait, and costs one request', () async {
       final ids = await makeCategories(6);
-      final server = build({ids[4]});
+      final server = build({ids[4]}, message: _tooLarge);
       await server.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
       await age();
       server.requests.clear();
@@ -311,7 +314,7 @@ void main() {
     test('some accepted, some still refused: only the accepted ones leave the list', () async {
       final ids = await makeCategories(10);
       final poison = {ids[1], ids[5], ids[8]};
-      final server = build(poison);
+      final server = build(poison, message: _tooLarge);
       await server.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
       expect(await server.service.quarantinedCount(), 3);
 
@@ -398,6 +401,110 @@ void main() {
       await server.service.retryQuarantined(configured.baseUrl, configured.apiKey, force: true);
 
       expect(await server.service.quarantinedCount(), 0);
+    });
+
+    group('a row that clashes with an old revision is sent again as a new one', () {
+      const differentContent =
+          'Could not record changes: A source revision was already recorded with different content.';
+
+      /// A server that refuses any batch holding one of [refusedRevs] - it knows
+      /// those revision numbers from before and holds different content for them.
+      ({SyncService service, List<List<int>> requests}) byRevision(Set<int> refusedRevs, String message) {
+        final requests = <List<int>>[];
+        final client = MockClient((request) async {
+          final action = request.url.queryParameters['action'];
+          if (action == 'pull_changes') {
+            return http.Response(jsonEncode({'success': true, 'changes': [], 'next_cursor': 0, 'has_more': false}), 200);
+          }
+          if (action != 'push_changes') throw StateError('unexpected request: ${request.url}');
+          final changes = (jsonDecode(request.body)['changes'] as List).cast<Map<String, dynamic>>();
+          final revs = changes.map((c) => c['local_rev'] as int).toList();
+          requests.add(revs);
+          if (revs.any(refusedRevs.contains)) {
+            return http.Response(jsonEncode({'success': false, 'message': message}), 422);
+          }
+          return http.Response(jsonEncode({'success': true, 'count': revs.length}), 200);
+        });
+        return (service: SyncService(db, syncMeta, PlatformSyncGateway(client), _Credentials(configured)), requests: requests);
+      }
+
+      Future<({String id, String name, int localRev, String updatedAt})> rowAt(int index) async {
+        final rows = (await db.select(db.categories).get())..sort((a, b) => a.localRev.compareTo(b.localRev));
+        final row = rows[index];
+        return (id: row.id, name: row.name, localRev: row.localRev, updatedAt: row.updatedAt);
+      }
+
+      test('"different content": new revision and timestamp, same data, uploaded on the next cycle', () async {
+        await makeCategories(6);
+        final original = await rowAt(2);
+        final server = byRevision({original.localRev}, differentContent);
+        await server.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+        expect(await server.service.quarantinedCount(), 1);
+        await age();
+
+        await server.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+
+        final after = (await db.select(db.categories).get()).firstWhere((c) => c.id == original.id);
+        expect(after.localRev, greaterThan(original.localRev), reason: 'a fresh revision number');
+        expect(after.localRev, greaterThan(await syncMeta.lastPushedLocalRev()), reason: 'so it is queued like any new change');
+        expect(after.updatedAt.compareTo(original.updatedAt), greaterThan(0), reason: 'and now the newest copy everywhere');
+        expect(after.name, original.name, reason: 'the data itself is untouched');
+        expect(await server.service.quarantinedCount(), 0, reason: 'nothing left to warn about');
+
+        server.requests.clear();
+        await server.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+        expect(server.requests, [
+          [after.localRev],
+        ], reason: 'exactly that row, as its new revision');
+        expect((await server.service.health()).pendingChanges, 0);
+        expect(await server.service.quarantinedCount(), 0);
+      });
+
+      test('"dated in the future": the same cure, with a timestamp of now', () async {
+        await makeCategories(4);
+        final original = await rowAt(1);
+        final server = byRevision({original.localRev}, _futureDated);
+        await server.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+        await age();
+
+        await server.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+
+        final after = (await db.select(db.categories).get()).firstWhere((c) => c.id == original.id);
+        expect(after.localRev, greaterThan(original.localRev));
+        expect(DateTime.now().toUtc().difference(DateTime.parse(after.updatedAt)).inMinutes.abs(), lessThan(2));
+        expect(await server.service.quarantinedCount(), 0);
+      });
+
+      test('a refusal a new revision cannot cure is left alone', () async {
+        await makeCategories(4);
+        final original = await rowAt(1);
+        final server = byRevision({original.localRev}, 'Could not record changes: Change payload is too large.');
+        await server.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+        await age();
+
+        await server.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+
+        final after = (await db.select(db.categories).get()).firstWhere((c) => c.id == original.id);
+        expect(after.localRev, original.localRev, reason: 'not touched');
+        expect(after.updatedAt, original.updatedAt);
+        expect(await server.service.quarantinedCount(), 1);
+      });
+
+      test('a row the server accepts on the retry keeps its revision', () async {
+        await makeCategories(4);
+        final original = await rowAt(1);
+        final refused = {original.localRev};
+        final server = byRevision(refused, differentContent);
+        await server.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+        refused.clear();
+        await age();
+
+        await server.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+
+        final after = (await db.select(db.categories).get()).firstWhere((c) => c.id == original.id);
+        expect(after.localRev, original.localRev, reason: 'accepted as it was, nothing re-stamped');
+        expect(await server.service.quarantinedCount(), 0);
+      });
     });
   });
 

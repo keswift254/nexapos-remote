@@ -14,6 +14,7 @@ on:
       - release-activation-share-1.0.64
       - release-key-safety-1.0.65
       - release-key-safety-1.0.66
+      - release-key-safety-1.0.67
     paths:
       - 'lib/**'
       - 'android/**'
@@ -384,7 +385,7 @@ jobs:
           if-no-files-found: error
 
   publish-github-release:
-    if: github.ref == 'refs/heads/nexapos-1.0.12-safety' || github.ref == 'refs/heads/release-1.0.57-lan-support-payments' || github.ref == 'refs/heads/improve-support-app' || github.ref == 'refs/heads/hotfix-activation-reporting-1.0.62' || github.ref == 'refs/heads/release-activation-share-1.0.63' || github.ref == 'refs/heads/release-activation-share-1.0.64' || github.ref == 'refs/heads/release-key-safety-1.0.65' || github.ref == 'refs/heads/release-key-safety-1.0.66'
+    if: github.ref == 'refs/heads/nexapos-1.0.12-safety' || github.ref == 'refs/heads/release-1.0.57-lan-support-payments' || github.ref == 'refs/heads/improve-support-app' || github.ref == 'refs/heads/hotfix-activation-reporting-1.0.62' || github.ref == 'refs/heads/release-activation-share-1.0.63' || github.ref == 'refs/heads/release-activation-share-1.0.64' || github.ref == 'refs/heads/release-key-safety-1.0.65' || github.ref == 'refs/heads/release-key-safety-1.0.66' || github.ref == 'refs/heads/release-key-safety-1.0.67'
     needs:
       - metadata
       - android-release

@@ -875,9 +875,22 @@ class SyncService {
     } on PaystackException catch (error) {
       if (!_isValidationRefusal(error)) rethrow;
       if (slice.length == 1) {
+        final change = slice.single;
+        // Some refusals are about this exact revision of the row, not the data:
+        // the server already holds a different copy of revision N, or it dated
+        // the row in the future. Sending the same row again as a new revision
+        // cures both, and it uploads on the next normal cycle.
+        if (_restampCures(error.message) && await _restamp(change)) {
+          await _forgetQuarantined(
+            change.tableName,
+            change.json['id'] as String,
+            change.json['localRev'] as int,
+          );
+          return;
+        }
         // Still refused: keep it, with the server's latest words and a fresh
         // clock so it is not asked about again for another few hours.
-        await _quarantine(slice.single, error.message);
+        await _quarantine(change, error.message);
         return;
       }
       if (isolation.requestsLeft <= 0) return;
@@ -886,6 +899,39 @@ class SyncService {
       await _retryResolving(baseUrl, apiKey, slice.sublist(0, middle), isolation);
       await _retryResolving(baseUrl, apiKey, slice.sublist(middle), isolation);
     }
+  }
+
+  static const _differentContentReason = 'already recorded with different content';
+  static const _futureDatedReason = 'dated more than a day in the future';
+
+  static bool _restampCures(String reason) =>
+      reason.contains(_differentContentReason) || reason.contains(_futureDatedReason);
+
+  /// Gives a set-aside row a fresh revision number and a fresh updated-at, so the
+  /// server sees it as a new change instead of a clash with an old one and every
+  /// other device takes it as the newest copy. The data itself is untouched. (The
+  /// database stamps updated_at on any update anyway; it is set here explicitly so
+  /// the value is the one this method means.)
+  Future<bool> _restamp(_PendingChange change) async {
+    final id = change.json['id'] as String;
+    final oldRev = change.json['localRev'] as int;
+    if (!syncTableAdapters.containsKey(change.tableName)) return false;
+    var changed = false;
+    await _db.transaction(() async {
+      final rev = await _syncMeta.nextLocalRev();
+      final updated = await _db.customUpdate(
+        'UPDATE "${change.tableName}" SET local_rev = ?, updated_at = ? '
+        'WHERE id = ? AND local_rev = ?',
+        variables: [
+          Variable<int>(rev),
+          Variable<String>(DateTime.now().toUtc().toIso8601String()),
+          Variable<String>(id),
+          Variable<int>(oldRev),
+        ],
+      );
+      changed = updated == 1;
+    });
+    return changed;
   }
 
   DateTime? _lastSuccessWrittenAt;

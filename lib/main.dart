@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'app.dart';
 import 'core/checkout_return_bridge.dart';
 import 'core/secure_storage_guard.dart';
+import 'core/tls_trusted_roots.dart';
 import 'data/local/database_startup_check.dart';
 import 'features/recovery/database_recovery_app.dart';
 
@@ -18,6 +19,9 @@ void main() {
     () async {
       WidgetsFlutterBinding.ensureInitialized();
       FlutterError.onError = FlutterError.presentError;
+      // Before any connection: trust the Let's Encrypt roots even on a PC (an old
+      // Windows 7 one, typically) whose own certificate store lacks them.
+      installExtraTrustedRoots();
       // Before anything reads a secret: keeps a second copy of the Windows
       // secure-storage file so one bad read cannot lose the database key.
       await installSecureStorageGuard();
