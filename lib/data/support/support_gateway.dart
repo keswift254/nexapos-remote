@@ -37,6 +37,34 @@ class SupportTicket {
       );
 }
 
+/// The message a reply quotes, as the server describes it.
+class SupportQuote {
+  const SupportQuote({required this.id, required this.sender, required this.snippet});
+
+  final int id;
+  final String sender;
+  final String snippet;
+
+  factory SupportQuote.fromJson(Map<String, dynamic> json) => SupportQuote(
+        id: _supportId(json['id']),
+        sender: (json['sender'] as String? ?? 'customer').trim(),
+        snippet: (json['snippet'] as String? ?? '').trim(),
+      );
+}
+
+/// One side's emoji on a message. [sender] is 'customer' (this shop) or 'support'.
+class SupportReaction {
+  const SupportReaction({required this.sender, required this.emoji});
+
+  final String sender;
+  final String emoji;
+
+  factory SupportReaction.fromJson(Map<String, dynamic> json) => SupportReaction(
+        sender: (json['sender'] as String? ?? 'customer').trim(),
+        emoji: (json['emoji'] as String? ?? '').trim(),
+      );
+}
+
 class SupportMessage {
   const SupportMessage({
     required this.id,
@@ -44,6 +72,8 @@ class SupportMessage {
     required this.body,
     required this.createdAt,
     this.attachments = const [],
+    this.replyTo,
+    this.reactions = const [],
   });
 
   final int id;
@@ -51,6 +81,30 @@ class SupportMessage {
   final String body;
   final List<int> attachments;
   final String createdAt;
+  final SupportQuote? replyTo;
+  final List<SupportReaction> reactions;
+
+  /// This shop's own reaction, if it left one.
+  SupportReaction? get myReaction {
+    for (final reaction in reactions) {
+      if (reaction.sender == 'customer') return reaction;
+    }
+    return null;
+  }
+
+  SupportMessage withMyReaction(String? emoji) => SupportMessage(
+        id: id,
+        sender: sender,
+        body: body,
+        createdAt: createdAt,
+        attachments: attachments,
+        replyTo: replyTo,
+        reactions: [
+          for (final reaction in reactions)
+            if (reaction.sender != 'customer') reaction,
+          if (emoji != null && emoji.isNotEmpty) SupportReaction(sender: 'customer', emoji: emoji),
+        ],
+      );
 
   factory SupportMessage.fromJson(Map<String, dynamic> json) => SupportMessage(
         id: _supportId(json['id']),
@@ -58,6 +112,13 @@ class SupportMessage {
         body: (json['body'] as String? ?? '').trim(),
         attachments: [for (final a in (json['attachments'] as List? ?? const [])) _supportId((a as Map)['id'])],
         createdAt: (json['created_at'] as String? ?? '').trim(),
+        replyTo: json['reply_to'] is Map
+            ? SupportQuote.fromJson((json['reply_to'] as Map).cast<String, dynamic>())
+            : null,
+        reactions: [
+          for (final r in (json['reactions'] as List? ?? const []))
+            if (r is Map) SupportReaction.fromJson(r.cast<String, dynamic>()),
+        ],
       );
 }
 
@@ -192,12 +253,14 @@ class SupportGateway {
     return thread;
   }
 
+  /// Sends a message on a ticket, optionally quoting one of its messages ([replyToId]).
   Future<void> reply({
     required String baseUrl,
     required String apiKey,
     required int ticketId,
     required String message,
     List<Uint8List> photos = const [],
+    int? replyToId,
   }) async {
     final response = await platformRequest(
       _client,
@@ -206,11 +269,35 @@ class SupportGateway {
       baseUrl,
       apiKey: apiKey,
       body: {'ticket_id': ticketId, 'message': message,
+        'reply_to_id': ?replyToId,
         if (photos.isNotEmpty) 'attachments': [for (final p in photos) {'data': base64Encode(p)}]},
     );
     if (response['success'] != true) {
       throw PaystackException(
         platformResponseMessage(response, 'Could not send your support message.'),
+      );
+    }
+  }
+
+  /// Sets this shop's emoji on a message, or takes it off when [emoji] is null.
+  Future<void> react({
+    required String baseUrl,
+    required String apiKey,
+    required int ticketId,
+    required int messageId,
+    required String? emoji,
+  }) async {
+    final response = await platformRequest(
+      _client,
+      'POST',
+      'support_react',
+      baseUrl,
+      apiKey: apiKey,
+      body: {'ticket_id': ticketId, 'message_id': messageId, 'emoji': emoji ?? ''},
+    );
+    if (response['success'] != true) {
+      throw PaystackException(
+        platformResponseMessage(response, 'Could not save your reaction.'),
       );
     }
   }

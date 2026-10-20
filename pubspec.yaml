@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.69+71
+version: 1.0.70+72
 
 environment:
   sdk: ^3.13.1
@@ -129,6 +129,11 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  assets:
+    # The short "message sent" sound of the Support conversation (the shop owner's own file,
+    # converted to a mono 32 kHz WAV, +6 dB with a limiter).
+    - assets/sounds/message_sent.wav
 
   # To add assets to your application, add an assets section, like this:
   # assets:

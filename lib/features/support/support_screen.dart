@@ -1,6 +1,7 @@
-import 'dart:typed_data';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/payments/paystack_gateway.dart' show PaystackException;
@@ -9,7 +10,9 @@ import '../../data/payments/platform_http_client.dart'
 import '../../data/support/support_gateway.dart';
 import '../../data/repositories/business_settings_repository_impl.dart';
 import '../../domain/entities/paystack_credentials.dart';
+import 'support_chat.dart';
 import 'support_photos.dart';
+import 'support_sound.dart';
 import '../../domain/services/paystack_credentials_service.dart';
 
 class SupportScreen extends ConsumerStatefulWidget {
@@ -108,7 +111,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
     _openedInitialTicket = true;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => _SupportThreadScreen(ticket: target!),
+        builder: (_) => SupportThreadScreen(ticket: target!),
       ),
     );
     if (mounted) await _load();
@@ -148,7 +151,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
       );
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
-          builder: (_) => _SupportThreadScreen(ticket: opened),
+          builder: (_) => SupportThreadScreen(ticket: opened),
         ),
       );
       if (mounted) _load();
@@ -311,7 +314,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
                     onTap: () async {
                       await Navigator.of(context).push(
                         MaterialPageRoute<void>(
-                          builder: (_) => _SupportThreadScreen(ticket: ticket),
+                          builder: (_) => SupportThreadScreen(ticket: ticket),
                         ),
                       );
                       await _load();
@@ -455,16 +458,26 @@ class _NewTicketDialogState extends State<_NewTicketDialog> {
   );
 }
 
-class _SupportThreadScreen extends ConsumerStatefulWidget {
-  const _SupportThreadScreen({required this.ticket});
+class SupportThreadScreen extends ConsumerStatefulWidget {
+  const SupportThreadScreen({super.key, required this.ticket});
   final SupportTicket ticket;
   @override
-  ConsumerState<_SupportThreadScreen> createState() =>
+  ConsumerState<SupportThreadScreen> createState() =>
       _SupportThreadScreenState();
 }
 
-class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
+/// What the shop typed, kept so a message that could not be delivered can be tried again.
+class _Draft {
+  const _Draft(this.message, this.photos, this.replyTo);
+  final String message;
+  final List<Uint8List> photos;
+  final SupportMessage? replyTo;
+}
+
+class _SupportThreadScreenState extends ConsumerState<SupportThreadScreen> {
   final _reply = TextEditingController();
+  final _replyFocus = FocusNode();
+  final _scroll = ScrollController();
   SupportThread? _thread;
   PaystackCredentials? _credentials;
   bool _loading = true;
@@ -473,12 +486,20 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
   final _photos = SupportPhotoController();
   String? _error;
   String? _shopName;
+  SupportMessage? _replyingTo;
+  SupportPendingMessage? _pending;
+  _Draft? _failedDraft;
+  Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
     _load();
     _loadShopName();
+    // New replies and reactions from support show up without having to leave and come back.
+    _refreshTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+      if (mounted && !_sending && _credentials != null) _load(quiet: true);
+    });
   }
 
   Future<void> _loadShopName() async {
@@ -492,12 +513,33 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
 
   @override
   void dispose() {
+    _refreshTimer?.cancel();
     _photos.dispose();
     _reply.dispose();
+    _replyFocus.dispose();
+    _scroll.dispose();
     super.dispose();
   }
 
-  Future<void> _load() async {
+  bool get _nearBottom =>
+      !_scroll.hasClients ||
+      _scroll.position.maxScrollExtent - _scroll.position.pixels < 120;
+
+  /// A long conversation only knows its real length once the messages near the end have been
+  /// built, so the first jump may fall short: jump again on the next two frames.
+  void _scrollToEnd() {
+    var passes = 0;
+    void jump(Duration _) {
+      if (!_scroll.hasClients) return;
+      _scroll.jumpTo(_scroll.position.maxScrollExtent);
+      if (++passes < 3) WidgetsBinding.instance.addPostFrameCallback(jump);
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback(jump);
+  }
+
+  /// [quiet]: a background refresh - it never replaces what is on screen with an error.
+  Future<void> _load({bool quiet = false}) async {
     try {
       final credentials = await ref
           .read(paystackCredentialsServiceProvider)
@@ -515,6 +557,7 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
           _credentials = credentials;
           _loading = false;
         });
+        _scrollToEnd();
       }
       final thread = await ref
           .read(supportGatewayProvider)
@@ -524,14 +567,19 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
             ticketId: widget.ticket.id,
           );
       if (!mounted) return;
+      final stay = _thread == null || _nearBottom;
+      final grew =
+          _thread == null || thread.messages.length > _thread!.messages.length;
       setState(() {
         _credentials = credentials;
         _thread = thread;
         _loading = false;
         _error = null;
       });
+      if (stay && grew) _scrollToEnd();
     } catch (e) {
       if (!mounted) return;
+      if (quiet && _thread != null) return;
       setState(() {
         _loading = false;
         _error = e is PaystackException
@@ -541,16 +589,38 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
     }
   }
 
-  Future<void> _send() async {
-    final credentials = _credentials;
+  void _toast(String text) =>
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+
+  void _send() {
     final message = _reply.text.trim();
-    if (credentials == null ||
+    if (_credentials == null ||
         (message.isEmpty && _photos.isEmpty) ||
         _sending ||
         _closing) {
       return;
     }
-    setState(() => _sending = true);
+    final draft = _Draft(message, _photos.photos, _replyingTo);
+    _reply.clear();
+    _photos.clear();
+    _deliver(draft);
+  }
+
+  /// Shows the message at once as "Sending…", then as delivered (with the send sound) once
+  /// the server has it, or as "Not delivered" to tap and try again.
+  Future<void> _deliver(_Draft draft) async {
+    final credentials = _credentials;
+    if (credentials == null) return;
+    setState(() {
+      _sending = true;
+      _failedDraft = null;
+      _replyingTo = null;
+      _pending = SupportPendingMessage(
+        body: draft.message,
+        photoCount: draft.photos.length,
+      );
+    });
+    _scrollToEnd();
     try {
       await ref
           .read(supportGatewayProvider)
@@ -558,24 +628,79 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
             baseUrl: credentials.baseUrl,
             apiKey: credentials.apiKey,
             ticketId: widget.ticket.id,
-            message: message,
-            photos: _photos.photos,
+            message: draft.message,
+            photos: draft.photos,
+            replyToId: draft.replyTo?.id,
           );
       if (!mounted) return;
-      _reply.clear();
-      _photos.clear();
-      await _load();
+      unawaited(ref.read(supportSoundProvider).playSent());
+      await _load(quiet: true);
+      if (!mounted) return;
+      setState(() => _pending = null);
+      _scrollToEnd();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            e is PaystackException ? e.message : 'Could not send the message.',
-          ),
-        ),
+      setState(() {
+        _failedDraft = draft;
+        _pending = SupportPendingMessage(
+          body: draft.message,
+          photoCount: draft.photos.length,
+          failed: true,
+        );
+      });
+      _toast(
+        e is PaystackException ? e.message : 'Could not send the message.',
       );
     } finally {
       if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  void _retry() {
+    final draft = _failedDraft;
+    if (draft != null && !_sending) _deliver(draft);
+  }
+
+  void _startReply(SupportMessage message) {
+    setState(() => _replyingTo = message);
+    _replyFocus.requestFocus();
+  }
+
+  Future<void> _copy(SupportMessage message) async {
+    await Clipboard.setData(ClipboardData(text: message.body));
+    if (mounted) _toast('Copied');
+  }
+
+  /// Shows the reaction at once; puts things back if the server does not take it.
+  Future<void> _react(SupportMessage message, String? emoji) async {
+    final credentials = _credentials;
+    final before = _thread;
+    if (credentials == null || before == null) return;
+    setState(
+      () => _thread = SupportThread(
+        ticket: before.ticket,
+        messages: [
+          for (final m in before.messages)
+            m.id == message.id ? m.withMyReaction(emoji) : m,
+        ],
+      ),
+    );
+    try {
+      await ref
+          .read(supportGatewayProvider)
+          .react(
+            baseUrl: credentials.baseUrl,
+            apiKey: credentials.apiKey,
+            ticketId: widget.ticket.id,
+            messageId: message.id,
+            emoji: emoji,
+          );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _thread = before);
+      _toast(
+        e is PaystackException ? e.message : 'Could not save your reaction.',
+      );
     }
   }
 
@@ -614,17 +739,40 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
       await _load();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            e is PaystackException ? e.message : 'Could not close the ticket.',
-          ),
-        ),
+      _toast(
+        e is PaystackException ? e.message : 'Could not close the ticket.',
       );
     } finally {
       if (mounted) setState(() => _closing = false);
     }
   }
+
+  Widget _header(SupportThread thread) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        thread.ticket.subject,
+        style: Theme.of(context).textTheme.titleLarge,
+      ),
+      const SizedBox(height: 8),
+      Chip(
+        avatar: Icon(
+          thread.ticket.status == 'pending'
+              ? Icons.mark_chat_unread_outlined
+              : thread.ticket.status == 'closed'
+              ? Icons.task_alt
+              : Icons.schedule_outlined,
+          size: 18,
+        ),
+        label: Text(_ticketStatusLabel(thread.ticket.status)),
+      ),
+      if (thread.ticket.customerEmail?.isNotEmpty == true)
+        Text(
+          'Email updates: ${thread.ticket.customerEmail}',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+    ],
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -653,99 +801,25 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
           : Column(
               children: [
                 Expanded(
-                  child: ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-                    itemCount: thread!.messages.length + 1,
-                    itemBuilder: (context, index) {
-                      if (index == 0) {
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 20),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                thread.ticket.subject,
-                                style: Theme.of(context).textTheme.titleLarge,
-                              ),
-                              const SizedBox(height: 8),
-                              Chip(
-                                avatar: Icon(
-                                  thread.ticket.status == 'pending'
-                                      ? Icons.mark_chat_unread_outlined
-                                      : thread.ticket.status == 'closed'
-                                      ? Icons.task_alt
-                                      : Icons.schedule_outlined,
-                                  size: 18,
-                                ),
-                                label: Text(
-                                  _ticketStatusLabel(thread.ticket.status),
-                                ),
-                              ),
-                              if (thread.ticket.customerEmail?.isNotEmpty ==
-                                  true)
-                                Text(
-                                  'Email updates: ${thread.ticket.customerEmail}',
-                                  style: Theme.of(context).textTheme.bodySmall,
-                                ),
-                            ],
-                          ),
-                        );
-                      }
-                      final message = thread.messages[index - 1];
-                      final support = message.sender == 'support';
-                      final scheme = Theme.of(context).colorScheme;
-                      return Align(
-                        alignment: support
-                            ? Alignment.centerLeft
-                            : Alignment.centerRight,
-                        child: Card(
-                          color: support
-                              ? scheme.surfaceContainerHighest
-                              : scheme.brightness == Brightness.dark
-                              ? const Color(0xFF174A7C)
-                              : const Color(0xFFD7E9FF),
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 520),
-                            child: Padding(
-                              padding: const EdgeInsets.all(12),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    support
-                                        ? 'NexaPOS Support'
-                                        : (_shopName?.isNotEmpty == true
-                                              ? _shopName!
-                                              : 'Your shop'),
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .labelMedium
-                                        ?.copyWith(fontWeight: FontWeight.w700),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  if (message.body.isNotEmpty)
-                                    SelectableText(message.body),
-                                  for (final id in message.attachments)
-                                    SupportPhoto(
-                                      id: id,
-                                      credentials: _credentials!,
-                                    ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    message.createdAt,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .bodySmall,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      );
-                    },
+                  child: SupportConversation(
+                    controller: _scroll,
+                    header: _header(thread!),
+                    messages: thread.messages,
+                    credentials: _credentials!,
+                    shopName: _shopName ?? '',
+                    pending: _pending,
+                    onRetryPending: _retry,
+                    onReply: _startReply,
+                    onReact: _react,
+                    onCopy: _copy,
                   ),
                 ),
+                if (_replyingTo != null)
+                  SupportReplyPreview(
+                    message: _replyingTo!,
+                    shopName: _shopName ?? '',
+                    onCancel: () => setState(() => _replyingTo = null),
+                  ),
                 SupportPhotoStrip(
                   controller: _photos,
                   enabled: !_sending && !_closing,
@@ -763,6 +837,7 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
                             enabled: !_sending && !_closing,
                             child: TextField(
                               controller: _reply,
+                              focusNode: _replyFocus,
                               minLines: 1,
                               maxLines: 5,
                               maxLength: 8000,
@@ -786,15 +861,7 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
                         IconButton.filled(
                           tooltip: 'Send',
                           onPressed: _sending ? null : _send,
-                          icon: _sending
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : const Icon(Icons.send),
+                          icon: const Icon(Icons.send),
                         ),
                       ],
                     ),

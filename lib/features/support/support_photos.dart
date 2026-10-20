@@ -444,9 +444,18 @@ class SupportPhotoStrip extends StatelessWidget {
 }
 
 class SupportPhoto extends ConsumerStatefulWidget {
-  const SupportPhoto({super.key, required this.id, required this.credentials});
+  const SupportPhoto({
+    super.key,
+    required this.id,
+    required this.credentials,
+    this.onDoubleTap,
+  });
   final int id;
   final PaystackCredentials credentials;
+
+  /// A double-tap on the photo (the conversation opens its message menu); a single tap
+  /// still opens the photo full size.
+  final VoidCallback? onDoubleTap;
   @override
   ConsumerState<SupportPhoto> createState() => _SupportPhotoState();
 }
@@ -497,8 +506,9 @@ class _SupportPhotoState extends ConsumerState<SupportPhoto> {
             child: Center(child: CircularProgressIndicator()),
           );
         }
-        return InkWell(
+        return GestureDetector(
           onTap: () => showSupportPhotoPreview(context, bytes),
+          onDoubleTap: widget.onDoubleTap,
           child: ClipRRect(
             borderRadius: BorderRadius.circular(8),
             child: Image.memory(

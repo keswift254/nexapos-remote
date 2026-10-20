@@ -1,8 +1,13 @@
 package com.nexapos.nexapos_mobile
 
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterFragmentActivity
@@ -14,6 +19,7 @@ class MainActivity : FlutterFragmentActivity() {
     private var downloadChannel: MethodChannel? = null
     private var appInfoChannel: MethodChannel? = null
     private var updatePermissionChannel: MethodChannel? = null
+    private var soundChannel: MethodChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -75,6 +81,19 @@ class MainActivity : FlutterFragmentActivity() {
             }
         }
 
+        // The short "message sent" sound of the Support conversation: Dart sends a 16-bit PCM WAV
+        // it made itself and this plays it once. A failure here must never break sending.
+        soundChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.nexapos/sound")
+        soundChannel?.setMethodCallHandler { call, result ->
+            if (call.method == "play") {
+                val wav = call.arguments as? ByteArray
+                if (wav != null) playWav(wav)
+                result.success(null)
+            } else {
+                result.notImplemented()
+            }
+        }
+
         downloadChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.nexapos/download_service")
         downloadChannel?.setMethodCallHandler { call, result ->
             when (call.method) {
@@ -91,6 +110,61 @@ class MainActivity : FlutterFragmentActivity() {
                 }
                 else -> result.notImplemented()
             }
+        }
+    }
+
+    private fun le16(b: ByteArray, at: Int): Int = (b[at].toInt() and 0xFF) or ((b[at + 1].toInt() and 0xFF) shl 8)
+
+    private fun le32(b: ByteArray, at: Int): Int = le16(b, at) or (le16(b, at + 2) shl 16)
+
+    private fun playWav(wav: ByteArray) {
+        try {
+            // Walk the RIFF chunks: "fmt " gives the channels and sample rate, "data" holds the
+            // 16-bit PCM. (Not a fixed 44-byte header: converters may add chunks of their own.)
+            var sampleRate = 0
+            var channels = 1
+            var dataStart = -1
+            var dataLength = 0
+            var at = 12
+            while (at + 8 <= wav.size) {
+                val id = String(wav, at, 4, Charsets.US_ASCII)
+                val size = le32(wav, at + 4)
+                if (size < 0) return
+                if (id == "fmt " && at + 16 <= wav.size) {
+                    channels = le16(wav, at + 10)
+                    sampleRate = le32(wav, at + 12)
+                } else if (id == "data") {
+                    dataStart = at + 8
+                    dataLength = minOf(size, wav.size - dataStart)
+                    break
+                }
+                at += 8 + size + (size and 1)
+            }
+            if (dataStart < 0 || dataLength <= 0 || sampleRate <= 0 || (channels != 1 && channels != 2)) return
+            val pcm = wav.copyOfRange(dataStart, dataStart + dataLength)
+            val track = AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_NOTIFICATION_COMMUNICATION_INSTANT)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(sampleRate)
+                        .setChannelMask(if (channels == 2) AudioFormat.CHANNEL_OUT_STEREO else AudioFormat.CHANNEL_OUT_MONO)
+                        .build()
+                )
+                .setBufferSizeInBytes(pcm.size)
+                .setTransferMode(AudioTrack.MODE_STATIC)
+                .build()
+            track.write(pcm, 0, pcm.size)
+            track.play()
+            val milliseconds = pcm.size / (2 * channels) * 1000L / sampleRate
+            Handler(Looper.getMainLooper()).postDelayed({ track.release() }, milliseconds + 300)
+        } catch (e: Exception) {
+            // No sound is better than a failed message.
         }
     }
 
