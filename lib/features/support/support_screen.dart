@@ -349,10 +349,11 @@ class _NewTicketDialogState extends State<_NewTicketDialog> {
   final _message = TextEditingController();
   final _email = TextEditingController();
   String? _emailError;
-  List<Uint8List> _photos = [];
+  final _photos = SupportPhotoController();
 
   @override
   void dispose() {
+    _photos.dispose();
     _subject.dispose();
     _message.dispose();
     _email.dispose();
@@ -371,7 +372,12 @@ class _NewTicketDialogState extends State<_NewTicketDialog> {
     }
     Navigator.pop(
       context,
-      _TicketDraft(subject, message, email.isEmpty ? null : email, _photos),
+      _TicketDraft(
+        subject,
+        message,
+        email.isEmpty ? null : email,
+        _photos.photos,
+      ),
     );
   }
 
@@ -397,18 +403,28 @@ class _NewTicketDialogState extends State<_NewTicketDialog> {
               ),
             ),
             const SizedBox(height: 8),
-            TextField(
-              controller: _message,
-              maxLength: 8000,
-              minLines: 4,
-              maxLines: 8,
-              decoration: const InputDecoration(
-                labelText: 'Describe the issue',
-                alignLabelWithHint: true,
+            SupportPasteImageShortcut(
+              controller: _photos,
+              child: TextField(
+                controller: _message,
+                maxLength: 8000,
+                minLines: 4,
+                maxLines: 8,
+                contentInsertionConfiguration: supportContentInsertion(_photos),
+                decoration: InputDecoration(
+                  labelText: 'Describe the issue',
+                  alignLabelWithHint: true,
+                  prefixIcon: Align(
+                    widthFactor: 1,
+                    heightFactor: 1,
+                    alignment: Alignment.topCenter,
+                    child: SupportAttachButton(controller: _photos),
+                  ),
+                ),
               ),
             ),
+            SupportPhotoStrip(controller: _photos),
             const SizedBox(height: 8),
-            SupportPhotoPicker(onChanged: (photos) => _photos = photos),
             TextField(
               controller: _email,
               keyboardType: TextInputType.emailAddress,
@@ -454,8 +470,7 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
   bool _loading = true;
   bool _sending = false;
   bool _closing = false;
-  final _photoPicker = GlobalKey<SupportPhotoPickerState>();
-  List<Uint8List> _photos = [];
+  final _photos = SupportPhotoController();
   String? _error;
   String? _shopName;
 
@@ -477,6 +492,7 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
 
   @override
   void dispose() {
+    _photos.dispose();
     _reply.dispose();
     super.dispose();
   }
@@ -543,11 +559,11 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
             apiKey: credentials.apiKey,
             ticketId: widget.ticket.id,
             message: message,
-            photos: _photos,
+            photos: _photos.photos,
           );
       if (!mounted) return;
       _reply.clear();
-      _photoPicker.currentState?.clear();
+      _photos.clear();
       await _load();
     } catch (e) {
       if (!mounted) return;
@@ -730,10 +746,9 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
                     },
                   ),
                 ),
-                SupportPhotoPicker(
-                  key: _photoPicker,
+                SupportPhotoStrip(
+                  controller: _photos,
                   enabled: !_sending && !_closing,
-                  onChanged: (photos) => _photos = photos,
                 ),
                 SafeArea(
                   top: false,
@@ -743,18 +758,28 @@ class _SupportThreadScreenState extends ConsumerState<_SupportThreadScreen> {
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Expanded(
-                          child: TextField(
-                            controller: _reply,
-                            minLines: 1,
-                            maxLines: 5,
-                            maxLength: 8000,
-                            decoration: InputDecoration(
-                              hintText: thread.ticket.status == 'closed'
-                                  ? 'Reply to reopen this ticket…'
-                                  : 'Reply to this ticket…',
-                              border: const OutlineInputBorder(),
+                          child: SupportPasteImageShortcut(
+                            controller: _photos,
+                            enabled: !_sending && !_closing,
+                            child: TextField(
+                              controller: _reply,
+                              minLines: 1,
+                              maxLines: 5,
+                              maxLength: 8000,
+                              contentInsertionConfiguration:
+                                  supportContentInsertion(_photos),
+                              decoration: InputDecoration(
+                                hintText: thread.ticket.status == 'closed'
+                                    ? 'Reply to reopen this ticket…'
+                                    : 'Reply to this ticket…',
+                                border: const OutlineInputBorder(),
+                                prefixIcon: SupportAttachButton(
+                                  controller: _photos,
+                                  enabled: !_sending && !_closing,
+                                ),
+                              ),
+                              onSubmitted: (_) => _send(),
                             ),
-                            onSubmitted: (_) => _send(),
                           ),
                         ),
                         const SizedBox(width: 8),
