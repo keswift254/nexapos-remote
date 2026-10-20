@@ -11,6 +11,7 @@ from pathlib import Path
 
 
 PRECACHE_TOKEN = "/*NEXAPOS_PRECACHE*/[]"
+BYTES_TOKEN = "/*NEXAPOS_PRECACHE_BYTES*/[]"
 VERSION_TOKEN = "/*NEXAPOS_CACHE_VERSION*/"
 EXCLUDED_NAMES = {
     "flutter_service_worker.js",  # Flutter's generated unregister stub.
@@ -46,11 +47,23 @@ def verify_deployed(root: Path) -> int:
     urls = json.loads(match.group(1))
     if not urls:
         raise SystemExit("the worker's PRECACHE_URLS list is empty (was it stamped?)")
+    sizes_match = re.search(r"const PRECACHE_BYTES = (\[.*?\]);", worker.read_text(encoding="utf-8"))
+    sizes = json.loads(sizes_match.group(1)) if sizes_match else []
+    if len(sizes) != len(urls):
+        raise SystemExit("the worker's PRECACHE_BYTES list does not match PRECACHE_URLS (was it stamped?)")
     missing = [url for url in urls if not (root / url[2:]).is_file()]
     if missing:
         raise SystemExit(
             "the offline cache would fail to install; these precached files are not deployed: "
             + ", ".join(missing)
+        )
+    wrong_size = [
+        url for url, size in zip(urls, sizes) if (root / url[2:]).stat().st_size != size
+    ]
+    if wrong_size:
+        raise SystemExit(
+            "these deployed files are not the size the worker expects (a cut-off upload, or a file "
+            "changed after stamping): " + ", ".join(wrong_size)
         )
     print(f"deployed offline cache ok: all {len(urls)} precached files exist in {root}")
     return 0
@@ -98,6 +111,7 @@ def main() -> int:
 
     digest = hashlib.sha256()
     urls: list[str] = []
+    sizes: list[int] = []
     total_bytes = 0
     for path in files:
         relative = path.relative_to(root).as_posix()
@@ -106,15 +120,19 @@ def main() -> int:
         digest.update(b"\0")
         digest.update(hashlib.sha256(payload).digest())
         urls.append("./" + relative)
+        sizes.append(len(payload))
         total_bytes += len(payload)
 
     source = worker.read_text(encoding="utf-8")
-    if PRECACHE_TOKEN not in source or VERSION_TOKEN not in source:
+    if PRECACHE_TOKEN not in source or BYTES_TOKEN not in source or VERSION_TOKEN not in source:
         raise SystemExit("service-worker template tokens are missing")
 
     version = digest.hexdigest()[:20]
     source = source.replace(VERSION_TOKEN, version)
     source = source.replace(PRECACHE_TOKEN, json.dumps(urls, separators=(",", ":")))
+    # The sizes are the files' real bytes, which is what the browser hands the worker after
+    # undoing any gzip, so "bytes received / bytes expected" is a true download percentage.
+    source = source.replace(BYTES_TOKEN, json.dumps(sizes, separators=(",", ":")))
     worker.write_text(source, encoding="utf-8", newline="\n")
     print(
         f"offline cache {version}: {len(urls)} files, "

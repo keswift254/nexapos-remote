@@ -17,4 +17,6 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
+      - name: Web update script and offline worker (Node)
+        run: node --test --test-timeout=20000 test/web_update_test.cjs
       - run: git diff --check

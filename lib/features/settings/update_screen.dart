@@ -1,4 +1,5 @@
-import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
+import 'package:flutter/foundation.dart'
+    show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -6,6 +7,7 @@ import '../../data/update/update_gateway.dart';
 import '../../domain/services/update_service.dart';
 import '../../domain/services/android_update_permission_service.dart';
 import 'web_update_button.dart';
+import 'web_update_controller.dart';
 
 /// Reachable from the dashboard's Settings menu ("Check for Updates")
 /// and from the dashboard's own update-available banner tap - both just
@@ -20,7 +22,8 @@ class UpdateScreen extends ConsumerStatefulWidget {
   ConsumerState<UpdateScreen> createState() => _UpdateScreenState();
 }
 
-class _UpdateScreenState extends ConsumerState<UpdateScreen> with WidgetsBindingObserver {
+class _UpdateScreenState extends ConsumerState<UpdateScreen>
+    with WidgetsBindingObserver {
   bool _checking = true;
   String? _error;
   UpdateCheckResult? _result;
@@ -34,8 +37,11 @@ class _UpdateScreenState extends ConsumerState<UpdateScreen> with WidgetsBinding
     // away is already running - updateInstallProvider is
     // keepAlive and already carries what's being installed (see its
     // .info field), so re-checking here would just flash a loading
-    // spinner over progress that's already known.
-    if (ref.read(updateInstallProvider).installing) {
+    // spinner over progress that's already known. The browser update
+    // (webUpdateProvider) is kept the same way.
+    if (ref.read(updateInstallProvider).installing ||
+        (ref.read(isWebPlatformProvider) &&
+            ref.read(webUpdateProvider).running)) {
       _checking = false;
     } else {
       _check();
@@ -159,10 +165,14 @@ class _UpdateScreenState extends ConsumerState<UpdateScreen> with WidgetsBinding
     final updateAvailable = _result != null
         ? _result!.updateAvailable
         : installState.info != null;
+    final isWeb = ref.watch(isWebPlatformProvider);
+    final webRunning = isWeb && ref.watch(webUpdateProvider).running;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Software Update')),
-      body: _checking
+      // A re-check never takes the update's progress off the screen: while the
+      // browser update runs the page stays, and only the check button shows work.
+      body: _checking && !webRunning
           ? const Center(child: CircularProgressIndicator())
           : ListView(
               padding: const EdgeInsets.all(16),
@@ -196,7 +206,9 @@ class _UpdateScreenState extends ConsumerState<UpdateScreen> with WidgetsBinding
                   ),
                   const SizedBox(height: 16),
                 ],
-                if (updateAvailable && latest != null) ...[
+                // While the browser update runs the card stays whatever the latest
+                // check says (the new files may already be what a check reads).
+                if ((updateAvailable && latest != null) || webRunning) ...[
                   Card(
                     color: theme.colorScheme.primaryContainer,
                     child: Padding(
@@ -208,7 +220,11 @@ class _UpdateScreenState extends ConsumerState<UpdateScreen> with WidgetsBinding
                           // into the release-notes box when the release was
                           // published (a download link, once) is not shown here.
                           Text(
-                            'Update available: ${latest.version}',
+                            webRunning
+                                ? (latest != null
+                                      ? 'Updating to ${latest.version}'
+                                      : 'Updating NexaPOS')
+                                : 'Update available: ${latest!.version}',
                             style: theme.textTheme.titleMedium?.copyWith(
                               fontWeight: FontWeight.bold,
                             ),
@@ -218,7 +234,7 @@ class _UpdateScreenState extends ConsumerState<UpdateScreen> with WidgetsBinding
                     ),
                   ),
                   const SizedBox(height: 20),
-                  if (kIsWeb)
+                  if (isWeb)
                     // Refresh the browser's application assets, preserving the
                     // local shop database and normal offline caching afterward.
                     const WebUpdateButton()
@@ -270,9 +286,11 @@ class _UpdateScreenState extends ConsumerState<UpdateScreen> with WidgetsBinding
                 ],
                 const SizedBox(height: 20),
                 OutlinedButton.icon(
-                  onPressed: installState.installing ? null : _check,
+                  onPressed: installState.installing || _checking
+                      ? null
+                      : _check,
                   icon: const Icon(Icons.refresh),
-                  label: const Text('Check for Updates'),
+                  label: Text(_checking ? 'Checking…' : 'Check for Updates'),
                 ),
               ],
             ),

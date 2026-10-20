@@ -360,36 +360,169 @@
     })();
   </script>
   <script>
-    window.nexaPOSUpdate = async function () {
-      const registration = await navigator.serviceWorker.getRegistration();
-      if (!registration) throw new Error('Offline cache is not ready; retry shortly.');
-      await registration.update();
-      const pending = registration.installing || registration.waiting;
-      if (pending && pending.state !== 'activated') {
-        await new Promise((resolve, reject) => {
-          const timeout = setTimeout(() => reject(new Error('Update timed out')), 120000);
-          pending.addEventListener('statechange', () => {
-            if (pending.state === 'activated') { clearTimeout(timeout); resolve(); }
-            if (pending.state === 'redundant') { clearTimeout(timeout); reject(new Error('Update failed')); }
-          });
+    // "Update now" for the Software Update screen.
+    //   nexaPOSUpdate(onProgress) -> a promise that ALWAYS resolves: null once the page is about
+    //   to restart on the new version, or a sentence saying why it could not be done.
+    //   onProgress(fraction, phrase): fraction is 0..1, or -1 when it is not known yet.
+    // One update runs at a time: calling again while one is running joins it (and is told how far
+    // it has got), it never starts a second download.
+    //
+    // How the newest version is forced in:
+    //  1. Ask the browser for the newest service worker. If the server has a newer build, the new
+    //     worker downloads every file into a fresh cache by itself (reporting progress) and takes
+    //     over; we wait for that - no second download.
+    //  2. If the browser found no newer worker, the worker we have may still be stale (Safari is
+    //     known to miss updates): compare it with the one the server serves, and if they differ
+    //     download every file again, bypassing the HTTP cache. If they are the same, only files
+    //     the browser evicted are fetched (usually none).
+    //  3. Restart the page, so the new code is what runs.
+    // IndexedDB/OPFS (shop data) and preferences are never touched.
+    (function () {
+      const DOWNLOAD_PHRASE = 'Downloading the new version…';
+      const STALL_TEXT = 'The download stopped. Check your internet connection and try again.';
+      const listeners = new Set();
+      let last = null;
+
+      class UpdateProblem extends Error {}
+
+      function stallMs() { return window.NEXAPOS_UPDATE_STALL_MS || 90000; }
+      function restartMs() { return window.NEXAPOS_UPDATE_RESTART_MS || 8000; }
+
+      // Gives up if nothing (no progress message) is heard for stallMs(); poke() on every sign of life.
+      function stallTimer(onStall) {
+        let timer;
+        const poke = function () { clearTimeout(timer); timer = setTimeout(onStall, stallMs()); };
+        poke();
+        return { poke: poke, stop: function () { clearTimeout(timer); } };
+      }
+
+      function emit(fraction, phrase) {
+        last = [fraction, phrase];
+        listeners.forEach(function (listener) {
+          try { listener(fraction, phrase); } catch (_) { /* a broken listener must not stop the update */ }
         });
       }
-      const worker = registration.active;
-      if (!worker) throw new Error('Update worker is unavailable');
-      await new Promise((resolve, reject) => {
-        const channel = new MessageChannel();
-        const timeout = setTimeout(() => { channel.port1.close(); reject(new Error('Download timed out')); }, 120000);
-        channel.port1.onmessage = (event) => {
-          clearTimeout(timeout);
-          channel.port1.close();
-          event.data.ok ? resolve() : reject(new Error(event.data.error));
-        };
-        worker.postMessage({ type: 'NEXAPOS_REFRESH' }, [channel.port2]);
-      });
-      const destination = new URL(location.href);
-      destination.searchParams.set('updated', Date.now().toString());
-      location.replace(destination.href);
-    };
+
+      // A newer worker is installing: it downloads everything itself and reports as it goes.
+      function waitForInstall(pending) {
+        return new Promise(function (resolve, reject) {
+          const stall = stallTimer(function () { cleanup(); reject(new UpdateProblem(STALL_TEXT)); });
+          function onMessage(event) {
+            const data = event.data;
+            if (data && data.type === 'NEXAPOS_PROGRESS') {
+              stall.poke();
+              emit(data.fraction, DOWNLOAD_PHRASE);
+            }
+          }
+          function onState() {
+            if (pending.state === 'activated') { cleanup(); resolve(); }
+            else if (pending.state === 'redundant') {
+              cleanup();
+              reject(new UpdateProblem('The new version could not be installed. Check your internet connection and try again.'));
+            }
+          }
+          function cleanup() {
+            stall.stop();
+            navigator.serviceWorker.removeEventListener('message', onMessage);
+            pending.removeEventListener('statechange', onState);
+          }
+          navigator.serviceWorker.addEventListener('message', onMessage);
+          if (navigator.serviceWorker.startMessages) navigator.serviceWorker.startMessages();
+          pending.addEventListener('statechange', onState);
+          onState();
+        });
+      }
+
+      // Sends the worker a request and waits for its final reply, passing its progress on.
+      function ask(worker, message, onProgress) {
+        return new Promise(function (resolve, reject) {
+          const channel = new MessageChannel();
+          const stall = stallTimer(function () { channel.port1.close(); reject(new UpdateProblem(STALL_TEXT)); });
+          channel.port1.onmessage = function (event) {
+            const data = event.data || {};
+            stall.poke();
+            if (data.type === 'progress') { if (onProgress) onProgress(data.fraction); return; }
+            stall.stop();
+            channel.port1.close();
+            resolve(data);
+          };
+          worker.postMessage(message, [channel.port2]);
+        });
+      }
+
+      async function refreshActiveWorker(registration) {
+        const worker = registration.active;
+        if (!worker) throw new UpdateProblem('The app is still getting ready. Wait a few seconds and try again.');
+        let missingOnly = false;
+        try {
+          const running = await ask(worker, { type: 'NEXAPOS_VERSION' });
+          const served = await fetch(worker.scriptURL, { cache: 'no-store' });
+          if (!served.ok) throw new Error('HTTP ' + served.status);
+          const found = /CACHE_PREFIX \+ '([^']+)'/.exec(await served.text());
+          missingOnly = !!(found && running.version === found[1]);
+        } catch (error) {
+          if (error instanceof UpdateProblem) throw error;
+          throw new UpdateProblem('Could not reach the update server. Check your internet connection and try again.');
+        }
+        const reply = await ask(worker, { type: 'NEXAPOS_REFRESH', missingOnly: missingOnly }, function (fraction) {
+          emit(fraction, DOWNLOAD_PHRASE);
+        });
+        if (!reply.ok) {
+          throw new UpdateProblem('The download did not finish. Check your internet connection and try again.');
+        }
+      }
+
+      async function perform() {
+        if (!('serviceWorker' in navigator)) {
+          throw new UpdateProblem('This browser cannot update the app by itself. Reload the page instead.');
+        }
+        emit(-1, 'Looking for the new version…');
+        const registration = await navigator.serviceWorker.getRegistration();
+        if (!registration) throw new UpdateProblem('The app is still getting ready. Wait a few seconds and try again.');
+        try {
+          await registration.update();
+        } catch (_) {
+          throw new UpdateProblem('Could not reach the update server. Check your internet connection and try again.');
+        }
+        const pending = registration.installing || registration.waiting;
+        if (pending && pending.state !== 'activated') {
+          emit(0, DOWNLOAD_PHRASE);
+          await waitForInstall(pending);
+        } else {
+          emit(0, DOWNLOAD_PHRASE);
+          await refreshActiveWorker(registration);
+        }
+        emit(1, 'Restarting…');
+        const destination = new URL(location.href);
+        destination.searchParams.set('updated', Date.now().toString());
+        location.replace(destination.href);
+        // Still here after a while: the browser did not restart the page.
+        await new Promise(function (resolve) { setTimeout(resolve, restartMs()); });
+        throw new UpdateProblem('The update is ready. Please reload this page to start it.');
+      }
+
+      window.nexaPOSUpdate = function (onProgress) {
+        if (typeof onProgress === 'function') {
+          listeners.add(onProgress);
+          if (window.NEXAPOS_UPDATE_RUN && last) onProgress(last[0], last[1]);
+        }
+        if (window.NEXAPOS_UPDATE_RUN) return window.NEXAPOS_UPDATE_RUN;
+        last = null;
+        window.NEXAPOS_UPDATE_RUN = perform().then(
+          function () { return null; },
+          function (error) {
+            return error instanceof UpdateProblem
+              ? error.message
+              : 'The update did not work. Check your internet connection and try again.';
+          },
+        ).then(function (outcome) {
+          window.NEXAPOS_UPDATE_RUN = null;
+          listeners.clear();
+          return outcome;
+        });
+        return window.NEXAPOS_UPDATE_RUN;
+      };
+    })();
   </script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
