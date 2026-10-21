@@ -85,12 +85,13 @@ void main() {
       // Every role can see the license status (it holds nothing secret).
       expect(find.text('My License'), findsOneWidget);
       if (role != UserRole.admin) {
-        expect(find.text('Business & Receipts'), findsNothing);
+        expect(find.text('Business, Receipts & Themes'), findsNothing);
         expect(find.text('Payments & Payouts'), findsNothing);
         expect(find.text('Sync & Invites'), findsNothing);
         expect(find.text('Backup & Restore'), findsNothing);
         expect(find.text('Date, Time & Region'), findsNothing);
       } else {
+        expect(find.text('Business, Receipts & Themes'), findsOneWidget);
         expect(find.text('Date, Time & Region'), findsOneWidget);
       }
       // Relative, not absolute, from here on - automatic background

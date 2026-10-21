@@ -5,10 +5,24 @@ import 'package:web/web.dart' as web;
 
 /// Call directly from the user's send gesture. Audio.play() is invoked before
 /// any await, allowing browser autoplay policies to permit this short sound.
+web.HTMLAudioElement? _sentAudio;
+
 Future<void> playAsset() async {
-  final audio = web.HTMLAudioElement()
-    ..src = 'assets/assets/sounds/message_sent.wav'
-    ..volume = 0.8;
+  // The element is created by index.html before Flutter boots. Reuse it so
+  // Safari can load the WAV ahead of the Send gesture; play() itself still
+  // happens synchronously inside that gesture, before the first await.
+  final audio = _sentAudio ??=
+      (web.document.getElementById('nexapos-send-sound')
+          as web.HTMLAudioElement?) ??
+      (web.HTMLAudioElement()
+        ..src = 'assets/assets/sounds/message_sent.wav'
+        ..preload = 'auto');
+  audio.volume = 0.8;
+  try {
+    audio.currentTime = 0;
+  } catch (_) {
+    // Safari can refuse seeking until the source has loaded; play still works.
+  }
   await audio.play().toDart;
 }
 

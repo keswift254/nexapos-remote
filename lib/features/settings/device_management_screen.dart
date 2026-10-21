@@ -133,7 +133,9 @@ class _DeviceManagementScreenState extends ConsumerState<DeviceManagementScreen>
             final error = snapshot.error;
             return Center(child: Text(error is PaystackException ? error.message : 'Failed to load: $error'));
           }
-          final devices = snapshot.data ?? const [];
+          final devices = (snapshot.data ?? const <DeviceInfo>[])
+              .where((device) => !device.isDisabled)
+              .toList();
           return ListView.separated(
             padding: const EdgeInsets.all(16),
             itemCount: devices.length,
@@ -155,7 +157,7 @@ class _DeviceManagementScreenState extends ConsumerState<DeviceManagementScreen>
                 ),
                 title: Text(device.deviceLabel.isEmpty ? 'Unnamed device' : device.deviceLabel),
                 subtitle: Text(_statusLabel(device)),
-                trailing: device.isOwner || device.isDisabled
+                trailing: device.isOwner
                     ? null
                     : _revokingId == device.id
                         ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
@@ -173,8 +175,7 @@ class _DeviceManagementScreenState extends ConsumerState<DeviceManagementScreen>
   }
 
   String _statusLabel(DeviceInfo device) {
-    if (device.isOwner) return 'Owner (this device)';
-    if (device.isDisabled) return 'Revoked';
+    if (device.isOwner) return 'Primary device';
     if (device.isOnline) return 'Online';
     final lastSeen = device.lastSeenAt;
     if (lastSeen == null) return 'Offline - never checked in';

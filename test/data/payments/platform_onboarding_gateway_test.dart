@@ -191,7 +191,7 @@ void main() {
       expect(devices.single.id, 50);
     });
 
-    test('parses devices, marking the owner and disabled ones', () async {
+    test('recognizes the primary device and hides revoked entries', () async {
       final gateway = PlatformOnboardingGateway(MockClient((request) async {
         expect(request.url.queryParameters['action'], 'list_devices');
         expect(request.headers['Authorization'], 'Bearer owner_key');
@@ -199,7 +199,7 @@ void main() {
           jsonEncode({
             'success': true,
             'devices': [
-              {'id': 3, 'device_label': 'Counter PC', 'is_owner': true, 'status': 'active'},
+              {'id': '3', 'device_label': 'Counter PC', 'is_owner': '1', 'status': 'active'},
               {'id': 5, 'device_label': 'Cashier Phone', 'is_owner': false, 'status': 'active'},
               {'id': 7, 'device_label': 'Old Phone', 'is_owner': false, 'status': 'disabled'},
             ],
@@ -210,13 +210,14 @@ void main() {
 
       final devices = await gateway.listDevices(baseUrl: _baseUrl, apiKey: 'owner_key');
 
-      expect(devices, hasLength(3));
+      expect(devices, hasLength(2));
+      expect(devices.first.id, 3);
       expect(devices.where((d) => d.isOwner).single.deviceLabel, 'Counter PC');
-      expect(devices.where((d) => d.isDisabled).single.deviceLabel, 'Old Phone');
+      expect(devices.any((d) => d.isDisabled), isFalse);
       expect(devices.every((d) => d.lastSeenAt == null), isTrue);
     });
 
-    test('last_seen_at within 5 minutes counts as online, older or disabled does not', () async {
+    test('last_seen_at within 5 minutes counts as online; revoked entries stay hidden', () async {
       final now = DateTime.now().toUtc();
       String stamp(Duration ago) =>
           now.subtract(ago).toIso8601String().substring(0, 19).replaceFirst('T', ' ');
@@ -241,10 +242,8 @@ void main() {
       expect(devices.firstWhere((d) => d.deviceLabel == 'Long ago').isOnline, isFalse);
       expect(devices.firstWhere((d) => d.deviceLabel == 'Never seen').isOnline, isFalse);
       expect(devices.firstWhere((d) => d.deviceLabel == 'Never seen').lastSeenAt, isNull);
-      // A disabled device never counts as online even with a fresh
-      // last_seen_at - a revoked device stops making authenticated
-      // calls, so a stale-but-recent stamp shouldn't read as "here now".
-      expect(devices.firstWhere((d) => d.deviceLabel == 'Recently disabled').isOnline, isFalse);
+      // Even with a fresh last_seen_at, a revoked device is not listed.
+      expect(devices.any((d) => d.deviceLabel == 'Recently disabled'), isFalse);
     });
 
     test('a non-owner device calling this surfaces the backend rejection', () async {

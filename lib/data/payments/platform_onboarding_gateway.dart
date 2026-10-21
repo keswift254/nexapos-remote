@@ -509,6 +509,9 @@ class PlatformOnboardingGateway {
     final devices = (response['devices'] as List?) ?? const [];
     return devices
         .whereType<Map>()
+        // Keep revoked clients in the server's audit history, not in the
+        // shop's actionable device list. Older servers may still return them.
+        .where((device) => device['status'] != 'disabled')
         .map(
           (device) => DeviceInfo(
             // MySQL/PHP may serialize an integer ID as either a JSON number
@@ -519,7 +522,12 @@ class PlatformOnboardingGateway {
               _ => 0,
             },
             deviceLabel: (device['device_label'] as String? ?? '').trim(),
-            isOwner: device['is_owner'] == true,
+            // PDO can encode a MySQL TINYINT as 1 or "1", not just true.
+            // Missing this conversion made the primary device look revokable.
+            isOwner:
+                device['is_owner'] == true ||
+                device['is_owner'] == 1 ||
+                device['is_owner'] == '1',
             status: (device['status'] as String? ?? '').trim(),
             // MySQL's TIMESTAMP comes back as a naive "YYYY-MM-DD
             // HH:MM:SS" string with no zone suffix - it's UTC (the

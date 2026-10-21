@@ -5,6 +5,72 @@ const vm = require('node:vm');
 
 const tick = (ms = 0) => new Promise(resolve => setTimeout(resolve, ms));
 
+test('Safari send sound is preloaded before Flutter and played from the existing element', () => {
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const backend = fs.readFileSync('lib/features/support/support_sound_web.dart', 'utf8');
+  assert.match(html, /<audio id="nexapos-send-sound" preload="auto" src="assets\/assets\/sounds\/message_sent\.wav"><\/audio>/);
+  assert.ok(html.indexOf('id="nexapos-send-sound"') < html.indexOf('src="flutter_bootstrap.js"'));
+  assert.match(backend, /getElementById\('nexapos-send-sound'\)/);
+  assert.match(backend, /await audio\.play\(\)\.toDart/);
+});
+
+function startupHarness({controlled = true} = {}) {
+  const html = fs.readFileSync('web/index.html', 'utf8');
+  const source = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)]
+    .map(match => match[1]).find(script => script.includes('hadControllerAtStart'));
+  assert.ok(source, 'startup worker script exists');
+  const listeners = {}, nodes = [], state = {reloads: 0};
+  const registration = {active: {state: 'activated'}, update: async () => {}};
+  const serviceWorker = {
+    controller: controlled ? {} : null,
+    register: async () => registration,
+    addEventListener: (name, callback) => { listeners[name] = callback; },
+  };
+  const document = {
+    baseURI: 'https://example.test/app/',
+    addEventListener: (name, callback) => { listeners[name] = callback; },
+    getElementById: id => nodes.find(node => node.id === id),
+    createElement: () => ({style: {}, addEventListener(name, callback) { this[name] = callback; }}),
+    body: {appendChild: node => nodes.push(node)},
+  };
+  const sandbox = {
+    URL, Promise, setTimeout, clearTimeout, console,
+    document, navigator: {serviceWorker},
+    location: {reload: () => state.reloads++},
+    addEventListener: (name, callback) => { listeners['window:' + name] = callback; },
+  };
+  sandbox.window = sandbox;
+  vm.runInNewContext(source, sandbox);
+  return {listeners, nodes, state};
+}
+
+test('new worker reloads an untouched Safari page into the new bundle', async () => {
+  const h = startupHarness();
+  await tick();
+  h.listeners.controllerchange();
+  assert.equal(h.state.reloads, 1);
+  assert.equal(h.nodes.length, 0);
+});
+
+test('new worker preserves an in-progress task and offers a manual reload', async () => {
+  const h = startupHarness();
+  await tick();
+  h.listeners.pointerdown();
+  h.listeners.controllerchange();
+  assert.equal(h.state.reloads, 0);
+  assert.equal(h.nodes.length, 1);
+  assert.match(h.nodes[0].textContent, /New version ready/);
+  h.nodes[0].click();
+  assert.equal(h.state.reloads, 1);
+});
+
+test('first-time service-worker activation does not reload the page', async () => {
+  const h = startupHarness({controlled: false});
+  await tick();
+  h.listeners.controllerchange();
+  assert.equal(h.state.reloads, 0);
+});
+
 // ---------------------------------------------------------------------------------------------
 // The service worker (web/nexapos_service_worker.js)
 // ---------------------------------------------------------------------------------------------

@@ -159,7 +159,7 @@ class _BusinessSettingsScreenState extends ConsumerState<BusinessSettingsScreen>
     final themeMode = ref.watch(themeSettingsProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Business & Receipts')),
+      appBar: AppBar(title: const Text('Business, Receipts & Themes')),
       body: settingsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (error, _) => Center(child: Text('Failed to load: $error')),
