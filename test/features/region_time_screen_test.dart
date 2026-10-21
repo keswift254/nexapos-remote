@@ -102,7 +102,7 @@ void main() {
     testWidgets('a right clock and zone: says so, offers nothing to fix', (tester) async {
       await open(tester, savedCountry: 'KE');
 
-      expect(find.text('Region and Time'), findsOneWidget);
+      expect(find.text('Date, Time & Region'), findsOneWidget);
       expect(find.byKey(const Key('clock-right')), findsOneWidget);
       expect(find.byKey(const Key('zone-right')), findsOneWidget);
       expect(find.byKey(const Key('fix-clock')), findsNothing);

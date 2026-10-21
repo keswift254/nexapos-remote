@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -50,7 +51,7 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
       if (!credentials.isConfigured) {
         throw const PaystackException(
           'This device is not connected to the shop sync service yet. '
-          'Open Settings > Device Sync while online, then try again.',
+          'Open Settings > Sync & Invites while online, then try again.',
         );
       }
       final cached = ref
@@ -474,7 +475,8 @@ class _Draft {
   final SupportMessage? replyTo;
 }
 
-class _SupportThreadScreenState extends ConsumerState<SupportThreadScreen> {
+class _SupportThreadScreenState extends ConsumerState<SupportThreadScreen>
+    with WidgetsBindingObserver {
   final _reply = TextEditingController();
   final _replyFocus = FocusNode();
   final _scroll = ScrollController();
@@ -490,10 +492,13 @@ class _SupportThreadScreenState extends ConsumerState<SupportThreadScreen> {
   SupportPendingMessage? _pending;
   _Draft? _failedDraft;
   Timer? _refreshTimer;
+  int _readThrough = 0;
+  bool _markingRead = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
     _loadShopName();
     // New replies and reactions from support show up without having to leave and come back.
@@ -513,12 +518,58 @@ class _SupportThreadScreenState extends ConsumerState<SupportThreadScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _refreshTimer?.cancel();
     _photos.dispose();
     _reply.dispose();
     _replyFocus.dispose();
     _scroll.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _credentials != null) {
+      _load(quiet: true);
+    }
+  }
+
+  void _markVisibleRepliesRead(
+    SupportThread thread,
+    PaystackCredentials credentials,
+  ) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted ||
+          _markingRead ||
+          ModalRoute.of(context)?.isCurrent == false) {
+        return;
+      }
+      final lifecycle = WidgetsBinding.instance.lifecycleState;
+      if (lifecycle != null && lifecycle != AppLifecycleState.resumed) return;
+      var through = 0;
+      for (final message in thread.messages) {
+        if (message.sender == 'support' && message.id > through) {
+          through = message.id;
+        }
+      }
+      if (through <= _readThrough) return;
+      _markingRead = true;
+      try {
+        await ref
+            .read(supportGatewayProvider)
+            .markRead(
+              baseUrl: credentials.baseUrl,
+              apiKey: credentials.apiKey,
+              ticketId: widget.ticket.id,
+              throughMessageId: through,
+            );
+        _readThrough = through;
+      } catch (_) {
+        // A transient failure is retried on the next visible refresh.
+      } finally {
+        _markingRead = false;
+      }
+    });
   }
 
   bool get _nearBottom =>
@@ -577,6 +628,7 @@ class _SupportThreadScreenState extends ConsumerState<SupportThreadScreen> {
         _error = null;
       });
       if (stay && grew) _scrollToEnd();
+      _markVisibleRepliesRead(thread, credentials);
     } catch (e) {
       if (!mounted) return;
       if (quiet && _thread != null) return;
@@ -603,6 +655,10 @@ class _SupportThreadScreenState extends ConsumerState<SupportThreadScreen> {
     final draft = _Draft(message, _photos.photos, _replyingTo);
     _reply.clear();
     _photos.clear();
+    // Browsers only permit audible playback from a user gesture. The reply
+    // request completes too late to retain that gesture; native platforms
+    // still play on acknowledgement below.
+    if (kIsWeb) unawaited(ref.read(supportSoundProvider).playSent());
     _deliver(draft);
   }
 
@@ -633,7 +689,7 @@ class _SupportThreadScreenState extends ConsumerState<SupportThreadScreen> {
             replyToId: draft.replyTo?.id,
           );
       if (!mounted) return;
-      unawaited(ref.read(supportSoundProvider).playSent());
+      if (!kIsWeb) unawaited(ref.read(supportSoundProvider).playSent());
       await _load(quiet: true);
       if (!mounted) return;
       setState(() => _pending = null);
@@ -658,7 +714,10 @@ class _SupportThreadScreenState extends ConsumerState<SupportThreadScreen> {
 
   void _retry() {
     final draft = _failedDraft;
-    if (draft != null && !_sending) _deliver(draft);
+    if (draft != null && !_sending) {
+      if (kIsWeb) unawaited(ref.read(supportSoundProvider).playSent());
+      _deliver(draft);
+    }
   }
 
   void _startReply(SupportMessage message) {

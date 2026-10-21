@@ -6,6 +6,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../data/printing/thermal_printer_service.dart';
 import '../../domain/entities/business_settings.dart';
 import '../../domain/services/business_settings_service.dart';
+import '../../domain/services/theme_settings.dart';
 
 part 'business_settings_screen.g.dart';
 
@@ -155,9 +156,10 @@ class _BusinessSettingsScreenState extends ConsumerState<BusinessSettingsScreen>
   @override
   Widget build(BuildContext context) {
     final settingsAsync = ref.watch(currentBusinessSettingsProvider);
+    final themeMode = ref.watch(themeSettingsProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('General Settings')),
+      appBar: AppBar(title: const Text('Business & Receipts')),
       body: settingsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (error, _) => Center(child: Text('Failed to load: $error')),
@@ -168,6 +170,22 @@ class _BusinessSettingsScreenState extends ConsumerState<BusinessSettingsScreen>
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
+                Text('Appearance', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 8),
+                DropdownButtonFormField<ThemeMode>(
+                  key: ValueKey(themeMode),
+                  initialValue: themeMode,
+                  decoration: const InputDecoration(labelText: 'Theme'),
+                  items: const [
+                    DropdownMenuItem(value: ThemeMode.system, child: Text('Use system setting')),
+                    DropdownMenuItem(value: ThemeMode.light, child: Text('Light')),
+                    DropdownMenuItem(value: ThemeMode.dark, child: Text('Dark')),
+                  ],
+                  onChanged: (mode) {
+                    if (mode != null) ref.read(themeSettingsProvider.notifier).setMode(mode);
+                  },
+                ),
+                const SizedBox(height: 28),
                 Text('Shown on printed receipts.', style: Theme.of(context).textTheme.bodySmall),
                 const SizedBox(height: 16),
                 TextFormField(

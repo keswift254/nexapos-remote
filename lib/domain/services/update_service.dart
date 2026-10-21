@@ -86,6 +86,19 @@ String? publishedChecksumError(String? expectedHex) {
   return null;
 }
 
+/// Retry one transient connection failure without retrying integrity errors
+/// or insecure URLs. A second failure still reaches the caller unchanged.
+Future<void> retryTransientUpdateDownload(
+  Future<void> Function() download,
+) async {
+  try {
+    await download();
+  } on UpdateOfflineException {
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    await download();
+  }
+}
+
 /// Remembers the last background check's result so the dashboard banner
 /// (see dashboard_screen.dart) can show it reactively without every
 /// screen re-querying the server itself - mirrors
@@ -187,7 +200,9 @@ class UpdateService {
     // leaves everything untouched and falls through to the full download
     // below, so a patch is purely an optimization, never a new way to fail.
     await _tryWindowsPatch(info, legacy: legacy);
-    final url = legacy ? info.windowsLegacyInstallerUrl : info.windowsInstallerUrl;
+    final url = legacy
+        ? info.windowsLegacyInstallerUrl
+        : info.windowsInstallerUrl;
     if (url.isEmpty) {
       return Result.failure(
         legacy
@@ -333,17 +348,19 @@ class UpdateService {
     try {
       final tempDir = await getTemporaryDirectory();
       final setupFile = File(path.join(tempDir.path, 'NexaPOS-setup.exe'));
-      await _ref
-          .read(updateGatewayProvider)
-          .downloadTo(
-            url,
-            setupFile,
-            onProgress: (received, total) {
-              if (total != null && total > 0) {
-                onProgress?.call(received / total * 0.9);
-              }
-            },
-          );
+      await retryTransientUpdateDownload(
+        () => _ref
+            .read(updateGatewayProvider)
+            .downloadTo(
+              url,
+              setupFile,
+              onProgress: (received, total) {
+                if (total != null && total > 0) {
+                  onProgress?.call(received / total * 0.9);
+                }
+              },
+            ),
+      );
       final checksumError = await _verifyChecksum(setupFile, sha256);
       if (checksumError != null) return Result.failure(checksumError);
       onProgress?.call(1.0);
@@ -401,7 +418,10 @@ class UpdateService {
               onProgress: (received, total) {
                 if (total != null && total > 0) {
                   onProgress?.call(received / total);
-                  final percent = (received / total * 100).floor().clamp(0, 100);
+                  final percent = (received / total * 100).floor().clamp(
+                    0,
+                    100,
+                  );
                   if (percent != lastNotifiedPercent) {
                     lastNotifiedPercent = percent;
                     _AndroidDownloadNotification.update(
@@ -413,7 +433,10 @@ class UpdateService {
               },
             );
 
-        final checksumError = await _verifyChecksum(apkFile, info.androidSha256);
+        final checksumError = await _verifyChecksum(
+          apkFile,
+          info.androidSha256,
+        );
         if (checksumError != null) return Result.failure(checksumError);
       } else {
         onProgress?.call(1.0);
@@ -464,7 +487,10 @@ class UpdateService {
   /// isn't on the exact version it was built from, a download/apply/
   /// verify step fails - so the caller always has the normal full
   /// download to fall back to. Never throws.
-  Future<bool> _tryAndroidPatch(LatestVersionInfo info, File destination) async {
+  Future<bool> _tryAndroidPatch(
+    LatestVersionInfo info,
+    File destination,
+  ) async {
     final patchUrl = info.androidPatchUrl;
     final expectedNewSha256 = info.androidSha256;
     if (patchUrl == null ||
@@ -589,7 +615,8 @@ class UpdateInstallNotifier extends _$UpdateInstallNotifier {
     // this line is unreached there. Android reaches here either way.
     result.when(
       ok: (_) => state = const UpdateInstallState(),
-      failure: (message) => state = UpdateInstallState(error: message, info: info),
+      failure: (message) =>
+          state = UpdateInstallState(error: message, info: info),
     );
   }
 }
@@ -608,9 +635,7 @@ class _AndroidDownloadNotification {
 
   static Future<void> start(String text) {
     if (!Platform.isAndroid) return Future.value();
-    return _channel
-        .invokeMethod('start', {'text': text})
-        .catchError((_) {});
+    return _channel.invokeMethod('start', {'text': text}).catchError((_) {});
   }
 
   static Future<void> update(String text, int progressPercent) {

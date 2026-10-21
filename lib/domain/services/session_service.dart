@@ -12,9 +12,8 @@ part 'session_service.g.dart';
 
 const _storedUserIdKey = 'nexapos.session.userId';
 
-/// Current logged-in user as reactive state, persisted via
-/// flutter_secure_storage so app resume behaves like PHP's session
-/// cookie. Role checks are enforced here at the use-case boundary, not
+/// Current logged-in user as reactive state, stored for this app session
+/// only (native process or browser tab). Role checks are enforced here at the use-case boundary, not
 /// just by hiding buttons - on a phone there's no separate server tier
 /// to fall back on the way Auth::requireRole() protects a PHP route
 /// even if the UI is bypassed. go_router's redirect guard calls [can]

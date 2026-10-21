@@ -476,13 +476,36 @@
         if (!('serviceWorker' in navigator)) {
           throw new UpdateProblem('This browser cannot update the app by itself. Reload the page instead.');
         }
-        emit(-1, 'Looking for the new version…');
-        const registration = await navigator.serviceWorker.getRegistration();
-        if (!registration) throw new UpdateProblem('The app is still getting ready. Wait a few seconds and try again.');
+        emit(-1, 'Preparing the update…');
+        function onEarlyProgress(event) {
+          const data = event.data;
+          if (data && data.type === 'NEXAPOS_PROGRESS') {
+            emit(data.fraction, DOWNLOAD_PHRASE);
+          }
+        }
+        navigator.serviceWorker.addEventListener('message', onEarlyProgress);
+        // The initial worker may still be installing when the user opens
+        // Software Update. Wait for the registration started at page load
+        // instead of failing the first attempt with "try again".
+        let registration;
         try {
-          await registration.update();
-        } catch (_) {
-          throw new UpdateProblem('Could not reach the update server. Check your internet connection and try again.');
+          if (window.NEXAPOS_SERVICE_WORKER_READY) {
+            try {
+              await window.NEXAPOS_SERVICE_WORKER_READY;
+            } catch (_) {
+              throw new UpdateProblem('The update service is not ready. Check your connection and try again.');
+            }
+          }
+          registration = await navigator.serviceWorker.getRegistration();
+          if (!registration) throw new UpdateProblem('The app is still getting ready. Wait a few seconds and try again.');
+          emit(-1, 'Checking for the new version…');
+          try {
+            await registration.update();
+          } catch (_) {
+            throw new UpdateProblem('Could not reach the update server. Check your internet connection and try again.');
+          }
+        } finally {
+          navigator.serviceWorker.removeEventListener('message', onEarlyProgress);
         }
         const pending = registration.installing || registration.waiting;
         if (pending && pending.state !== 'activated') {

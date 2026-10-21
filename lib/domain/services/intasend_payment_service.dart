@@ -65,7 +65,7 @@ class IntaSendPaymentService {
   }) async {
     final credentials = await _credentials.load();
     if (!credentials.isConfigured) {
-      return const Result.failure('Payments are not set up yet. Complete Payment Settings first.');
+      return const Result.failure('Payments are not set up yet. Complete Payments & Payouts first.');
     }
 
     final phone = _normalizeKenyanPhone(customerPhone);

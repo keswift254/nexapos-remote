@@ -203,7 +203,21 @@ self.addEventListener('message', (event) => {
       progress.start();
       const target = missingOnly ? cache : await caches.open(stagingName);
       for (const { entry, request } of todo) {
-        await fetchIntoCache(target, request, (bytes) => progress.loaded(bytes), { cache: 'no-store' });
+        // A dropped connection on one asset should not force the shopkeeper
+        // to press Try again and repeat the entire update. Keep verified
+        // files in the staging cache and retry this one request in place.
+        let lastError;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            await fetchIntoCache(target, request, (bytes) => progress.loaded(bytes), { cache: 'no-store' });
+            lastError = null;
+            break;
+          } catch (error) {
+            lastError = error;
+            if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 350));
+          }
+        }
+        if (lastError) throw lastError;
         progress.fileDone(entry);
       }
       if (!missingOnly) {

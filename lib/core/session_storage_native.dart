@@ -1,25 +1,24 @@
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-
 import 'session_storage.dart';
 
-/// Native has no "shared computer" risk the way a browser does, so the
-/// session can safely live in the same secure storage as everything
-/// else - a separate FlutterSecureStorage instance rather than reusing
-/// secureStorageProvider's, purely to keep this class free of a Riverpod
-/// Ref dependency (createSessionStorage() is called from a conditional
-/// import, not a provider body).
+/// Login sessions last only as long as the native process. Device identity,
+/// licence, database keys and lock preferences remain in their own persistent
+/// secure storage. Closing/reopening the app must not silently restore a
+/// cashier or owner session from disk, including on Windows.
 SessionStorage createSessionStorage() => _NativeSessionStorage();
 
 class _NativeSessionStorage implements SessionStorage {
-  static const _storage = FlutterSecureStorage();
+  static final Map<String, String> _session = {};
 
   @override
-  Future<String?> read({required String key}) => _storage.read(key: key);
+  Future<String?> read({required String key}) async => _session[key];
 
   @override
-  Future<void> write({required String key, required String value}) =>
-      _storage.write(key: key, value: value);
+  Future<void> write({required String key, required String value}) async {
+    _session[key] = value;
+  }
 
   @override
-  Future<void> delete({required String key}) => _storage.delete(key: key);
+  Future<void> delete({required String key}) async {
+    _session.remove(key);
+  }
 }

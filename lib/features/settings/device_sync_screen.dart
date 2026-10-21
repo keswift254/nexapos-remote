@@ -687,7 +687,7 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
         leading: BackButton(
           onPressed: () => context.go(widget.joinOnly ? '/activate' : '/'),
         ),
-        title: Text(widget.joinOnly ? 'Join a shop' : 'Device Sync'),
+        title: Text(widget.joinOnly ? 'Join a shop' : 'Sync & Invites'),
       ),
       body: credentialsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),

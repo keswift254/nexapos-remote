@@ -70,6 +70,27 @@ void main() {
     });
   });
 
+  test('a transient update download retries once automatically', () async {
+    var attempts = 0;
+    await retryTransientUpdateDownload(() async {
+      attempts++;
+      if (attempts == 1) throw const UpdateOfflineException();
+    });
+    expect(attempts, 2);
+  });
+
+  test('a permanent update download failure is not retried', () async {
+    var attempts = 0;
+    await expectLater(
+      retryTransientUpdateDownload(() async {
+        attempts++;
+        throw const UpdateException('bad checksum');
+      }),
+      throwsA(isA<UpdateException>()),
+    );
+    expect(attempts, 1);
+  });
+
   group('Windows 7/8 edition update track', () {
     ProviderContainer buildContainer(
       Map<String, Object?> published, {

@@ -242,7 +242,7 @@ class _PaymentSettingsScreenState extends ConsumerState<PaymentSettingsScreen> {
     final credentialsAsync = ref.watch(currentPaymentCredentialsProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Payment Settings')),
+      appBar: AppBar(title: const Text('Payments & Payouts')),
       body: credentialsAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (error, _) => Center(child: Text('Failed to load: $error')),

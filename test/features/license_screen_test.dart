@@ -102,7 +102,7 @@ void main() {
     serverAnswer = () => _verify(valid: true, validUntil: '2026-01-31 04:00:05');
     await openLicenseScreen(tester, savedValidUntil: '2026-01-31T04:00:05.000Z');
 
-    expect(find.text('License'), findsOneWidget);
+    expect(find.text('My License'), findsOneWidget);
     expect(find.text('Active'), findsOneWidget);
     expect(find.text('Time remaining'), findsOneWidget);
     // 30 days, 4 hours, 0 minutes, 5 seconds from the fixed clock.

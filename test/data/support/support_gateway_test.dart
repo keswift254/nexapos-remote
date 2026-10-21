@@ -10,6 +10,21 @@ import 'package:nexapos_mobile/data/payments/platform_http_client.dart'
 import 'package:nexapos_mobile/data/support/support_gateway.dart';
 
 void main() {
+  test('read receipt posts the last visible support message with device auth', () async {
+    final gateway = SupportGateway(MockClient((request) async {
+      expect(request.url.queryParameters['action'], 'support_mark_read');
+      expect(request.headers['Authorization'], 'Bearer shop-key');
+      expect(jsonDecode(request.body), {'ticket_id': 7, 'through_message_id': 91});
+      return http.Response('{"success":true,"marked":1}', 200);
+    }));
+    await gateway.markRead(
+      baseUrl: 'https://example.com/index.php',
+      apiKey: 'shop-key',
+      ticketId: 7,
+      throughMessageId: 91,
+    );
+  });
+
   test('reads support IDs returned as strings by MySQL/PHP', () async {
     final gateway = SupportGateway(
       MockClient((request) async {

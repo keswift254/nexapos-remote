@@ -511,7 +511,13 @@ class PlatformOnboardingGateway {
         .whereType<Map>()
         .map(
           (device) => DeviceInfo(
-            id: (device['id'] as num? ?? 0).toInt(),
+            // MySQL/PHP may serialize an integer ID as either a JSON number
+            // or a decimal string. A single string must not blank the list.
+            id: switch (device['id']) {
+              num value => value.toInt(),
+              String value => int.tryParse(value) ?? 0,
+              _ => 0,
+            },
             deviceLabel: (device['device_label'] as String? ?? '').trim(),
             isOwner: device['is_owner'] == true,
             status: (device['status'] as String? ?? '').trim(),

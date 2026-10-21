@@ -93,7 +93,7 @@ class _SyncHealthBannerState extends ConsumerState<SyncHealthBanner> {
                 Navigator.pop(dialogContext);
                 context.push('/device-sync');
               },
-              child: const Text('Open Device Sync'),
+              child: const Text('Open Sync & Invites'),
             ),
         ],
       ),

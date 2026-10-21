@@ -170,7 +170,7 @@ class _RegionTimeScreenState extends ConsumerState<RegionTimeScreen> {
     final health = ref.watch(clockHealthProvider);
     final selected = _selected;
     return Scaffold(
-      appBar: AppBar(title: const Text('Region and Time')),
+      appBar: AppBar(title: const Text('Date, Time & Region')),
       body: !_loaded || selected == null
           ? const Center(child: CircularProgressIndicator())
           : ListView(

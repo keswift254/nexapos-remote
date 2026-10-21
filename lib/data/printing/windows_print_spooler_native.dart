@@ -97,7 +97,7 @@ Future<void> sendViaWindowsSpooler(String printerName, Uint8List bytes) async {
     final opened = OpenPrinter(PCWSTR(printerNamePtr), handlePtr, null);
     if (!opened.value) {
       throw ThermalPrinterException(
-        'Could not open the printer "$printerName" - check it\'s still connected and its name in General Settings.',
+        'Could not open the printer "$printerName" - check it\'s still connected and its name in Business & Receipts.',
       );
     }
     final handle = PRINTER_HANDLE(handlePtr.value);

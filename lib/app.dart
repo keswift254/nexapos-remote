@@ -11,6 +11,7 @@ import 'core/providers.dart';
 import 'core/keyboard_back.dart';
 import 'core/utils/monotonic_clock.dart';
 import 'domain/services/session_service.dart';
+import 'domain/services/theme_settings.dart';
 import 'domain/services/sync_service.dart';
 import 'domain/services/lan_sync_service.dart';
 import 'domain/services/license_service.dart';
@@ -177,8 +178,9 @@ GoRouter router(Ref ref) {
       GoRoute(
         path: '/support',
         builder: (context, state) => SupportScreen(
-          initialTicketId:
-              int.tryParse(state.uri.queryParameters['ticket'] ?? ''),
+          initialTicketId: int.tryParse(
+            state.uri.queryParameters['ticket'] ?? '',
+          ),
         ),
       ),
       GoRoute(
@@ -524,17 +526,29 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
   @override
   Widget build(BuildContext context) {
     final router = ref.watch(routerProvider);
+    final themeMode = ref.watch(themeSettingsProvider);
     return Listener(
       onPointerDown: _recordActivity,
       onPointerSignal: _recordActivity,
       behavior: HitTestBehavior.translucent,
       child: MaterialApp.router(
         title: 'NexaPOS',
-        theme: ThemeData(colorSchemeSeed: Colors.indigo, useMaterial3: true),
+        theme: ThemeData(
+          colorSchemeSeed: Colors.indigo,
+          brightness: Brightness.light,
+          useMaterial3: true,
+        ),
+        darkTheme: ThemeData(
+          colorSchemeSeed: Colors.indigo,
+          brightness: Brightness.dark,
+          useMaterial3: true,
+        ),
+        themeMode: themeMode,
         routerConfig: router,
         builder: (context, child) => CallbackShortcuts(
           bindings: {
-            const SingleActivator(LogicalKeyboardKey.escape): () => keyboardBack(router),
+            const SingleActivator(LogicalKeyboardKey.escape): () =>
+                keyboardBack(router),
             const SingleActivator(LogicalKeyboardKey.f2): () =>
                 router.push('/new-sale'),
             const SingleActivator(LogicalKeyboardKey.f4): () =>

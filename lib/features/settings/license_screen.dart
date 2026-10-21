@@ -116,7 +116,7 @@ class _LicenseScreenState extends ConsumerState<LicenseScreen> {
     final status = _status;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('License'),
+        title: const Text('My License'),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),

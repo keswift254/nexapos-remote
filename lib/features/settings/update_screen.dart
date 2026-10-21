@@ -246,7 +246,9 @@ class _UpdateScreenState extends ConsumerState<UpdateScreen>
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      installState.progress < 0.9
+                      installState.progress == 0
+                          ? 'Preparing the update…'
+                          : installState.progress < 0.9
                           ? 'Downloading... ${(installState.progress * 100).round()}%'
                           : 'Installing...',
                       textAlign: TextAlign.center,

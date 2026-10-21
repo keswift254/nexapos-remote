@@ -177,6 +177,20 @@ void main() {
   });
 
   group('listDevices', () {
+    test('accepts device IDs encoded as decimal strings by the server', () async {
+      final gateway = PlatformOnboardingGateway(MockClient((request) async {
+        return http.Response(jsonEncode({
+          'success': true,
+          'devices': [
+            {'id': '50', 'device_label': 'REDKEM-PC', 'is_owner': true, 'status': 'active'},
+          ],
+        }), 200);
+      }));
+
+      final devices = await gateway.listDevices(baseUrl: _baseUrl, apiKey: 'owner_key');
+      expect(devices.single.id, 50);
+    });
+
     test('parses devices, marking the owner and disabled ones', () async {
       final gateway = PlatformOnboardingGateway(MockClient((request) async {
         expect(request.url.queryParameters['action'], 'list_devices');

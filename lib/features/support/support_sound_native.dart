@@ -7,6 +7,10 @@ import 'package:win32/win32.dart';
 
 const _channel = MethodChannel('com.nexapos/sound');
 
+// Kept for the conditional backend's shared interface; native playback uses
+// the WAV bytes through playWav instead.
+Future<void> playAsset() async {}
+
 Pointer<Uint8>? _windowsBuffer;
 int _windowsBufferLength = 0;
 

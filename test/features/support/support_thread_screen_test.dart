@@ -62,6 +62,7 @@ class _Server extends SupportGateway {
   int threadCalls = 0;
   final replies = <({String message, int? replyToId, int photos})>[];
   final reactions = <({int messageId, String? emoji})>[];
+  final readThrough = <int>[];
   Completer<void>? holdReply;
   bool failReply = false;
   bool failReact = false;
@@ -139,6 +140,16 @@ class _Server extends SupportGateway {
   }
 
   @override
+  Future<void> markRead({
+    required String baseUrl,
+    required String apiKey,
+    required int ticketId,
+    required int throughMessageId,
+  }) async {
+    readThrough.add(throughMessageId);
+  }
+
+  @override
   Future<Uint8List> photo({
     required String baseUrl,
     required String apiKey,
@@ -202,6 +213,18 @@ void main() {
   setUp(() {
     server = _Server([_support(1, 'Hello from support')]);
     sound = _Sound();
+  });
+
+  testWidgets('opening a visible thread acknowledges its support reply once', (tester) async {
+    await open(tester);
+    expect(server.readThrough, [1]);
+    await tester.pump(const Duration(seconds: 21));
+    await tester.pumpAndSettle();
+    expect(server.readThrough, [1], reason: 'refreshing does not send duplicate receipts');
+    server.messages.add(_support(2, 'One more thing'));
+    await tester.pump(const Duration(seconds: 21));
+    await tester.pumpAndSettle();
+    expect(server.readThrough, [1, 2]);
   });
 
   testWidgets('sending: "Sending…" at once, then "Delivered" with the sound', (

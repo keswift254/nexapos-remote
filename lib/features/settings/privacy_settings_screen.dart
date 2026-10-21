@@ -49,7 +49,7 @@ class _PrivacySettingsScreenState extends ConsumerState<PrivacySettingsScreen> {
         ? 'Windows Hello'
         : 'Fingerprint or face recognition';
     return Scaffold(
-      appBar: AppBar(title: const Text('Privacy')),
+      appBar: AppBar(title: const Text('Security & Privacy')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [

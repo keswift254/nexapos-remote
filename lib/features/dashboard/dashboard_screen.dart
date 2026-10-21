@@ -336,39 +336,39 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
               itemBuilder: (context) => [
                 const PopupMenuItem(
                   value: '/privacy-settings',
-                  child: Text('Privacy'),
+                  child: Text('Security & Privacy'),
                 ),
                 if (user.role == UserRole.admin)
                   const PopupMenuItem(
                     value: '/business-settings',
-                    child: Text('General Settings'),
+                    child: Text('Business & Receipts'),
                   ),
                 if (user.role == UserRole.admin)
                   const PopupMenuItem(
                     value: '/payment-settings',
-                    child: Text('Payment Settings'),
+                    child: Text('Payments & Payouts'),
                   ),
                 if (user.role == UserRole.admin)
                   const PopupMenuItem(
                     value: '/device-sync',
-                    child: Text('Device Sync'),
+                    child: Text('Sync & Invites'),
                   ),
                 if (user.role == UserRole.admin)
                   const PopupMenuItem(
                     value: '/connected-devices',
-                    child: Text('Connected Devices'),
+                    child: Text('Devices in This Shop'),
                   ),
                 if (user.role == UserRole.admin)
-                  const PopupMenuItem(value: '/backup', child: Text('Backup')),
+                  const PopupMenuItem(value: '/backup', child: Text('Backup & Restore')),
                 if (user.role == UserRole.admin)
                   const PopupMenuItem(
                     value: '/region-time',
-                    child: Text('Region and Time'),
+                    child: Text('Date, Time & Region'),
                   ),
-                const PopupMenuItem(value: '/license', child: Text('License')),
+                const PopupMenuItem(value: '/license', child: Text('My License')),
                 const PopupMenuItem(
                   value: '/update',
-                  child: Text('Check for Updates'),
+                  child: Text('Software Update'),
                 ),
               ],
             ),

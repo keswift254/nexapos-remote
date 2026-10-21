@@ -92,7 +92,7 @@ class ThermalPrinterService {
       final printerName = await loadWindowsPrinterName();
       if (printerName.isEmpty) {
         throw const ThermalPrinterException(
-          'Thermal printer not configured. Choose a printer in General Settings first.',
+          'Thermal printer not configured. Choose a printer in Business & Receipts first.',
         );
       }
       await _sendViaWindowsSpooler(printerName, bytes);

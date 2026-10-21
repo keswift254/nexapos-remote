@@ -81,17 +81,17 @@ void main() {
       }
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
-      expect(find.text('Privacy'), findsOneWidget);
+      expect(find.text('Security & Privacy'), findsOneWidget);
       // Every role can see the license status (it holds nothing secret).
-      expect(find.text('License'), findsOneWidget);
+      expect(find.text('My License'), findsOneWidget);
       if (role != UserRole.admin) {
-        expect(find.text('General Settings'), findsNothing);
-        expect(find.text('Payment Settings'), findsNothing);
-        expect(find.text('Device Sync'), findsNothing);
-        expect(find.text('Backup'), findsNothing);
-        expect(find.text('Region and Time'), findsNothing);
+        expect(find.text('Business & Receipts'), findsNothing);
+        expect(find.text('Payments & Payouts'), findsNothing);
+        expect(find.text('Sync & Invites'), findsNothing);
+        expect(find.text('Backup & Restore'), findsNothing);
+        expect(find.text('Date, Time & Region'), findsNothing);
       } else {
-        expect(find.text('Region and Time'), findsOneWidget);
+        expect(find.text('Date, Time & Region'), findsOneWidget);
       }
       // Relative, not absolute, from here on - automatic background
       // checks (dashboard load, app startup) already happened above and
@@ -99,7 +99,7 @@ void main() {
       // actually matters is that each explicit tap below adds exactly
       // one more call of its own.
       final checksBeforeFirstTap = updates.checks;
-      await tester.tap(find.text('Check for Updates'));
+      await tester.tap(find.text('Software Update'));
       await tester.pumpAndSettle();
       expect(find.text('Software Update'), findsOneWidget);
       expect(updates.checks, checksBeforeFirstTap + 1);

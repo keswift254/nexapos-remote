@@ -18,22 +18,22 @@ class ConnectedDevicesEntryScreen extends ConsumerWidget {
     final credentialsAsync = ref.watch(currentPaymentCredentialsProvider);
     return credentialsAsync.when(
       loading: () => Scaffold(
-        appBar: AppBar(title: const Text('Connected Devices')),
+        appBar: AppBar(title: const Text('Devices in This Shop')),
         body: const Center(child: CircularProgressIndicator()),
       ),
       error: (error, _) => Scaffold(
-        appBar: AppBar(title: const Text('Connected Devices')),
+        appBar: AppBar(title: const Text('Devices in This Shop')),
         body: Center(child: Text('Failed to load: $error')),
       ),
       data: (credentials) => credentials.isConfigured
           ? DeviceManagementScreen(credentials: credentials)
           : Scaffold(
-              appBar: AppBar(title: const Text('Connected Devices')),
+              appBar: AppBar(title: const Text('Devices in This Shop')),
               body: const Center(
                 child: Padding(
                   padding: EdgeInsets.all(24),
                   child: Text(
-                    'This device isn\'t registered with a shop yet - set that up first from Payment Settings or Device Sync.',
+                    'This device isn\'t registered with a shop yet - set that up first from Payments & Payouts or Sync & Invites.',
                     textAlign: TextAlign.center,
                   ),
                 ),
@@ -122,7 +122,7 @@ class _DeviceManagementScreenState extends ConsumerState<DeviceManagementScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Connected Devices')),
+      appBar: AppBar(title: const Text('Devices in This Shop')),
       body: FutureBuilder<List<DeviceInfo>>(
         future: _devicesFuture,
         builder: (context, snapshot) {

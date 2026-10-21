@@ -253,6 +253,29 @@ class SupportGateway {
     return thread;
   }
 
+  /// Acknowledges support replies only after the shop has opened their
+  /// conversation. Repeating the same receipt is harmless on the server.
+  Future<void> markRead({
+    required String baseUrl,
+    required String apiKey,
+    required int ticketId,
+    required int throughMessageId,
+  }) async {
+    final response = await platformRequest(
+      _client,
+      'POST',
+      'support_mark_read',
+      baseUrl,
+      apiKey: apiKey,
+      body: {'ticket_id': ticketId, 'through_message_id': throughMessageId},
+    );
+    if (response['success'] != true) {
+      throw PaystackException(
+        platformResponseMessage(response, 'Could not mark the support reply as read.'),
+      );
+    }
+  }
+
   /// Sends a message on a ticket, optionally quoting one of its messages ([replyToId]).
   Future<void> reply({
     required String baseUrl,

@@ -331,7 +331,7 @@ class SyncService {
     }
     if (await hasPendingShopChange) {
       lastError =
-          'Shop change interrupted. Resolve it in Device Sync before syncing.';
+          'Shop change interrupted. Resolve it in Sync & Invites before syncing.';
       return;
     }
     final credentials = await _credentials.load();
@@ -429,7 +429,7 @@ class SyncService {
       // ...) - try again next cycle rather than surfacing an error from
       // a background process the user didn't explicitly trigger.
     } catch (_) {
-      lastError = 'Sync could not complete. Local data is retained; retry from Device Sync.';
+      lastError = 'Sync could not complete. Local data is retained; retry from Sync & Invites.';
     } finally {
       _progress(
         lastError ?? (setAside ? 'Sync will continue in a moment' : 'Sync complete'),

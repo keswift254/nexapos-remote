@@ -141,6 +141,14 @@ test('a failed full refresh leaves every existing file in place and reports a re
   assert.deepEqual([...h.store.keys()], ['nexapos-web-v1'], 'the staging cache is gone');
 });
 
+test('a transient refresh failure retries the one file without a second button tap', async () => {
+  const h = workerHarness({cached: ['./index.html', './main.dart.js'], failing: {'/app/main.dart.js': 1}});
+  await h.refresh();
+  assert.equal(h.replies.at(-1).ok, true);
+  assert.equal(h.requests.filter(r => r.path === '/app/main.dart.js').length, 2);
+  assert.ok([...h.realCache().values()].every(r => r.marker !== 'old'));
+});
+
 test('refreshing only what is missing fetches just the files the browser evicted', async () => {
   const h = workerHarness({cached: ['./index.html']});
   await h.refresh({missingOnly: true});
@@ -259,7 +267,7 @@ test('a newer build: waits for it to install, shows its progress, downloads noth
   await tick(2);
   pending.become('activated');
   const outcome = await run;
-  assert.deepEqual(h.state.progress.map(p => p[0]), [-1, 0, 0.3, 0.8, 1]);
+  assert.deepEqual(h.state.progress.map(p => p[0]), [-1, -1, 0, 0.3, 0.8, 1]);
   assert.equal(h.state.progress.at(-1)[1], 'Restarting…');
   assert.equal(h.state.sent.length, 0, 'the new worker already cached everything: no refresh message, no second download');
   assert.equal(h.state.replaced.length, 1);
@@ -275,8 +283,24 @@ test('no newer worker but the one running is the newest: only evicted files are 
   await h.update();
   assert.deepEqual(h.state.sent.map(m => m.type), ['NEXAPOS_VERSION', 'NEXAPOS_REFRESH']);
   assert.equal(h.state.sent[1].missingOnly, true);
-  assert.deepEqual(h.state.progress.map(p => p[0]), [-1, 0, 0.5, 1]);
+  assert.deepEqual(h.state.progress.map(p => p[0]), [-1, -1, 0, 0.5, 1]);
   assert.equal(h.state.replaced.length, 1);
+});
+
+test('the first update waits for the page-start worker and shows its progress', async () => {
+  const h = pageHarness({servedVersion: 'abc', version: 'abc'});
+  let ready;
+  h.sandbox.NEXAPOS_SERVICE_WORKER_READY = new Promise(resolve => { ready = resolve; });
+  const run = h.update();
+  await tick(2);
+  assert.equal(h.state.updates, 0, 'do not race the startup registration');
+  h.tellPage({type: 'NEXAPOS_PROGRESS', fraction: 0.4});
+  assert.ok(h.state.progress.some(([fraction]) => fraction === 0.4));
+  ready(h.registration);
+  await run;
+  assert.equal(h.state.updates, 1);
+  assert.equal(h.state.replaced.length, 1);
+  assert.equal(h.state.swListeners.size, 0);
 });
 
 test('no newer worker found, but the server has a different build (a browser that missed the update): every file is downloaded again', async () => {

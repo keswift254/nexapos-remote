@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart' show ByteData, rootBundle;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -24,15 +25,23 @@ class DeviceSupportSound implements SupportSound {
     Future<void> Function(Uint8List wav)? play,
     Future<ByteData> Function(String asset)? load,
   }) : _play = play ?? backend.playWav,
-       _load = load ?? rootBundle.load;
+       _load = load ?? rootBundle.load,
+       _useBrowserAsset = play == null && load == null;
 
   final Future<void> Function(Uint8List wav) _play;
   final Future<ByteData> Function(String asset) _load;
+  final bool _useBrowserAsset;
   Uint8List? _wav;
 
   @override
   Future<void> playSent() async {
     try {
+      if (kIsWeb && _useBrowserAsset) {
+        // The browser play() call must happen in the send button's user
+        // gesture. Loading Flutter asset bytes first loses that activation.
+        await backend.playAsset();
+        return;
+      }
       final wav = _wav ??= await _loadWav();
       await _play(wav);
     } catch (_) {
