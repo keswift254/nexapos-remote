@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, visibleForTesting;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -118,12 +118,21 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
     if (mounted) await _load();
   }
 
+  /// The address the shop gave on its most recent ticket, so it does not have to be typed again.
+  String _lastTicketEmail() {
+    for (final ticket in _tickets) {
+      final email = ticket.customerEmail?.trim() ?? '';
+      if (email.isNotEmpty) return email;
+    }
+    return '';
+  }
+
   Future<void> _newTicket() async {
     final credentials = _credentials;
     if (credentials == null) return;
-    final draft = await showDialog<_TicketDraft>(
+    final draft = await showDialog<SupportTicketDraft>(
       context: context,
-      builder: (_) => const _NewTicketDialog(),
+      builder: (_) => SupportNewTicketDialog(initialEmail: _lastTicketEmail()),
     );
     if (draft == null || !mounted) return;
     try {
@@ -328,12 +337,28 @@ class _SupportScreenState extends ConsumerState<SupportScreen> {
   );
 }
 
-class _TicketDraft {
-  const _TicketDraft(this.subject, this.message, this.email, this.photos);
+/// What the new-ticket dialog hands back: the email address is always present.
+@visibleForTesting
+class SupportTicketDraft {
+  const SupportTicketDraft(this.subject, this.message, this.email, this.photos);
   final String subject;
   final String message;
-  final String? email;
+  final String email;
   final List<Uint8List> photos;
+}
+
+/// Why [raw] cannot be used as the address replies are emailed to, or null when it can.
+/// Every ticket needs one: support's replies are copied to it.
+@visibleForTesting
+String? supportEmailProblem(String raw) {
+  final email = raw.trim();
+  if (email.isEmpty) {
+    return 'Enter your email address - we send a copy of every reply there.';
+  }
+  if (!RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email)) {
+    return 'Enter a valid email address.';
+  }
+  return null;
 }
 
 String _ticketStatusLabel(String status) => switch (status) {
@@ -342,16 +367,18 @@ String _ticketStatusLabel(String status) => switch (status) {
   _ => 'Waiting for support',
 };
 
-class _NewTicketDialog extends StatefulWidget {
-  const _NewTicketDialog();
+@visibleForTesting
+class SupportNewTicketDialog extends StatefulWidget {
+  const SupportNewTicketDialog({super.key, this.initialEmail = ''});
+  final String initialEmail;
   @override
-  State<_NewTicketDialog> createState() => _NewTicketDialogState();
+  State<SupportNewTicketDialog> createState() => _SupportNewTicketDialogState();
 }
 
-class _NewTicketDialogState extends State<_NewTicketDialog> {
+class _SupportNewTicketDialogState extends State<SupportNewTicketDialog> {
   final _subject = TextEditingController();
   final _message = TextEditingController();
-  final _email = TextEditingController();
+  late final _email = TextEditingController(text: widget.initialEmail);
   String? _emailError;
   final _photos = SupportPhotoController();
 
@@ -369,19 +396,14 @@ class _NewTicketDialogState extends State<_NewTicketDialog> {
     final message = _message.text.trim();
     final email = _email.text.trim();
     if (subject.length < 3 || (message.isEmpty && _photos.isEmpty)) return;
-    if (email.isNotEmpty &&
-        !RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email)) {
-      setState(() => _emailError = 'Enter a valid email address.');
+    final problem = supportEmailProblem(email);
+    if (problem != null) {
+      setState(() => _emailError = problem);
       return;
     }
     Navigator.pop(
       context,
-      _TicketDraft(
-        subject,
-        message,
-        email.isEmpty ? null : email,
-        _photos.photos,
-      ),
+      SupportTicketDraft(subject, message, email, _photos.photos),
     );
   }
 
@@ -438,9 +460,9 @@ class _NewTicketDialogState extends State<_NewTicketDialog> {
                 if (_emailError != null) setState(() => _emailError = null);
               },
               decoration: InputDecoration(
-                labelText: 'Email for ticket updates (optional)',
+                labelText: 'Email address (required)',
                 hintText: 'you@example.com',
-                helperText: 'We can email you when support replies.',
+                helperText: 'We email you a copy of every reply.',
                 errorText: _emailError,
                 prefixIcon: const Icon(Icons.email_outlined),
               ),

@@ -21,6 +21,7 @@ on:
       - release-key-safety-1.0.71
       - release-key-safety-1.0.72
       - release-key-safety-1.0.73
+      - release-key-safety-1.0.74
     paths:
       - 'lib/**'
       - 'android/**'
@@ -391,7 +392,7 @@ jobs:
           if-no-files-found: error
 
   publish-github-release:
-    if: github.ref == 'refs/heads/nexapos-1.0.12-safety' || github.ref == 'refs/heads/release-1.0.57-lan-support-payments' || github.ref == 'refs/heads/improve-support-app' || github.ref == 'refs/heads/hotfix-activation-reporting-1.0.62' || github.ref == 'refs/heads/release-activation-share-1.0.63' || github.ref == 'refs/heads/release-activation-share-1.0.64' || github.ref == 'refs/heads/release-key-safety-1.0.65' || github.ref == 'refs/heads/release-key-safety-1.0.66' || github.ref == 'refs/heads/release-key-safety-1.0.67' || github.ref == 'refs/heads/release-key-safety-1.0.68' || github.ref == 'refs/heads/release-key-safety-1.0.69' || github.ref == 'refs/heads/release-key-safety-1.0.70' || github.ref == 'refs/heads/release-key-safety-1.0.71' || github.ref == 'refs/heads/release-key-safety-1.0.72' || github.ref == 'refs/heads/release-key-safety-1.0.73'
+    if: github.ref == 'refs/heads/nexapos-1.0.12-safety' || github.ref == 'refs/heads/release-1.0.57-lan-support-payments' || github.ref == 'refs/heads/improve-support-app' || github.ref == 'refs/heads/hotfix-activation-reporting-1.0.62' || github.ref == 'refs/heads/release-activation-share-1.0.63' || github.ref == 'refs/heads/release-activation-share-1.0.64' || github.ref == 'refs/heads/release-key-safety-1.0.65' || github.ref == 'refs/heads/release-key-safety-1.0.66' || github.ref == 'refs/heads/release-key-safety-1.0.67' || github.ref == 'refs/heads/release-key-safety-1.0.68' || github.ref == 'refs/heads/release-key-safety-1.0.69' || github.ref == 'refs/heads/release-key-safety-1.0.70' || github.ref == 'refs/heads/release-key-safety-1.0.71' || github.ref == 'refs/heads/release-key-safety-1.0.72' || github.ref == 'refs/heads/release-key-safety-1.0.73' || github.ref == 'refs/heads/release-key-safety-1.0.74'
     needs:
       - metadata
       - android-release
