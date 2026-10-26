@@ -9,6 +9,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/utils/money.dart';
+import '../../data/printing/thermal_printer_service.dart';
 import '../../domain/entities/business_settings.dart';
 import '../../domain/services/business_settings_service.dart';
 import '../../domain/services/reports_service.dart';
@@ -244,12 +245,43 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
   Future<void> _print(ReportData data) async {
     if (_printing) return;
     setState(() => _printing = true);
-    final bytes = await _buildPdfBytes(data);
     try {
-      await Printing.layoutPdf(
-        name: 'NexaPOS $_fileNameLabel.pdf',
-        onLayout: (format) => bytes,
-      );
+      if (kIsWeb) {
+        // Browsers require their own print dialog; native apps can send the
+        // ESC/POS report directly to the printer configured on this device.
+        final bytes = await _buildPdfBytes(data);
+        await Printing.layoutPdf(
+          name: 'NexaPOS $_fileNameLabel.pdf',
+          onLayout: (format) => bytes,
+        );
+      } else {
+        final settings = await ref.read(businessSettingsServiceProvider).get();
+        await ref
+            .read(thermalPrinterServiceProvider)
+            .printReport(
+              data: data,
+              reportTitle: _reportTitle,
+              periodLabel: _periodLabel,
+              isMonthlyReport: _isMonthly,
+              timeFormat: DateFormat(_isMultiDay ? 'd MMM HH:mm' : 'HH:mm'),
+              settings: settings,
+              generatedByName:
+                  ref.read(sessionProvider)?.name ?? 'System Admin',
+            );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Report sent to the configured thermal printer.'),
+            ),
+          );
+        }
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not print report: $error')),
+        );
+      }
     } finally {
       if (mounted) setState(() => _printing = false);
     }
@@ -483,9 +515,8 @@ class _ReportPdfPreviewScreenState extends State<ReportPdfPreviewScreen> {
           : defaultTargetPlatform == TargetPlatform.windows
           ? 'This Windows version cannot share PDF files directly. Save the PDF, then attach it in the app you choose.'
           : 'Could not open sharing for this PDF.';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
     }
   }
 
