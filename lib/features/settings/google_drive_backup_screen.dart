@@ -20,12 +20,26 @@ Future<String?> connectedGoogleDriveEmail(Ref ref) {
   return ref.watch(googleDriveBackupServiceProvider).connectedEmail();
 }
 
-@riverpod
+/// Riverpod would otherwise retry a failed list about ten times with growing pauses, so the
+/// real answer (expired sign-in, no access) appeared only after half a minute of spinning.
+/// Google's answers here are final; "Try again" is the merchant's retry.
+Duration? _neverRetry(int retryCount, Object error) => null;
+
+@Riverpod(retry: _neverRetry)
 Future<List<GoogleDriveBackupSummary>> googleDriveBackups(Ref ref) async {
   final email = await ref.watch(connectedGoogleDriveEmailProvider.future);
   if (email == null) return const [];
-  return ref.watch(googleDriveBackupServiceProvider).listBackups();
+  // Never leave the list spinning: a dead connection answers with a message and a retry.
+  return ref.watch(googleDriveBackupServiceProvider).listBackups().timeout(
+    googleDriveListTimeout,
+    onTimeout: () => throw TimeoutException(
+      'Google Drive did not answer in time. Check the internet connection and try again.',
+    ),
+  );
 }
+
+/// How long the Drive list may take before the screen gives up and offers "Try again".
+const googleDriveListTimeout = Duration(seconds: 45);
 
 /// Lets an Admin connect the shop's Google account so encrypted local
 /// backups also mirror to a hidden Drive folder (see
@@ -50,6 +64,18 @@ class GoogleDriveBackupSection extends ConsumerStatefulWidget {
 class _GoogleDriveBackupSectionState extends ConsumerState<GoogleDriveBackupSection> {
   bool _busy = false;
   String? _error;
+  // Google rejected the saved sign-in: the fix is to connect again, so offer that button.
+  bool _needsReconnect = false;
+
+  /// Shows [e] under [prefix], and remembers when the answer is "connect again".
+  void _fail(String prefix, Object e) {
+    setState(() {
+      _error = e is GoogleDriveReconnectRequiredException || e is GoogleDriveUnavailableException
+          ? e.toString()
+          : '$prefix: $e';
+      _needsReconnect = e is GoogleDriveReconnectRequiredException;
+    });
+  }
 
   Future<void> _connect() async {
     final approval = await requestSensitiveApproval(context, action: 'Connect Google Drive backup');
@@ -61,6 +87,7 @@ class _GoogleDriveBackupSectionState extends ConsumerState<GoogleDriveBackupSect
     setState(() {
       _busy = true;
       _error = null;
+      _needsReconnect = false;
     });
     try {
       await ref.read(sensitiveActionProvider).consume(approval, 'Connect Google Drive backup');
@@ -72,7 +99,7 @@ class _GoogleDriveBackupSectionState extends ConsumerState<GoogleDriveBackupSect
         SnackBar(content: Text('Connected to Google Drive as $email.')),
       );
     } catch (e) {
-      setState(() => _error = 'Could not connect Google Drive: $e');
+      _fail('Could not connect Google Drive', e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -114,6 +141,7 @@ class _GoogleDriveBackupSectionState extends ConsumerState<GoogleDriveBackupSect
     setState(() {
       _busy = true;
       _error = null;
+      _needsReconnect = false;
     });
     try {
       await ref.read(googleDriveBackupServiceProvider).uploadLatestBackupIfConnected();
@@ -123,7 +151,7 @@ class _GoogleDriveBackupSectionState extends ConsumerState<GoogleDriveBackupSect
         const SnackBar(content: Text('Uploaded the latest backup to Google Drive.')),
       );
     } catch (e) {
-      setState(() => _error = 'Could not upload to Google Drive: $e');
+      _fail('Could not upload to Google Drive', e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -168,7 +196,7 @@ class _GoogleDriveBackupSectionState extends ConsumerState<GoogleDriveBackupSect
       );
       unawaited(ref.read(syncServiceProvider).runSyncCycle().catchError((Object _) {}));
     } catch (e) {
-      setState(() => _error = 'Could not restore from Google Drive: $e');
+      _fail('Could not restore from Google Drive', e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -263,6 +291,40 @@ class _GoogleDriveBackupSectionState extends ConsumerState<GoogleDriveBackupSect
     );
   }
 
+  Widget _reconnectButton() => Padding(
+    padding: const EdgeInsets.only(bottom: 12),
+    child: FilledButton.icon(
+      onPressed: _busy ? null : _connect,
+      icon: const Icon(Icons.refresh),
+      label: const Text('Reconnect'),
+    ),
+  );
+
+  /// Why the Drive list could not load, with the one button that can fix it.
+  Widget _listError(Object error) {
+    final reconnect = error is GoogleDriveReconnectRequiredException;
+    final unavailable = error is GoogleDriveUnavailableException;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(reconnect || unavailable ? error.toString() : 'Could not list backups: $error'),
+        const SizedBox(height: 8),
+        if (reconnect)
+          FilledButton.icon(
+            onPressed: _busy ? null : _connect,
+            icon: const Icon(Icons.refresh),
+            label: const Text('Reconnect'),
+          )
+        else if (!unavailable)
+          OutlinedButton.icon(
+            onPressed: () => ref.invalidate(googleDriveBackupsProvider),
+            icon: const Icon(Icons.refresh),
+            label: const Text('Try again'),
+          ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final emailAsync = ref.watch(connectedGoogleDriveEmailProvider);
@@ -285,6 +347,7 @@ class _GoogleDriveBackupSectionState extends ConsumerState<GoogleDriveBackupSect
                 padding: const EdgeInsets.only(bottom: 12),
                 child: Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
               ),
+          if (_needsReconnect && !_busy) _reconnectButton(),
             Card(
               child: ListTile(
                 leading: Icon(email != null ? Icons.cloud_done : Icons.cloud_off),
@@ -331,7 +394,7 @@ class _GoogleDriveBackupSectionState extends ConsumerState<GoogleDriveBackupSect
               const SizedBox(height: 8),
               backupsAsync.when(
                 loading: () => const Center(child: CircularProgressIndicator()),
-                error: (error, _) => Text('Could not list backups: $error'),
+                error: (error, _) => _listError(error),
                 data: (backups) => backups.isEmpty
                     ? const Text('No backups uploaded yet.')
                     : Column(

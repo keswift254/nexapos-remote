@@ -22,6 +22,7 @@ on:
       - release-key-safety-1.0.72
       - release-key-safety-1.0.73
       - release-key-safety-1.0.74
+      - release-key-safety-1.0.75
     paths:
       - 'lib/**'
       - 'android/**'
@@ -169,10 +170,35 @@ jobs:
 
       - run: flutter pub get
       - run: flutter config --enable-windows-desktop
+
+      - name: Require the Google Drive Windows client secret
+        shell: bash
+        env:
+          NEXAPOS_GOOGLE_WINDOWS_CLIENT_SECRET: ${{ secrets.NEXAPOS_GOOGLE_WINDOWS_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NEXAPOS_GOOGLE_WINDOWS_CLIENT_SECRET:-}" ]; then
+            echo "::error::Missing required secret: NEXAPOS_GOOGLE_WINDOWS_CLIENT_SECRET. Without it, Google Drive backup compiles disabled on Windows (google_drive_backup_service_native.dart throws the moment a user tries to connect)."
+            exit 1
+          fi
+
       - name: Build Windows release
-        run: flutter build windows --release --no-pub
+        run: flutter build windows --release --no-pub --dart-define=NEXAPOS_GOOGLE_WINDOWS_CLIENT_SECRET=${{ secrets.NEXAPOS_GOOGLE_WINDOWS_CLIENT_SECRET }}
         env:
           CL: /D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
+
+      - name: Verify the Google Drive client secret is compiled into the build
+        shell: bash
+        env:
+          NEXAPOS_GOOGLE_WINDOWS_CLIENT_SECRET: ${{ secrets.NEXAPOS_GOOGLE_WINDOWS_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          # Prints nothing about the secret; fails the job if the shipped Dart snapshot lacks it.
+          if ! grep -aqF -- "$NEXAPOS_GOOGLE_WINDOWS_CLIENT_SECRET" build/windows/x64/runner/Release/data/app.so; then
+            echo "::error::The Google Drive client secret is not inside build/windows/x64/runner/Release/data/app.so - Drive backup would not work in this build."
+            exit 1
+          fi
+          echo "Google Drive client secret is compiled in."
 
       - name: Build compact Windows installer
         shell: pwsh
@@ -234,11 +260,35 @@ jobs:
             throw 'Windows Hello plugin is still registered in the legacy build.'
           }
 
+      - name: Require the Google Drive Windows client secret
+        shell: bash
+        env:
+          NEXAPOS_GOOGLE_WINDOWS_CLIENT_SECRET: ${{ secrets.NEXAPOS_GOOGLE_WINDOWS_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NEXAPOS_GOOGLE_WINDOWS_CLIENT_SECRET:-}" ]; then
+            echo "::error::Missing required secret: NEXAPOS_GOOGLE_WINDOWS_CLIENT_SECRET. Without it, Google Drive backup compiles disabled on Windows (google_drive_backup_service_native.dart throws the moment a user tries to connect)."
+            exit 1
+          fi
+
       - name: Build Windows 7/8 release
         shell: pwsh
-        run: flutter build windows --release --no-pub --dart-define=NEXAPOS_LEGACY_WINDOWS=true
+        run: flutter build windows --release --no-pub --dart-define=NEXAPOS_LEGACY_WINDOWS=true --dart-define=NEXAPOS_GOOGLE_WINDOWS_CLIENT_SECRET=${{ secrets.NEXAPOS_GOOGLE_WINDOWS_CLIENT_SECRET }}
         env:
           CL: /D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
+
+      - name: Verify the Google Drive client secret is compiled into the build
+        shell: bash
+        env:
+          NEXAPOS_GOOGLE_WINDOWS_CLIENT_SECRET: ${{ secrets.NEXAPOS_GOOGLE_WINDOWS_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          # Prints nothing about the secret; fails the job if the shipped Dart snapshot lacks it.
+          if ! grep -aqF -- "$NEXAPOS_GOOGLE_WINDOWS_CLIENT_SECRET" build/windows/x64/runner/Release/data/app.so; then
+            echo "::error::The Google Drive client secret is not inside build/windows/x64/runner/Release/data/app.so - Drive backup would not work in this build."
+            exit 1
+          fi
+          echo "Google Drive client secret is compiled in."
 
       - name: Restore verified Windows 7-compatible Flutter engine
         shell: pwsh
@@ -392,7 +442,7 @@ jobs:
           if-no-files-found: error
 
   publish-github-release:
-    if: github.ref == 'refs/heads/nexapos-1.0.12-safety' || github.ref == 'refs/heads/release-1.0.57-lan-support-payments' || github.ref == 'refs/heads/improve-support-app' || github.ref == 'refs/heads/hotfix-activation-reporting-1.0.62' || github.ref == 'refs/heads/release-activation-share-1.0.63' || github.ref == 'refs/heads/release-activation-share-1.0.64' || github.ref == 'refs/heads/release-key-safety-1.0.65' || github.ref == 'refs/heads/release-key-safety-1.0.66' || github.ref == 'refs/heads/release-key-safety-1.0.67' || github.ref == 'refs/heads/release-key-safety-1.0.68' || github.ref == 'refs/heads/release-key-safety-1.0.69' || github.ref == 'refs/heads/release-key-safety-1.0.70' || github.ref == 'refs/heads/release-key-safety-1.0.71' || github.ref == 'refs/heads/release-key-safety-1.0.72' || github.ref == 'refs/heads/release-key-safety-1.0.73' || github.ref == 'refs/heads/release-key-safety-1.0.74'
+    if: github.ref == 'refs/heads/nexapos-1.0.12-safety' || github.ref == 'refs/heads/release-1.0.57-lan-support-payments' || github.ref == 'refs/heads/improve-support-app' || github.ref == 'refs/heads/hotfix-activation-reporting-1.0.62' || github.ref == 'refs/heads/release-activation-share-1.0.63' || github.ref == 'refs/heads/release-activation-share-1.0.64' || github.ref == 'refs/heads/release-key-safety-1.0.65' || github.ref == 'refs/heads/release-key-safety-1.0.66' || github.ref == 'refs/heads/release-key-safety-1.0.67' || github.ref == 'refs/heads/release-key-safety-1.0.68' || github.ref == 'refs/heads/release-key-safety-1.0.69' || github.ref == 'refs/heads/release-key-safety-1.0.70' || github.ref == 'refs/heads/release-key-safety-1.0.71' || github.ref == 'refs/heads/release-key-safety-1.0.72' || github.ref == 'refs/heads/release-key-safety-1.0.73' || github.ref == 'refs/heads/release-key-safety-1.0.74' || github.ref == 'refs/heads/release-key-safety-1.0.75'
     needs:
       - metadata
       - android-release

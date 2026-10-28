@@ -60,7 +60,7 @@ final class GoogleDriveBackupsProvider
     : super(
         from: null,
         argument: null,
-        retry: null,
+        retry: _neverRetry,
         name: r'googleDriveBackupsProvider',
         isAutoDispose: true,
         dependencies: null,
@@ -83,4 +83,4 @@ final class GoogleDriveBackupsProvider
 }
 
 String _$googleDriveBackupsHash() =>
-    r'9b56de322270f84f1be5b79a32ba491ef19bf5f5';
+    r'1c001889c1dfbd6465fb09cfbd211bc8514ff51e';

@@ -48,6 +48,28 @@ class GoogleDriveNotConnectedException implements Exception {
   const GoogleDriveNotConnectedException();
 }
 
+/// Google no longer accepts the sign-in this device saved: it expired (a Google
+/// project still in "Testing" ends every sign-in after 7 days) or the merchant
+/// removed NexaPOS at myaccount.google.com/permissions. Connecting again fixes it.
+class GoogleDriveReconnectRequiredException implements Exception {
+  const GoogleDriveReconnectRequiredException();
+
+  @override
+  String toString() =>
+      'Google Drive sign-in expired or was removed. Tap Reconnect to sign in again.';
+}
+
+/// This build of NexaPOS cannot talk to Google Drive at all (it was compiled
+/// without Google's client secret), so reconnecting would not help.
+class GoogleDriveUnavailableException implements Exception {
+  const GoogleDriveUnavailableException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
 /// One backup file already uploaded to the hidden app-data folder.
 class GoogleDriveBackupSummary {
   const GoogleDriveBackupSummary({

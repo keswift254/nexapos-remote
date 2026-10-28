@@ -15,6 +15,14 @@ import 'package:url_launcher/url_launcher.dart';
 import 'automatic_backup_service.dart';
 import 'google_drive_backup_types.dart';
 
+/// True when Google answered a token refresh with `invalid_grant`: the saved
+/// sign-in is expired or revoked and the merchant has to connect again. Other
+/// failures (no network, a bad request) are not that and keep their own message.
+bool googleRefreshTokenRejected(gauth.ServerRequestFailedException error) {
+  final content = error.responseContent;
+  return error.statusCode == 400 && content is Map && content['error'] == 'invalid_grant';
+}
+
 /// Real implementation - see google_drive_backup_types.dart for why this
 /// is split out (native-only: googleapis_auth/auth_io.dart, google_sign_in,
 /// dart:io HttpServer). Selected on native platforms by
@@ -332,7 +340,20 @@ class _NativeGoogleDriveBackupService implements GoogleDriveBackupService {
     if (_isWindows) {
       final refreshToken = await _storage.read(key: _windowsRefreshTokenKey);
       if (refreshToken == null) throw const GoogleDriveNotConnectedException();
-      client = await gauth.clientViaRefreshToken(_windowsClientId, refreshToken, [_scope]);
+      if (_windowsClientSecret.isEmpty) {
+        // Google refuses every token refresh without the secret ("client_secret is
+        // missing"); say what is wrong instead of showing that.
+        throw const GoogleDriveUnavailableException(
+          'This version of NexaPOS was built without Google Drive access. '
+          'Update NexaPOS to the latest version, then try again.',
+        );
+      }
+      try {
+        client = await gauth.clientViaRefreshToken(_windowsClientId, refreshToken, [_scope]);
+      } on gauth.ServerRequestFailedException catch (e) {
+        if (googleRefreshTokenRejected(e)) throw const GoogleDriveReconnectRequiredException();
+        rethrow;
+      }
     } else {
       await _ensureAndroidSignInInitialized();
       final account = await GoogleSignIn.instance.attemptLightweightAuthentication();
