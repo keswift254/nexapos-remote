@@ -9,6 +9,7 @@ class HomeScreenInstallState {
     this.isIosSafari = false,
     this.canPromptInstall = false,
     this.isDismissed = false,
+    this.isIosHomeScreenApp = false,
   });
 
   /// No browser chrome to add a shortcut to at all - either this is the
@@ -28,6 +29,11 @@ class HomeScreenInstallState {
 
   final bool isDismissed;
 
+  /// Running as an iPhone/iPad Home Screen web app. iOS keeps that copy's data apart from
+  /// Safari's, so a shop set up in Safari is not in it: it starts empty, and is best joined
+  /// to the existing shop with an invite code rather than set up again.
+  final bool isIosHomeScreenApp;
+
   bool get shouldOffer =>
       !isStandalone && !isDismissed && (canPromptInstall || isIosSafari);
 
@@ -36,12 +42,14 @@ class HomeScreenInstallState {
     bool? isIosSafari,
     bool? canPromptInstall,
     bool? isDismissed,
+    bool? isIosHomeScreenApp,
   }) {
     return HomeScreenInstallState(
       isStandalone: isStandalone ?? this.isStandalone,
       isIosSafari: isIosSafari ?? this.isIosSafari,
       canPromptInstall: canPromptInstall ?? this.canPromptInstall,
       isDismissed: isDismissed ?? this.isDismissed,
+      isIosHomeScreenApp: isIosHomeScreenApp ?? this.isIosHomeScreenApp,
     );
   }
 }

@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../domain/services/home_screen_install_service.dart';
 import '../../domain/services/license_service.dart';
 import '../../core/providers.dart';
 import '../../data/payments/platform_http_client.dart';
@@ -155,6 +156,62 @@ class _JoinedAccessBannerState extends ConsumerState<_JoinedAccessBanner> {
           'online at least once every ${joinedMembershipGrace.inHours} hours. '
           'It reopens by itself as soon as it is connected - there is '
           'nothing to enter.',
+    );
+  }
+}
+
+/// Shown when NexaPOS runs as an iPhone/iPad Home Screen web app. iOS keeps that copy's data
+/// apart from Safari's, so a shop already set up in Safari is not here - and tapping through the
+/// setup would start a second, empty shop. The way in is to join the existing one.
+class _HomeScreenCopyNotice extends ConsumerWidget {
+  const _HomeScreenCopyNotice();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (!ref.watch(homeScreenInstallProvider).isIosHomeScreenApp) {
+      return const SizedBox.shrink();
+    }
+    final color = Theme.of(context).colorScheme.primary;
+    return Container(
+      key: const Key('ios-home-screen-notice'),
+      margin: const EdgeInsets.only(bottom: 24),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        border: Border.all(color: color),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.phone_iphone, color: color),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Opened from your Home Screen?',
+                  style: TextStyle(color: color, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'On iPhone, the Home Screen copy of NexaPOS keeps its own data, '
+            'separate from Safari. If your shop is already set up in Safari, '
+            "don't start a new one here: join it with an invite code from "
+            'Safari (Settings > Sync & Invites > Invite a device).',
+          ),
+          const SizedBox(height: 12),
+          FilledButton.tonalIcon(
+            key: const Key('ios-home-screen-join'),
+            onPressed: () => context.go('/join-shop'),
+            icon: const Icon(Icons.group_add_outlined),
+            label: const Text('Join my existing shop'),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -349,6 +406,7 @@ class _ActivationScreenState extends ConsumerState<ActivationScreen> {
                   const ActivationUpdateNotice(),
                   const _LicenseEndedBanner(),
                   const _JoinedAccessBanner(),
+                  const _HomeScreenCopyNotice(),
                   Icon(
                     Icons.vpn_key,
                     size: 48,

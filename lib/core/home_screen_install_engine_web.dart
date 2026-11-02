@@ -20,6 +20,7 @@ class _WebHomeScreenInstallEngine implements HomeScreenInstallEngine {
   JSObject? _deferredPrompt;
   bool _isStandalone = true;
   bool _isIosSafari = false;
+  bool _isIosHomeScreenApp = false;
   bool _isDismissed = false;
   void Function(HomeScreenInstallState)? _onChange;
 
@@ -37,6 +38,11 @@ class _WebHomeScreenInstallEngine implements HomeScreenInstallEngine {
         navigator.has('standalone') &&
         navigator.getProperty<JSBoolean?>('standalone'.toJS)?.toDart == true;
     _isStandalone = isDisplayStandalone || isIosStandalone;
+    // An iPad in desktop mode calls itself a Mac, with a touch screen.
+    final isIos =
+        _isIosSafari ||
+        (navigator.platform == 'MacIntel' && navigator.maxTouchPoints > 1);
+    _isIosHomeScreenApp = isIos && _isStandalone;
     _isDismissed = web.window.localStorage.getItem(_dismissedKey) != null;
 
     web.window.addEventListener(
@@ -65,6 +71,7 @@ class _WebHomeScreenInstallEngine implements HomeScreenInstallEngine {
       isIosSafari: _isIosSafari,
       canPromptInstall: canPromptInstall,
       isDismissed: _isDismissed,
+      isIosHomeScreenApp: _isIosHomeScreenApp,
     );
   }
 

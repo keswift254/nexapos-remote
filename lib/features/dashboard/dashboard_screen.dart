@@ -28,6 +28,7 @@ import '../checkout/cart_notifier.dart';
 import '../settings/biometric_setup_banner.dart';
 import 'sync_health_banner.dart';
 import '../settings/clock_health_banner.dart';
+import 'ios_add_to_home_screen_dialog.dart';
 import 'product_search_dialog.dart';
 
 part 'dashboard_screen.g.dart';
@@ -600,19 +601,7 @@ Future<void> _handleAddToHomeScreen(
   if (!state.isIosSafari) return;
   await showDialog<void>(
     context: context,
-    builder: (context) => AlertDialog(
-      title: const Text('Add NexaPOS to your home screen'),
-      content: const Text(
-        'Tap the Share icon in Safari\'s toolbar, then choose '
-        '"Add to Home Screen".',
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Got it'),
-        ),
-      ],
-    ),
+    builder: (context) => const IosAddToHomeScreenDialog(),
   );
 }
 
