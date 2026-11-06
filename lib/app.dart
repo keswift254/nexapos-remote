@@ -272,6 +272,11 @@ const _maintenanceInterval = Duration(minutes: 2);
 // alone) it can spend a minute doing so before it gets round to the LAN.
 const _lanInterval = Duration(seconds: 2);
 
+// How often an online payment that is still unpaid is asked about, wherever in
+// the app the cashier happens to be (see _recheckPendingPayments). Cheap when
+// there is nothing pending: the timer then does nothing at all.
+const _pendingPaymentsInterval = Duration(seconds: 10);
+
 // How long a "this device may take part in LAN sync" answer is kept before it is
 // worked out again (licence checks read secure storage - not every 2 seconds).
 const _lanAccessRecheck = Duration(seconds: 30);
@@ -313,6 +318,8 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
   Timer? _maintenanceTimer;
   Timer? _inactivityTimer;
   Timer? _lanTimer;
+  Timer? _pendingPaymentsTimer;
+  bool _recheckingPayments = false;
   DateTime? _lastActivity;
   DateTime? _backgroundedAt;
   bool _syncing = false;
@@ -340,6 +347,10 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
       (_) => _checkInactivity(),
     );
     _lanTimer = Timer.periodic(_lanInterval, (_) => _runLanTick());
+    _pendingPaymentsTimer = Timer.periodic(
+      _pendingPaymentsInterval,
+      (_) => _recheckPendingPayments(),
+    );
     HardwareKeyboard.instance.addHandler(_onKeyEvent);
   }
 
@@ -351,7 +362,25 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
     _maintenanceTimer?.cancel();
     _inactivityTimer?.cancel();
     _lanTimer?.cancel();
+    _pendingPaymentsTimer?.cancel();
     super.dispose();
+  }
+
+  /// Keeps asking about online payments that are still unpaid. The waiting
+  /// screen does this while it is open, but it can be torn down mid-payment
+  /// (the app locked itself while the customer paid on their phone, or the
+  /// page was reloaded on the way back from the payment page), and the
+  /// dashboard's "pending payment" banner would then sit there until the next
+  /// restart. A paid sale is finalised and announced on the dashboard.
+  Future<void> _recheckPendingPayments() async {
+    if (_recheckingPayments) return;
+    if (ref.read(pendingPaystackSalesProvider).isEmpty) return;
+    _recheckingPayments = true;
+    try {
+      await ref.read(pendingPaystackSalesProvider.notifier).reconcile();
+    } finally {
+      _recheckingPayments = false;
+    }
   }
 
   @override
@@ -370,6 +399,7 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
       _recordActivity();
       _runSync();
       _runMaintenance();
+      _recheckPendingPayments();
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden) {
       _backgroundedAt = ref.read(clockProvider).now();

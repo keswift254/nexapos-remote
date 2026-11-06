@@ -1,3 +1,4 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart' show Notifier, NotifierProvider;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../entities/sale.dart';
 import 'intasend_payment_service.dart';
@@ -20,10 +21,43 @@ class PendingPaystackSalesNotifier extends _$PendingPaystackSalesNotifier {
   List<Sale> build() => const [];
 
   Future<void> reconcile() async {
-    final results = await Future.wait([
-      ref.read(paystackPaymentServiceProvider).reconcilePendingSales(),
-      ref.read(intaSendPaymentServiceProvider).reconcilePendingSales(),
-    ]);
-    if (ref.mounted) state = [...results[0], ...results[1]];
+    final paystackCheck = ref.read(paystackPaymentServiceProvider).reconcileAndReport();
+    final intaSendCheck = ref.read(intaSendPaymentServiceProvider).reconcilePendingSales();
+    final paystack = await paystackCheck;
+    final intaSend = await intaSendCheck;
+    if (!ref.mounted) return;
+    state = [...paystack.stillPending, ...intaSend];
+    ref.read(confirmedOnlineSalesProvider.notifier).add(paystack.nowPaid);
   }
 }
+
+/// Online payments this reconcile pass found paid while nobody was watching -
+/// the page was reloaded on the way back from the payment page, or the cashier
+/// left the waiting screen - so the dashboard can say so instead of leaving
+/// the cashier to wonder what happened to the sale.
+class ConfirmedOnlineSalesNotifier extends Notifier<List<Sale>> {
+  @override
+  List<Sale> build() => const [];
+
+  void add(List<Sale> sales) {
+    if (sales.isEmpty) return;
+    final known = {for (final sale in state) sale.id};
+    final fresh = [
+      for (final sale in sales)
+        if (!known.contains(sale.id)) sale,
+    ];
+    if (fresh.isNotEmpty) state = [...state, ...fresh];
+  }
+
+  void dismiss(String saleId) {
+    state = [
+      for (final sale in state)
+        if (sale.id != saleId) sale,
+    ];
+  }
+}
+
+final confirmedOnlineSalesProvider =
+    NotifierProvider<ConfirmedOnlineSalesNotifier, List<Sale>>(
+      ConfirmedOnlineSalesNotifier.new,
+    );

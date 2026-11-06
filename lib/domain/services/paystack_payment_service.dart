@@ -39,6 +39,10 @@ class PaystackPollWaiting extends PaystackPollOutcome {
   const PaystackPollWaiting();
 }
 
+/// What one reconcile pass found: sales still waiting on the customer, and
+/// sales it just found paid.
+typedef PaystackReconcileReport = ({List<Sale> stillPending, List<Sale> nowPaid});
+
 /// Orchestrates a real Paystack payment: create the gateway checkout
 /// first, and only reserve stock + record the sale (via CheckoutService)
 /// once Paystack has actually accepted it - see beginPaystackSale's doc
@@ -190,14 +194,20 @@ class PaystackPaymentService {
   /// never sees anything; only sales that still don't verify are handed
   /// back for the dashboard to surface, since those need a human
   /// decision (keep waiting vs. cancel and restore stock).
-  Future<List<Sale>> reconcilePendingSales() async {
+  Future<List<Sale>> reconcilePendingSales() async =>
+      (await reconcileAndReport()).stillPending;
+
+  /// [reconcilePendingSales], also reporting the sales this pass found paid -
+  /// the cashier may have been away (the page reloaded after the payment
+  /// page, the app restarted) and should be told, not left to wonder.
+  Future<PaystackReconcileReport> reconcileAndReport() async {
     // pendingPaystackSales() now also returns stranded intasend sales
     // (see that method's doc) - filtered out here since a Paystack
     // reference can't be verified against IntaSend's API.
     final pending = (await _checkoutService.pendingPaystackSales())
         .where((sale) => sale.paymentMethod == 'paystack')
         .toList();
-    if (pending.isEmpty) return const [];
+    if (pending.isEmpty) return (stillPending: const <Sale>[], nowPaid: const <Sale>[]);
 
     // Polled in parallel, not sequentially - each sale is an independent
     // network round trip against an unrelated reference, so N pending
@@ -205,13 +215,30 @@ class PaystackPaymentService {
     // after a cold start on the platform's Render free tier, where a
     // single poll can already take tens of seconds).
     final results = await Future.wait(
-      pending.map((sale) async {
+      pending.map<Future<({Sale sale, bool resolved, Sale? paidSale})>>((sale) async {
         final reference = await _checkoutService.paystackReferenceFor(sale.id);
-        if (reference == null) return sale;
+        if (reference == null) return (sale: sale, resolved: false, paidSale: null);
         final outcome = await poll(sale.id, reference, sale.gatewayPortion);
-        return outcome is PaystackPollPaid ? null : sale;
+        return (
+          sale: sale,
+          resolved: outcome is PaystackPollPaid,
+          // Only a sale that really is paid is announced; one that was
+          // cancelled in the meantime is simply no longer pending.
+          paidSale: outcome is PaystackPollPaid && outcome.sale.status == 'paid'
+              ? outcome.sale
+              : null,
+        );
       }),
     );
-    return results.whereType<Sale>().toList();
+    return (
+      stillPending: [
+        for (final result in results)
+          if (!result.resolved) result.sale,
+      ],
+      nowPaid: [
+        for (final result in results)
+          if (result.paidSale != null) result.paidSale!,
+      ],
+    );
   }
 }

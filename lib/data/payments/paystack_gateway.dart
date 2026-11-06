@@ -37,8 +37,13 @@ class PaystackVerifyResult {
 /// directly - only the request side (URL, auth) changed.
 class PaystackGateway {
   final http.Client _client;
+  final bool _web;
 
-  PaystackGateway([http.Client? client]) : _client = client ?? http.Client();
+  /// [forWeb] exists for tests (the VM never runs as a browser); the app
+  /// always takes the real platform.
+  PaystackGateway([http.Client? client, bool? forWeb])
+      : _client = client ?? http.Client(),
+        _web = forWeb ?? isWeb;
 
   Future<PaystackInitResult> initialize({
     required String baseUrl,
@@ -59,20 +64,15 @@ class PaystackGateway {
         'amount': amount.cents,
         'currency': currency,
         'reference': reference,
-        // Only ask the platform backend for a callback_url pointing back
-        // into the app on native - that URL is a GitHub Pages page whose
-        // entire job is bouncing the customer into this app via a
-        // nexapos:// custom URI scheme, which does nothing useful (and
-        // nothing broken either - it just silently fails) from a browser
-        // tab. Omitting return_to_app makes the server skip callback_url
-        // entirely, so Paystack shows its own default confirmation page
-        // instead - not custom-branded, but not broken - while this
-        // cashier's tab keeps polling independently regardless of what
-        // the customer sees there (see PaystackWaitingScreen's own doc
-        // comment: the poll, never the redirect, is what confirms
-        // payment). Revisit once NexaPOS Web has a real hosting URL to
-        // point a dedicated /checkout-return route at instead.
-        'return_to_app': !isWeb,
+        // Where Paystack sends the customer afterwards. Native builds come
+        // back through a nexapos:// link. The web POS (a browser tab or an
+        // iPhone Home Screen app) is handed to its own return page, which
+        // tells a waiting NexaPOS tab to check the payment straight away or,
+        // if the app was reloaded meanwhile, reopens it. The server only
+        // accepts these fixed choices, never a URL from here. A server that
+        // predates return_to ignores it and behaves as before.
+        'return_to_app': !_web,
+        if (_web) 'return_to': 'web',
       },
     );
     if (response['status'] != true) {

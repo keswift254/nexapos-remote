@@ -288,6 +288,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
         user != null && {UserRole.admin, UserRole.manager}.contains(user.role);
     final dataAsync = ref.watch(dashboardDataProvider);
     final pendingPaystackSales = ref.watch(pendingPaystackSalesProvider);
+    final confirmedOnlineSales = ref.watch(confirmedOnlineSalesProvider);
     final availableUpdate = ref.watch(updateAvailabilityProvider);
     final cartState = ref.watch(cartProvider);
     final homeScreenInstall = ref.watch(homeScreenInstallProvider);
@@ -466,6 +467,38 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                               ? _supportBannerReplies.first
                               : null,
                         ),
+                      ),
+                    ),
+                  ],
+                  // Paid while the cashier was away (the page was reloaded on
+                  // the way back from the payment page, or the app locked
+                  // itself mid-payment): say so instead of leaving a sale that
+                  // quietly turned paid.
+                  for (final sale in confirmedOnlineSales) ...[
+                    const SizedBox(height: 12),
+                    Card(
+                      key: Key('confirmed-online-payment-${sale.id}'),
+                      color: Theme.of(context).colorScheme.primaryContainer,
+                      child: ListTile(
+                        leading: const Icon(Icons.check_circle_outline),
+                        title: Text('Payment received for ${sale.saleNumber}'),
+                        subtitle: Text(
+                          '${sale.gatewayPortion.format()} confirmed. '
+                          'Tap to view the receipt.',
+                        ),
+                        trailing: IconButton(
+                          tooltip: 'Dismiss',
+                          icon: const Icon(Icons.close),
+                          onPressed: () => ref
+                              .read(confirmedOnlineSalesProvider.notifier)
+                              .dismiss(sale.id),
+                        ),
+                        onTap: () {
+                          ref
+                              .read(confirmedOnlineSalesProvider.notifier)
+                              .dismiss(sale.id);
+                          context.push('/receipt/${sale.id}');
+                        },
                       ),
                     ),
                   ],

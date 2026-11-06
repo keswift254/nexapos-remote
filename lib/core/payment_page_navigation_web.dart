@@ -6,6 +6,14 @@ import 'package:web/web.dart' as web;
 /// commonly reject window.open() as no longer user-initiated. Same-tab
 /// navigation is not popup-blocked, and Paystack's callback returns this exact
 /// tab to NexaPOS afterwards.
-Future<void> replaceWithPaymentPage(Uri uri) async {
-  web.window.location.replace(uri.toString());
+///
+/// [replace] drops this page from the history (the licence purchase does, since
+/// there is nothing to come back to). A sale keeps it, so the browser's Back
+/// button from the payment page lands in NexaPOS again instead of a dead end.
+Future<void> replaceWithPaymentPage(Uri uri, {bool replace = true}) async {
+  if (replace) {
+    web.window.location.replace(uri.toString());
+  } else {
+    web.window.location.assign(uri.toString());
+  }
 }

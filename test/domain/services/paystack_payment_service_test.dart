@@ -468,4 +468,65 @@ void main() {
     expect(stillPending.single.id, saleId);
     expect(stillPending.single.status, 'pending', reason: 'must not be touched until a human decides or Paystack confirms');
   });
+
+  group('reconcileAndReport', () {
+    Future<String> startOneSale() async {
+      final initGateway = PaystackGateway(MockClient((request) async {
+        final body = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response(
+          jsonEncode({
+            'status': true,
+            'data': {'authorization_url': 'https://paystack.test/pay/abc', 'reference': body['reference']},
+          }),
+          200,
+        );
+      }));
+      final startService = PaystackPaymentService(initGateway, _FakeCredentialsService(configured), checkoutService);
+      final started = await startService.start(cart: oneWidget(), discount: const Money.zero(), saleType: 'retail', userId: userId);
+      late String saleId;
+      started.when(ok: (session) => saleId = session.sale.id, failure: (m) => fail(m));
+      return saleId;
+    }
+
+    PaystackPaymentService serviceVerifying(String paystackStatus) {
+      final verifyGateway = PaystackGateway(MockClient((request) async {
+        return http.Response(
+          jsonEncode({
+            'status': true,
+            'data': {'status': paystackStatus, 'amount': 10000, 'currency': 'KES', 'reference': 'irrelevant'},
+          }),
+          200,
+        );
+      }));
+      return PaystackPaymentService(verifyGateway, _FakeCredentialsService(configured), checkoutService);
+    }
+
+    test('names a sale it just found paid, so the cashier can be told about it', () async {
+      final saleId = await startOneSale();
+
+      final report = await serviceVerifying('success').reconcileAndReport();
+
+      expect(report.stillPending, isEmpty);
+      expect(report.nowPaid, hasLength(1));
+      expect(report.nowPaid.single.id, saleId);
+      expect(report.nowPaid.single.status, 'paid');
+      expect(await checkoutService.pendingPaystackSales(), isEmpty);
+    });
+
+    test('reports a sale Paystack does not confirm as still pending, and announces nothing', () async {
+      final saleId = await startOneSale();
+
+      final report = await serviceVerifying('abandoned').reconcileAndReport();
+
+      expect(report.nowPaid, isEmpty);
+      expect(report.stillPending.map((sale) => sale.id), [saleId]);
+    });
+
+    test('with nothing pending there is nothing to report', () async {
+      final report = await serviceVerifying('success').reconcileAndReport();
+
+      expect(report.stillPending, isEmpty);
+      expect(report.nowPaid, isEmpty);
+    });
+  });
 }
