@@ -56,6 +56,8 @@ class _BrowserDevice implements DeviceAuthenticationGateway, EnrollableDeviceAut
   @override
   Future<bool> isEnrolled() async => enrolled;
   @override
+  Future<String> whyUnsupported() async => 'No Face ID or fingerprint is turned on here. (code: no-device-unlock)';
+  @override
   Future<void> forget() async {
     forgetCalls++;
     enrolled = false;
@@ -183,7 +185,10 @@ void main() {
       device
         ..enrollThrows = false
         ..supported = false;
-      await expectLater(security.enableFor(user), throwsA(isA<StateError>()));
+      await expectLater(
+        security.enableFor(user),
+        throwsA(isA<StateError>().having((e) => e.message, 'message', contains('no-device-unlock'))),
+      );
       expect(device.enrollCalls, 1, reason: 'not even tried when the device cannot do it');
     });
 

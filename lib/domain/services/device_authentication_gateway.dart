@@ -22,6 +22,11 @@ abstract class EnrollableDeviceAuthentication {
   /// Whether a credential from an earlier [enroll] is still here.
   Future<bool> isEnrolled();
 
+  /// Why [DeviceAuthenticationGateway.isSupported] said no, in words the person can act on
+  /// (it differs: not on the secure address, a browser without the feature, or a device with
+  /// no face / fingerprint / Windows Hello turned on).
+  Future<String> whyUnsupported();
+
   /// Removes it (quick sign in turned off).
   Future<void> forget();
 }

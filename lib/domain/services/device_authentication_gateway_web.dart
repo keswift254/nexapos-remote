@@ -33,20 +33,51 @@ class WebDeviceAuthenticationGateway implements DeviceAuthenticationGateway, Enr
 
   // ---- what the browser can do ---------------------------------------------------------------
 
+  /// Why the last [isSupported] said no (a short code, shown with the explanation).
+  String _reason = 'unknown';
+
   @override
   Future<bool> isSupported() async {
-    final known = _supported;
-    if (known != null) return known;
-    var result = false;
+    // Only a yes is remembered: a no may change a moment later (the person turns Face ID or
+    // Windows Hello on and comes back), and must not need a page reload to be noticed.
+    if (_supported == true) return true;
     try {
       // Needs https (or localhost) and a built-in unlock method (face, finger, screen lock).
-      if (web.window.isSecureContext && globalContext.has('PublicKeyCredential')) {
-        result = (await web.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().toDart).toDart;
+      if (!web.window.isSecureContext) {
+        _reason = 'insecure-page';
+        return false;
       }
-    } catch (_) {
-      result = false;
+      if (!globalContext.has('PublicKeyCredential')) {
+        _reason = 'no-webauthn';
+        return false;
+      }
+      final available = (await web.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().toDart).toDart;
+      if (!available) {
+        _reason = 'no-device-unlock';
+        return false;
+      }
+      _supported = true;
+      return true;
+    } catch (error) {
+      _reason = 'check-failed';
+      return false;
     }
-    return _supported = result;
+  }
+
+  @override
+  Future<String> whyUnsupported() async {
+    switch (_reason) {
+      case 'insecure-page':
+        return 'Quick sign in only works on the secure address https://nexapos.cc/app. Open NexaPOS from there and try again. (code: insecure-page)';
+      case 'no-webauthn':
+        return 'This browser cannot do Face ID or fingerprint sign in. Update it, or use Safari, Chrome or Edge. (code: no-webauthn)';
+      case 'no-device-unlock':
+        return 'This browser cannot see a Face ID, Touch ID, fingerprint or Windows Hello on this device. '
+            'Turn one on in the device settings (on an iPhone: Settings > Face ID & Passcode), then reload NexaPOS and try again. '
+            '(code: no-device-unlock)';
+      default:
+        return 'The browser could not check this device for Face ID or fingerprint. Reload NexaPOS and try again. (code: $_reason)';
+    }
   }
 
   // ---- what was saved at set-up --------------------------------------------------------------

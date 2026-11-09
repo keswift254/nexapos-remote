@@ -26,6 +26,7 @@ void main() {
   }
 
   on('supported', () async => '${await gateway.isSupported()}');
+  on('why', () => gateway.whyUnsupported());
   on('enrolled', () async => '${await gateway.isEnrolled()}');
   on('enroll', () async => '${await gateway.enroll()}');
   on('authenticate', () async => '${await gateway.authenticate()}');

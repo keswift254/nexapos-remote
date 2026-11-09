@@ -16,6 +16,7 @@ import 'package:nexapos_mobile/domain/services/session_service.dart';
 import 'package:nexapos_mobile/features/checkout/cart_notifier.dart';
 import 'package:nexapos_mobile/features/checkout/cart_screen.dart';
 import 'package:nexapos_mobile/features/checkout/held_sales_notifier.dart';
+import 'package:nexapos_mobile/features/checkout/held_sales_sheet.dart';
 import 'package:nexapos_mobile/features/products/products_screen.dart';
 
 /// Holding a sale: set the cart aside to serve someone else, and come back to it (or throw
@@ -330,6 +331,40 @@ void main() {
       expect(find.text('Milk'), findsOneWidget);
       final discountField = tester.widget<TextField>(find.widgetWithText(TextField, 'Discount'));
       expect(discountField.controller!.text, '10.00', reason: 'the screen\'s fields follow the opened sale');
+    });
+
+    testWidgets('on a wide screen the held sales open as a centred window, not a sheet stuck to the bottom edge', (tester) async {
+      final container = await pumpCart(tester, withItem: false);
+      fill(container, name: 'Bread', quantity: 1, price: 60);
+      await container.read(heldSalesProvider.notifier).holdCurrent(label: 'First', heldBy: 'Wanjiru');
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.pause_circle_outline).first);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(BottomSheet), findsNothing);
+      final window = find.ancestor(of: find.text('First'), matching: find.byType(Dialog));
+      expect(window, findsOneWidget);
+      final box = tester.getRect(find.byType(HeldSalesSheet));
+      expect(box.width, lessThanOrEqualTo(560));
+      expect(box.bottom, lessThan(tester.view.physicalSize.height - 100), reason: 'clear of the bottom edge');
+      await tester.tap(find.byTooltip('Close'));
+      await tester.pumpAndSettle();
+      expect(find.text('First'), findsNothing);
+    });
+
+    testWidgets('on a phone the held sales still slide up from the bottom', (tester) async {
+      final container = await pumpCart(tester, withItem: false);
+      tester.view.physicalSize = const Size(400, 800);
+      fill(container, name: 'Bread', quantity: 1, price: 60);
+      await container.read(heldSalesProvider.notifier).holdCurrent(label: 'First', heldBy: 'Wanjiru');
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.pause_circle_outline).first);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(BottomSheet), findsOneWidget);
+      expect(find.ancestor(of: find.text('First'), matching: find.byType(Dialog)), findsNothing);
     });
 
     testWidgets('opening a held sale while the cart has items offers to hold the current one first', (tester) async {

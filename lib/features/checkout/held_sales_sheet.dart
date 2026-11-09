@@ -29,11 +29,45 @@ class HeldSalesButton extends ConsumerWidget {
   }
 }
 
+/// Phones get a sheet that slides up from the bottom. On a wide screen (the Windows app, a
+/// tablet, a browser) a sheet hugging the bottom edge ran into the taskbar and looked cut
+/// off, so there it is a centred window instead.
+const heldSalesWideScreenWidth = 700.0;
+
 Future<void> showHeldSalesSheet(BuildContext context, {VoidCallback? onResumed}) {
+  final size = MediaQuery.sizeOf(context);
+  if (size.width >= heldSalesWideScreenWidth) {
+    return showDialog<void>(
+      context: context,
+      builder: (dialogContext) => Dialog(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: 560, maxHeight: size.height * 0.75),
+          child: Stack(
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 16),
+                child: HeldSalesSheet(onResumed: onResumed),
+              ),
+              Positioned(
+                top: 4,
+                right: 4,
+                child: IconButton(
+                  tooltip: 'Close',
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(dialogContext),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
+    useSafeArea: true,
     builder: (sheetContext) => HeldSalesSheet(onResumed: onResumed),
   );
 }
