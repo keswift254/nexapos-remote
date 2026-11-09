@@ -65,11 +65,15 @@ class AppSecurityService {
     final gateway = _ref.read(deviceAuthenticationGatewayProvider);
     if (!await gateway.isSupported()) {
       final Object device = gateway;
-      throw StateError(
-        device is EnrollableDeviceAuthentication
-            ? await device.whyUnsupported()
-            : 'Set up fingerprint, face recognition, or Windows Hello on this device first.',
-      );
+      // A browser's "no" is only a hint, so where it can do passkeys at all it is let try.
+      final worthTrying = device is EnrollableDeviceAuthentication && await device.canTryAnyway();
+      if (!worthTrying) {
+        throw StateError(
+          device is EnrollableDeviceAuthentication
+              ? await device.whyUnsupported()
+              : 'Set up fingerprint, face recognition, or Windows Hello on this device first.',
+        );
+      }
     }
     // A browser has to create its passkey first (one prompt); the phone, tablet or PC apps
     // just ask for the fingerprint / face / Windows Hello once.

@@ -37,8 +37,13 @@ class _BrowserDevice implements DeviceAuthenticationGateway, EnrollableDeviceAut
   int enrollCalls = 0;
   int authenticateCalls = 0;
   int forgetCalls = 0;
+  /// Whether the browser's hint says no but a passkey can still be tried (WebAuthn exists).
+  bool canTry = false;
+  // Like the real web gateway: a passkey made here before proves it works, whatever the hint says.
   @override
-  Future<bool> isSupported() async => supported;
+  Future<bool> isSupported() async => supported || enrolled;
+  @override
+  Future<bool> canTryAnyway() async => canTry;
   @override
   Future<bool> authenticate() async {
     authenticateCalls++;
@@ -190,6 +195,31 @@ void main() {
         throwsA(isA<StateError>().having((e) => e.message, 'message', contains('no-device-unlock'))),
       );
       expect(device.enrollCalls, 1, reason: 'not even tried when the device cannot do it');
+    });
+
+    test('a "no Face ID here" hint does not stop a browser that can do passkeys from trying (iOS 26.2 says no on iPhones that have Face ID)', () async {
+      final (container, device, user) = await setUpBrowser();
+      device
+        ..supported = false
+        ..canTry = true;
+      final security = container.read(appSecurityServiceProvider);
+      await security.enableFor(user);
+      expect(device.enrollCalls, 1, reason: 'the phone itself decides');
+      expect(await security.canUseBiometricLogin(), isTrue, reason: 'and once it worked, the sign-in button is offered despite the hint');
+      final login = await container.read(sessionProvider.notifier).loginWithDeviceAuthentication();
+      expect(login.isOk, isTrue);
+    });
+
+    test('when the attempt itself is cancelled or refused after a "no" hint, quick sign in stays off', () async {
+      final (container, device, user) = await setUpBrowser();
+      device
+        ..supported = false
+        ..canTry = true
+        ..enrollApproved = false;
+      final security = container.read(appSecurityServiceProvider);
+      await expectLater(security.enableFor(user), throwsA(isA<StateError>()));
+      expect(await security.isBiometricLoginEnabled, isFalse);
+      expect(await security.canUseBiometricLogin(), isFalse);
     });
 
     test('if the browser lost its passkey the button is not offered (it could only fail)', () async {

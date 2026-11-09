@@ -41,6 +41,8 @@ class WebDeviceAuthenticationGateway implements DeviceAuthenticationGateway, Enr
     // Only a yes is remembered: a no may change a moment later (the person turns Face ID or
     // Windows Hello on and comes back), and must not need a page reload to be noticed.
     if (_supported == true) return true;
+    // A passkey made on this browser before proves it works here, whatever the check says now.
+    if (_saved() != null) return _supported = true;
     try {
       // Needs https (or localhost) and a built-in unlock method (face, finger, screen lock).
       if (!web.window.isSecureContext) {
@@ -51,8 +53,7 @@ class WebDeviceAuthenticationGateway implements DeviceAuthenticationGateway, Enr
         _reason = 'no-webauthn';
         return false;
       }
-      final available = (await web.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().toDart).toDart;
-      if (!available) {
+      if (!await _deviceUnlockHint()) {
         _reason = 'no-device-unlock';
         return false;
       }
@@ -60,6 +61,40 @@ class WebDeviceAuthenticationGateway implements DeviceAuthenticationGateway, Enr
       return true;
     } catch (error) {
       _reason = 'check-failed';
+      return false;
+    }
+  }
+
+  /// What the browser says about a built-in unlock (Face ID, fingerprint, Windows Hello). It is
+  /// only a HINT: iOS 26.2 answers "no" until a passkey provider (iCloud Keychain or a password
+  /// app) is set up, and answered "no" in Home Screen copies and other apps' browsers because of
+  /// a bug fixed in 26.3 - on an iPhone that has Face ID. So a "no" does not stop the person
+  /// from trying (see [canTryAnyway]); the phone itself gives the real answer.
+  Future<bool> _deviceUnlockHint() async {
+    try {
+      if ((await web.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().toDart).toDart) {
+        return true;
+      }
+    } catch (_) {}
+    try {
+      // The newer, more precise question some browsers answer correctly where the old one does not.
+      final credential = globalContext.getProperty<JSObject>('PublicKeyCredential'.toJS);
+      if (credential.has('getClientCapabilities')) {
+        final capabilities = await credential.callMethod<JSPromise<JSObject>>('getClientCapabilities'.toJS).toDart;
+        final answer = capabilities.getProperty<JSAny?>('userVerifyingPlatformAuthenticator'.toJS);
+        if (answer.isA<JSBoolean>() && (answer as JSBoolean).toDart) return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  /// Whether setting it up can be attempted although [isSupported] said no: the page is secure
+  /// and the browser has WebAuthn at all.
+  @override
+  Future<bool> canTryAnyway() async {
+    try {
+      return web.window.isSecureContext && globalContext.has('PublicKeyCredential');
+    } catch (_) {
       return false;
     }
   }
@@ -72,8 +107,9 @@ class WebDeviceAuthenticationGateway implements DeviceAuthenticationGateway, Enr
       case 'no-webauthn':
         return 'This browser cannot do Face ID or fingerprint sign in. Update it, or use Safari, Chrome or Edge. (code: no-webauthn)';
       case 'no-device-unlock':
-        return 'This browser cannot see a Face ID, Touch ID, fingerprint or Windows Hello on this device. '
-            'Turn one on in the device settings (on an iPhone: Settings > Face ID & Passcode), then reload NexaPOS and try again. '
+        return 'This device would not set up Face ID, fingerprint or Windows Hello for NexaPOS. '
+            'Check one is turned on in the device settings (on an iPhone: Settings > Face ID & Passcode, and Passwords must be on in Settings > your name > iCloud). '
+            'If you opened NexaPOS from the Home Screen, try it in Safari, then reload and try again. '
             '(code: no-device-unlock)';
       default:
         return 'The browser could not check this device for Face ID or fingerprint. Reload NexaPOS and try again. (code: $_reason)';
@@ -102,6 +138,8 @@ class WebDeviceAuthenticationGateway implements DeviceAuthenticationGateway, Enr
     try {
       web.window.localStorage.removeItem(_storeKey);
     } catch (_) {}
+    // The earlier "yes" may have come from that passkey; ask the browser afresh next time.
+    _supported = null;
   }
 
   // ---- set up --------------------------------------------------------------------------------
@@ -133,7 +171,12 @@ class WebDeviceAuthenticationGateway implements DeviceAuthenticationGateway, Enr
     try {
       credential = await web.window.navigator.credentials.create(options as web.CredentialCreationOptions).toDart;
     } catch (error) {
-      if (_cancelled(error)) return false;
+      if (_cancelled(error)) {
+        // Cancelling and "this device has nothing to unlock with" look the same to the page. When
+        // the hint also said no, say what to check instead of a silent "cancelled".
+        if (_supported != true && _reason == 'no-device-unlock') throw StateError(await whyUnsupported());
+        return false;
+      }
       throw StateError(_explain(error));
     }
     if (credential == null) return false;

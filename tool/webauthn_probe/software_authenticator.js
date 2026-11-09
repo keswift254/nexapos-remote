@@ -4,7 +4,7 @@
 // authenticator data and client data shaped like the spec says.
 (function () {
   var keys = {}; // credential id (base64url) -> private CryptoKey
-  var state = (window.__softAuth = { creates: 0, gets: 0, mode: 'ok', last: null });
+  var state = (window.__softAuth = { creates: 0, gets: 0, mode: 'ok', last: null, uvpaa: true });
 
   function b64u(buffer) {
     var s = '';
@@ -33,7 +33,9 @@
   function bytesOf(source) { return source instanceof ArrayBuffer ? new Uint8Array(source) : new Uint8Array(source.buffer, source.byteOffset, source.byteLength); }
   function notAllowed() { var e = new Error('The operation either timed out or was not allowed.'); e.name = 'NotAllowedError'; return e; }
 
-  PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable = function () { return Promise.resolve(true); };
+  PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable = function () { return Promise.resolve(state.uvpaa); };
+  // The newer question browsers answer too; the same "no" an iPhone gave on iOS 26.2 when no passkey provider is set up.
+  PublicKeyCredential.getClientCapabilities = function () { return Promise.resolve({ userVerifyingPlatformAuthenticator: state.uvpaa }); };
 
   navigator.credentials.create = function (options) {
     state.creates++;

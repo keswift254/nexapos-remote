@@ -27,6 +27,12 @@ abstract class EnrollableDeviceAuthentication {
   /// no face / fingerprint / Windows Hello turned on).
   Future<String> whyUnsupported();
 
+  /// Whether [enroll] is worth attempting although [DeviceAuthenticationGateway.isSupported]
+  /// said no. A browser's "is there a Face ID / fingerprint here?" answer is only a hint (an
+  /// iPhone with Face ID answered no on iOS 26.2), so when the browser can do passkeys at all
+  /// the person is let try, and the device itself gives the real answer.
+  Future<bool> canTryAnyway();
+
   /// Removes it (quick sign in turned off).
   Future<void> forget();
 }
