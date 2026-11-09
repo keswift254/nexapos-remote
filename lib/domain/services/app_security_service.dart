@@ -7,7 +7,7 @@ import '../../data/repositories/user_repository_impl.dart';
 export 'device_authentication_gateway.dart';
 import 'device_authentication_gateway.dart';
 import 'device_authentication_gateway_native.dart'
-    if (dart.library.js_interop) 'device_authentication_gateway_stub.dart'
+    if (dart.library.js_interop) 'device_authentication_gateway_web.dart'
     as device_auth;
 
 const _biometricUserKey = 'nexapos.security.biometricUserId';
@@ -40,10 +40,25 @@ class AppSecurityService {
   Future<bool> canUseBiometricLogin() async {
     if (!await isBiometricLoginEnabled) return false;
     try {
-      return await _ref.read(deviceAuthenticationGatewayProvider).isSupported();
+      final gateway = _ref.read(deviceAuthenticationGatewayProvider);
+      if (!await gateway.isSupported()) return false;
+      // In a browser the credential lives with this browser's storage: if that was cleared the
+      // button would only fail, so it is not offered until quick sign in is set up again.
+      final Object device = gateway;
+      if (device is EnrollableDeviceAuthentication && !await device.isEnrolled()) return false;
+      return true;
     } catch (_) {
       return false;
     }
+  }
+
+  /// Finds out early whether this device can do quick sign in, so a browser's answer is
+  /// already known when the person taps the switch (a browser only allows the face / finger
+  /// prompt shortly after a tap, so there must be nothing slow in between).
+  Future<void> warmUp() async {
+    try {
+      await _ref.read(deviceAuthenticationGatewayProvider).isSupported();
+    } catch (_) {}
   }
 
   Future<void> enableFor(User user) async {
@@ -53,7 +68,12 @@ class AppSecurityService {
         'Set up fingerprint, face recognition, or Windows Hello on this device first.',
       );
     }
-    if (!await gateway.authenticate()) {
+    // A browser has to create its passkey first (one prompt); the phone, tablet or PC apps
+    // just ask for the fingerprint / face / Windows Hello once.
+    final proved = gateway is EnrollableDeviceAuthentication
+        ? await (gateway as EnrollableDeviceAuthentication).enroll()
+        : await gateway.authenticate();
+    if (!proved) {
       throw StateError('Device authentication was cancelled.');
     }
     await _ref
@@ -94,8 +114,13 @@ class AppSecurityService {
             .toIso8601String(),
       );
 
-  Future<void> disable() =>
-      _ref.read(secureStorageProvider).delete(key: _biometricUserKey);
+  Future<void> disable() async {
+    final gateway = _ref.read(deviceAuthenticationGatewayProvider);
+    if (gateway is EnrollableDeviceAuthentication) {
+      await (gateway as EnrollableDeviceAuthentication).forget();
+    }
+    await _ref.read(secureStorageProvider).delete(key: _biometricUserKey);
+  }
 
   Future<User?> authenticateUser() async {
     final storage = _ref.read(secureStorageProvider);

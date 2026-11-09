@@ -29,6 +29,7 @@ import 'features/categories/categories_screen.dart';
 import 'features/products/products_screen.dart';
 import 'features/checkout/new_sale_screen.dart';
 import 'features/checkout/cart_notifier.dart';
+import 'features/checkout/held_sales_notifier.dart';
 import 'features/checkout/cart_screen.dart';
 import 'features/checkout/receipt_screen.dart';
 import 'features/checkout/pending_sales_screen.dart';
@@ -337,6 +338,7 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
     _runMaintenance();
     ref.read(pendingPaystackSalesProvider.notifier).reconcile();
     ref.read(cartProvider.notifier).restore();
+    ref.read(heldSalesProvider.notifier).restore();
     _scheduleNextSync();
     _maintenanceTimer = Timer.periodic(
       _maintenanceInterval,

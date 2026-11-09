@@ -17,6 +17,12 @@ class PrivacySettingsScreen extends ConsumerStatefulWidget {
 class _PrivacySettingsScreenState extends ConsumerState<PrivacySettingsScreen> {
   bool _saving = false;
 
+  @override
+  void initState() {
+    super.initState();
+    ref.read(appSecurityServiceProvider).warmUp();
+  }
+
   Future<void> _setBiometric(bool enabled) async {
     final user = ref.read(sessionProvider);
     if (user == null) return;
@@ -45,7 +51,9 @@ class _PrivacySettingsScreenState extends ConsumerState<PrivacySettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final lockMinutes = ref.watch(appLockSettingsProvider);
-    final authenticationName = defaultTargetPlatform == TargetPlatform.windows
+    final authenticationName = kIsWeb
+        ? 'Face ID or fingerprint'
+        : defaultTargetPlatform == TargetPlatform.windows
         ? 'Windows Hello'
         : 'Fingerprint or face recognition';
     return Scaffold(
@@ -83,8 +91,10 @@ class _PrivacySettingsScreenState extends ConsumerState<PrivacySettingsScreen> {
             builder: (context, snapshot) => SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: Text(authenticationName),
-              subtitle: const Text(
-                'Uses this device security. Your NexaPOS password is never stored.',
+              subtitle: Text(
+                kIsWeb
+                    ? 'Uses this device\'s Face ID, Touch ID or fingerprint through your browser, on this browser only. Your NexaPOS password is never stored.'
+                    : 'Uses this device security. Your NexaPOS password is never stored.',
               ),
               value: snapshot.data == true,
               onChanged: _saving ? null : _setBiometric,

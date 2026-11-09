@@ -26,6 +26,7 @@ import 'save_recovery.dart';
 import '../../app.dart' show hasAnyUsersProvider;
 import '../dashboard/dashboard_screen.dart' show dashboardDataProvider;
 import '../checkout/cart_notifier.dart';
+import '../checkout/held_sales_notifier.dart';
 import '../../domain/services/pending_sales_notifier.dart';
 import 'payment_settings_screen.dart' show currentPaymentCredentialsProvider;
 
@@ -1174,6 +1175,7 @@ class _DeviceSyncScreenState extends ConsumerState<DeviceSyncScreen> {
   Future<void> _afterShopChange() async {
     if (!mounted) return;
     ref.read(cartProvider.notifier).clear();
+    ref.read(heldSalesProvider.notifier).clearAll();
     ref.invalidate(pendingPaystackSalesProvider);
     // resetForFreshStart's bulk deletes DO fire dashboardChangeTicker
     // reactively, in principle - but a real report ("dashboard still

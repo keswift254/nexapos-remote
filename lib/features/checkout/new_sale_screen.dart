@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../products/products_screen.dart' show allProductsProvider;
 import 'add_item_actions.dart';
 import 'cart_notifier.dart';
+import 'held_sales_sheet.dart';
 
 /// Cashier-facing product browser: tap a product to add it to the cart.
 /// Deliberately separate from ProductsScreen, which is the admin
@@ -50,6 +51,7 @@ class _NewSaleScreenState extends ConsumerState<NewSaleScreen> {
       appBar: AppBar(
         title: const Text('New Sale'),
         actions: [
+          HeldSalesButton(onResumed: () => context.push('/checkout/cart')),
           IconButton(
             icon: const Icon(Icons.playlist_add),
             tooltip: 'Add manual item',

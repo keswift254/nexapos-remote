@@ -153,8 +153,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                   ? null
                                   : _useDeviceAuthentication,
                               icon: const Icon(Icons.fingerprint),
-                              label: const Text(
-                                'Use fingerprint, face, or Windows Hello',
+                              label: Text(
+                                kIsWeb
+                                    ? 'Quick sign in (Face ID or fingerprint)'
+                                    : 'Use fingerprint, face, or Windows Hello',
                               ),
                             ),
                           )

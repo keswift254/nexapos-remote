@@ -11,6 +11,9 @@ import '../dashboard/dashboard_screen.dart';
 import '../products/products_screen.dart' show allProductsProvider;
 import 'add_item_actions.dart';
 import 'cart_notifier.dart';
+import 'cart_state.dart';
+import 'held_sales_notifier.dart';
+import 'held_sales_sheet.dart';
 import 'paystack_waiting_screen.dart';
 
 // IntaSend deliberately removed from here, not from CheckoutService/
@@ -88,6 +91,45 @@ class _CartScreenState extends ConsumerState<CartScreen> {
       ),
     );
     if (confirmed == true) cart.removeAt(index);
+  }
+
+  /// A held sale opened from the list replaces the cart behind this screen's back, so the
+  /// two text fields that were filled in once at start-up are brought in line with it. A
+  /// value the cashier is typing already matches the cart, so their cursor is left alone.
+  void _syncControllers(CartState next) {
+    final typedDiscount = Money.fromMajor(double.tryParse(_discountController.text.trim()) ?? 0);
+    if (typedDiscount != next.discount) {
+      _discountController.text = next.discount.cents == 0 ? '' : next.discount.toMajorDouble.toStringAsFixed(2);
+    }
+    final typedCash = Money.fromMajor(double.tryParse(_cashReceivedController.text.trim()) ?? 0);
+    if (typedCash != next.cashReceived) {
+      _cashReceivedController.text = next.cashReceived.cents == 0 ? '' : next.cashReceived.toMajorDouble.toStringAsFixed(2);
+    }
+  }
+
+  /// Sets this sale aside (so the next customer can be served) and goes back to picking
+  /// products for them. The cashier can add a name or note to recognise it by.
+  Future<void> _holdSale() async {
+    final chosen = await showDialog<String>(
+      context: context,
+      builder: (_) => _HoldSaleDialog(initialName: ref.read(cartProvider).customerName),
+    );
+    if (chosen == null || !mounted) return;
+    final user = ref.read(sessionProvider);
+    final held = await ref
+        .read(heldSalesProvider.notifier)
+        .holdCurrent(label: chosen, heldBy: user?.name ?? 'Cashier');
+    if (held == null || !mounted) return;
+    _discountController.clear();
+    _cashReceivedController.clear();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Sale held as "${held.label}". Find it under Held sales.')),
+    );
+    if (context.canPop()) {
+      context.pop();
+    } else {
+      context.go('/');
+    }
   }
 
   void _addFromSearch(CartNotifier cart, Product product) {
@@ -233,9 +275,11 @@ class _CartScreenState extends ConsumerState<CartScreen> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<CartState>(cartProvider, (previous, next) => _syncControllers(next));
     final cartState = ref.watch(cartProvider);
     final cart = ref.read(cartProvider.notifier);
     final userId = ref.watch(sessionProvider)?.id;
+    final heldCount = ref.watch(heldSalesProvider).length;
     final discount = cartState.discount;
     final total = discount > cartState.subtotal
         ? const Money.zero()
@@ -252,7 +296,10 @@ class _CartScreenState extends ConsumerState<CartScreen> {
     );
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Cart & Checkout')),
+      appBar: AppBar(
+        title: const Text('Cart & Checkout'),
+        actions: const [HeldSalesButton()],
+      ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -305,6 +352,18 @@ class _CartScreenState extends ConsumerState<CartScreen> {
           ],
           const SizedBox(height: 12),
           if (cartState.isEmpty) const Text('Your cart is empty.'),
+          if (cartState.isEmpty && heldCount > 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () => showHeldSalesSheet(context),
+                  icon: const Icon(Icons.pause_circle_outline),
+                  label: Text('$heldCount held ${heldCount == 1 ? 'sale is' : 'sales are'} waiting'),
+                ),
+              ),
+            ),
           for (var i = 0; i < cartState.items.length; i++)
             Card(
               child: ListTile(
@@ -423,17 +482,29 @@ class _CartScreenState extends ConsumerState<CartScreen> {
       bottomNavigationBar: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(12),
-          child: FilledButton(
-            onPressed: (_submitting || cartState.isEmpty || userId == null || cashShortfall)
-                ? null
-                : () => _submit(cart, cartState.paymentMethod, userId),
-            child: _submitting
-                ? const SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Text('Complete Sale'),
+          child: Row(
+            children: [
+              OutlinedButton.icon(
+                onPressed: (_submitting || cartState.isEmpty) ? null : _holdSale,
+                icon: const Icon(Icons.pause_circle_outline),
+                label: const Text('Hold'),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: FilledButton(
+                  onPressed: (_submitting || cartState.isEmpty || userId == null || cashShortfall)
+                      ? null
+                      : () => _submit(cart, cartState.paymentMethod, userId),
+                  child: _submitting
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Complete Sale'),
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -495,6 +566,61 @@ class _TotalsRow extends StatelessWidget {
           Text(value.format(), style: style),
         ],
       ),
+    );
+  }
+}
+
+/// The dialog owns its text controller, so the controller outlives the dialog's closing animation.
+class _HoldSaleDialog extends StatefulWidget {
+  final String initialName;
+  const _HoldSaleDialog({required this.initialName});
+
+  @override
+  State<_HoldSaleDialog> createState() => _HoldSaleDialogState();
+}
+
+class _HoldSaleDialogState extends State<_HoldSaleDialog> {
+  late final _label = TextEditingController(text: widget.initialName);
+
+  @override
+  void dispose() {
+    _label.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Hold this sale'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'It is set aside so you can serve someone else. Open it again from Held sales to finish or throw it away. Stock is not taken until it is completed.',
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _label,
+            autofocus: true,
+            decoration: const InputDecoration(
+              labelText: 'Name or note (optional)',
+              hintText: 'e.g. Mama Njeri',
+            ),
+            onSubmitted: (value) => Navigator.pop(context, value),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _label.text),
+          child: const Text('Hold sale'),
+        ),
+      ],
     );
   }
 }

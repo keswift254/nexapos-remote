@@ -15,6 +15,7 @@ import 'session_service.dart';
 import 'pending_sales_notifier.dart';
 import '../../data/repositories/user_repository_impl.dart';
 import '../../features/checkout/cart_notifier.dart';
+import '../../features/checkout/held_sales_notifier.dart';
 
 final shopSafetyProvider = Provider<ShopSafetyService>(
   (ref) => ShopSafetyService(
@@ -25,6 +26,7 @@ final shopSafetyProvider = Provider<ShopSafetyService>(
     onShopChanged: (joining) async {
       final license = ref.read(licenseServiceProvider);
       ref.read(cartProvider.notifier).clear();
+      await ref.read(heldSalesProvider.notifier).clearAll();
       ref.invalidate(pendingPaystackSalesProvider);
       ref.invalidate(userRepositoryProvider);
       await ref.read(sessionProvider.notifier).logout();

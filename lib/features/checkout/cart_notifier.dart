@@ -59,7 +59,7 @@ class CartNotifier extends _$CartNotifier {
         .getSingleOrNull();
     if (row == null) return;
     try {
-      final restored = _cartStateFromJson(
+      final restored = cartStateFromJson(
         jsonDecode(row.data['value'] as String) as Map<String, dynamic>,
       );
       if (restored.isNotEmpty) state = await _withCatalogPrices(restored);
@@ -124,7 +124,7 @@ class CartNotifier extends _$CartNotifier {
     }
     await db.customStatement(
       "INSERT OR REPLACE INTO local_safety_state(id,value) VALUES('$_cartDraftKey',?)",
-      [jsonEncode(_cartStateToJson(draft))],
+      [jsonEncode(cartStateToJson(draft))],
     );
   }
 
@@ -196,14 +196,20 @@ class CartNotifier extends _$CartNotifier {
   void setCashReceived(Money amount) => state = state.copyWith(cashReceived: amount);
 
   void clear() => state = const CartState();
+
+  /// Replaces the whole cart, as when a held sale is opened again. Lines saved by an older
+  /// version get their catalog prices filled in, same as a restored draft.
+  Future<void> replaceWith(CartState next) async {
+    state = await _withCatalogPrices(next);
+  }
 }
 
 /// Hand-written rather than json_serializable-generated: CartState only
 /// ever needs to round-trip through this one local draft slot, so a
 /// generated file (and wiring CartItem/Money into it too) would be a
 /// lot of build_runner output for two small, stable shapes.
-Map<String, dynamic> _cartStateToJson(CartState state) => {
-  'items': state.items.map(_cartItemToJson).toList(),
+Map<String, dynamic> cartStateToJson(CartState state) => {
+  'items': state.items.map(cartItemToJson).toList(),
   'saleType': state.saleType,
   'discount': state.discount.cents,
   'customerName': state.customerName,
@@ -213,9 +219,9 @@ Map<String, dynamic> _cartStateToJson(CartState state) => {
   'cashReceived': state.cashReceived.cents,
 };
 
-CartState _cartStateFromJson(Map<String, dynamic> json) => CartState(
+CartState cartStateFromJson(Map<String, dynamic> json) => CartState(
   items: (json['items'] as List)
-      .map((raw) => _cartItemFromJson(raw as Map<String, dynamic>))
+      .map((raw) => cartItemFromJson(raw as Map<String, dynamic>))
       .toList(),
   saleType: json['saleType'] as String,
   discount: Money(json['discount'] as int),
@@ -226,7 +232,7 @@ CartState _cartStateFromJson(Map<String, dynamic> json) => CartState(
   cashReceived: Money(json['cashReceived'] as int),
 );
 
-Map<String, dynamic> _cartItemToJson(CartItem item) => {
+Map<String, dynamic> cartItemToJson(CartItem item) => {
   'productId': item.productId,
   'name': item.name,
   'unitPriceCents': item.unitPrice.cents,
@@ -236,7 +242,7 @@ Map<String, dynamic> _cartItemToJson(CartItem item) => {
   if (item.wholesalePrice != null) 'wholesalePriceCents': item.wholesalePrice!.cents,
 };
 
-CartItem _cartItemFromJson(Map<String, dynamic> json) => CartItem(
+CartItem cartItemFromJson(Map<String, dynamic> json) => CartItem(
   productId: json['productId'] as String?,
   name: json['name'] as String,
   unitPrice: Money(json['unitPriceCents'] as int),
