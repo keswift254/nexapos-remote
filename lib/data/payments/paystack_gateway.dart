@@ -18,12 +18,25 @@ class PaystackInitResult {
   const PaystackInitResult({required this.authorizationUrl, required this.reference});
 }
 
+/// What an M-Pesa prompt (a charge sent straight to the customer's phone, no payment page) answered.
+/// [status] is Paystack's own word: `pay_offline` (waiting for the customer), `pending`, or `success`.
+class PaystackChargeResult {
+  final String reference;
+  final String status;
+
+  const PaystackChargeResult({required this.reference, required this.status});
+}
+
 class PaystackVerifyResult {
   final bool success;
   final String message;
   final String reference;
 
-  const PaystackVerifyResult({required this.success, required this.message, required this.reference});
+  /// Paystack's own status for the transaction, lower case (`success`, `ongoing`, `pay_offline`, `failed`,
+  /// `abandoned`, `reversed`...). Empty when the answer did not carry one.
+  final String status;
+
+  const PaystackVerifyResult({required this.success, required this.message, required this.reference, this.status = ''});
 }
 
 /// Thin HTTP client for the operator's own payments-platform backend -
@@ -85,6 +98,42 @@ class PaystackGateway {
     return PaystackInitResult(authorizationUrl: url, reference: ref);
   }
 
+  /// Sends an M-Pesa prompt to [phone] for [amount] - the customer approves it on their own phone, so no payment
+  /// page is opened anywhere. Throws [PaystackException] (with the server's own words) when the prompt was not sent;
+  /// nothing is recorded by the server in that case, so there is nothing to undo.
+  Future<PaystackChargeResult> chargeMobileMoney({
+    required String baseUrl,
+    required String apiKey,
+    required Money amount,
+    required String reference,
+    required String currency,
+    required String phone,
+  }) async {
+    final response = await platformRequest(
+      _client,
+      'POST',
+      'charge_mobile_money',
+      baseUrl,
+      apiKey: apiKey,
+      body: {
+        'amount': amount.cents,
+        'currency': currency,
+        'reference': reference,
+        'phone': phone,
+      },
+    );
+    if (response['status'] != true) {
+      throw PaystackException(platformResponseMessage(response, 'The M-Pesa prompt could not be sent.'));
+    }
+    final data = (response['data'] as Map?)?.cast<String, dynamic>() ?? const {};
+    final status = (data['status'] as String? ?? '').toLowerCase().trim();
+    // Only a prompt that really went out (or a payment already made) counts. The server checks this too.
+    if (!const {'pay_offline', 'pending', 'success'}.contains(status)) {
+      throw PaystackException(platformResponseMessage(response, 'The M-Pesa prompt could not be sent.'));
+    }
+    return PaystackChargeResult(reference: (data['reference'] as String? ?? reference).trim(), status: status);
+  }
+
   Future<PaystackVerifyResult> verify({
     required String baseUrl,
     required String apiKey,
@@ -112,6 +161,7 @@ class PaystackGateway {
       success: success,
       message: success ? 'Payment received.' : platformResponseMessage(response, 'Payment was not successful.'),
       reference: (data['reference'] as String? ?? reference).trim(),
+      status: status,
     );
   }
 }

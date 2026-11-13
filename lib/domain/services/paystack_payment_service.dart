@@ -20,10 +20,34 @@ PaystackPaymentService paystackPaymentService(Ref ref) {
 
 class PaystackCheckoutSession {
   final Sale sale;
+
+  /// The payment page to open - empty for an M-Pesa prompt, which goes straight to the customer's phone and opens
+  /// no page at all ([viaPrompt]).
   final String authorizationUrl;
   final String reference;
 
-  const PaystackCheckoutSession({required this.sale, required this.authorizationUrl, required this.reference});
+  /// True when this sale was started by sending an M-Pesa prompt to [phone] instead of opening a payment page.
+  final bool viaPrompt;
+  final String phone;
+
+  const PaystackCheckoutSession({
+    required this.sale,
+    required this.authorizationUrl,
+    required this.reference,
+    this.viaPrompt = false,
+    this.phone = '',
+  });
+}
+
+/// Paystack's words for a prompt that is over without being paid: the customer cancelled it, it ran out of time,
+/// or it was reversed. (`ongoing` and `pay_offline` mean it is still waiting.)
+const _promptEndedStatuses = {'failed', 'abandoned', 'reversed', 'cancelled'};
+
+/// Whether [text] looks like a phone number that an M-Pesa prompt can be sent to (the server cleans it up and does
+/// the final check): 9 to 13 digits once spaces, dashes and a leading + are ignored.
+bool looksLikeMpesaNumber(String text) {
+  final digits = text.replaceAll(RegExp(r'[^0-9]'), '');
+  return digits.length >= 9 && digits.length <= 13;
 }
 
 sealed class PaystackPollOutcome {
@@ -37,6 +61,42 @@ class PaystackPollPaid extends PaystackPollOutcome {
 
 class PaystackPollWaiting extends PaystackPollOutcome {
   const PaystackPollWaiting();
+}
+
+/// An M-Pesa prompt that is over without being paid (see [_promptEndedStatuses]). The sale is still recorded as
+/// pending with its stock reserved: only the cashier ends it, by sending the prompt again or cancelling the sale.
+class PaystackPollEnded extends PaystackPollOutcome {
+  const PaystackPollEnded();
+}
+
+/// What sending a declined prompt again came to.
+sealed class PaystackRetryOutcome {
+  const PaystackRetryOutcome();
+}
+
+/// The customer had approved it after all: the sale is paid and nothing is cancelled.
+class PaystackRetryPaid extends PaystackRetryOutcome {
+  final Sale sale;
+  const PaystackRetryPaid(this.sale);
+}
+
+/// The prompt is not over (or could not be checked just now), so nothing was cancelled.
+class PaystackRetryNotYet extends PaystackRetryOutcome {
+  const PaystackRetryNotYet();
+}
+
+/// The first sale was cancelled (stock back) and its contents are handed back to put in the cart again.
+class PaystackRetryRestored extends PaystackRetryOutcome {
+  final List<CartItem> items;
+  final Money discount;
+  final String saleType;
+  final Money? cashReceived;
+  const PaystackRetryRestored({required this.items, required this.discount, required this.saleType, this.cashReceived});
+}
+
+class PaystackRetryFailed extends PaystackRetryOutcome {
+  final String message;
+  const PaystackRetryFailed(this.message);
 }
 
 /// What one reconcile pass found: sales still waiting on the customer, and
@@ -69,10 +129,20 @@ class PaystackPaymentService {
     // total on top of cash already collected. Null for a plain
     // Paystack sale, which charges the full total exactly as before.
     Money? cashReceived,
+    // When given, an M-Pesa prompt is sent to this number and NO payment page is used. Left empty, the payment page
+    // (card or M-Pesa) is opened as before.
+    String mpesaPhone = '',
   }) async {
+    final prompt = mpesaPhone.trim();
+    if (prompt.isNotEmpty && !looksLikeMpesaNumber(prompt)) {
+      return const Result.failure('Enter the customer\'s M-Pesa number, like 0712 345 678.');
+    }
     final credentials = await _credentials.load();
     if (!credentials.isConfigured) {
       return const Result.failure('Payment collection is not set up yet. Complete Payments & Payouts first.');
+    }
+    if (prompt.isNotEmpty && credentials.currency.toUpperCase() != 'KES') {
+      return const Result.failure('M-Pesa prompts are only for payments in KES.');
     }
 
     final totalsResult = await _checkoutService.previewTotals(cart, discount);
@@ -96,16 +166,32 @@ class PaystackPaymentService {
 
     final saleNumber = await _checkoutService.generateSaleNumber();
 
-    final PaystackInitResult init;
+    final String authorizationUrl;
+    final String gatewayReference;
     try {
-      init = await _gateway.initialize(
-        baseUrl: credentials.baseUrl,
-        apiKey: credentials.apiKey,
-        amount: chargeAmount,
-        reference: saleNumber,
-        email: credentials.defaultEmail,
-        currency: credentials.currency,
-      );
+      if (prompt.isNotEmpty) {
+        final charge = await _gateway.chargeMobileMoney(
+          baseUrl: credentials.baseUrl,
+          apiKey: credentials.apiKey,
+          amount: chargeAmount,
+          reference: saleNumber,
+          currency: credentials.currency,
+          phone: prompt,
+        );
+        authorizationUrl = '';
+        gatewayReference = charge.reference;
+      } else {
+        final init = await _gateway.initialize(
+          baseUrl: credentials.baseUrl,
+          apiKey: credentials.apiKey,
+          amount: chargeAmount,
+          reference: saleNumber,
+          email: credentials.defaultEmail,
+          currency: credentials.currency,
+        );
+        authorizationUrl = init.authorizationUrl;
+        gatewayReference = init.reference;
+      }
     } on PaystackOfflineException catch (e) {
       // Not "check your internet connection" - a real report confirmed this
       // fires just as easily when the device's own connection is fine and
@@ -125,19 +211,21 @@ class PaystackPaymentService {
       cart: cart,
       discount: discount,
       customerName: customerName,
-      customerPhone: customerPhone,
+      customerPhone: prompt.isNotEmpty ? prompt : customerPhone,
       saleType: saleType,
       userId: userId,
       saleNumber: saleNumber,
-      paystackReference: init.reference,
+      paystackReference: gatewayReference,
       cashReceived: cashReceived,
     );
 
     return saleResult.when(
       ok: (sale) => Result.ok(PaystackCheckoutSession(
         sale: sale,
-        authorizationUrl: init.authorizationUrl,
-        reference: init.reference,
+        authorizationUrl: authorizationUrl,
+        reference: gatewayReference,
+        viaPrompt: prompt.isNotEmpty,
+        phone: prompt,
       )),
       failure: Result.failure,
     );
@@ -150,7 +238,7 @@ class PaystackPaymentService {
   /// back as [PaystackPollWaiting] so the UI just tries again next tick.
   /// The only way to reach a cancelled/stock-restored state is the
   /// cashier explicitly calling [cancel].
-  Future<PaystackPollOutcome> poll(String saleId, String reference, Money expectedAmount) async {
+  Future<PaystackPollOutcome> poll(String saleId, String reference, Money expectedAmount, {bool viaPrompt = false}) async {
     final credentials = await _credentials.load();
     if (!credentials.isConfigured) return const PaystackPollWaiting();
 
@@ -162,7 +250,10 @@ class PaystackPaymentService {
         expectedAmount: expectedAmount,
         currency: credentials.currency,
       );
-      if (!verify.success) return const PaystackPollWaiting();
+      if (!verify.success) {
+        // Only an M-Pesa prompt can be "over": on a payment page the customer simply is not done yet.
+        return viaPrompt && _promptEndedStatuses.contains(verify.status) ? const PaystackPollEnded() : const PaystackPollWaiting();
+      }
       final result = await _checkoutService.finalizePaystackSale(saleId);
       final PaystackPollOutcome outcome =
           result.when(ok: PaystackPollPaid.new, failure: (_) => const PaystackPollWaiting());
@@ -175,6 +266,27 @@ class PaystackPaymentService {
   }
 
   Future<Result<void>> cancel(String saleId) => _checkoutService.cancelPaystackSale(saleId);
+
+  /// "Send the prompt again": the customer declined or let the first one run out. One last look first - they may
+  /// have approved just now, and then it is a paid sale and nothing is cancelled. Only when the prompt is really
+  /// over is the first sale cancelled (stock back) and its contents handed back to put in the cart again, so the
+  /// customer is never charged twice and nothing has to be typed again.
+  Future<PaystackRetryOutcome> retryPrompt(Sale sale, String reference) async {
+    final last = await poll(sale.id, reference, sale.gatewayPortion, viaPrompt: true);
+    if (last is PaystackPollPaid) return PaystackRetryPaid(last.sale);
+    if (last is! PaystackPollEnded) return const PaystackRetryNotYet();
+    final items = await _checkoutService.cartItemsForSale(sale.id);
+    final cancelled = await _checkoutService.cancelPaystackSale(sale.id);
+    return cancelled.when<PaystackRetryOutcome>(
+      ok: (_) => PaystackRetryRestored(
+        items: items,
+        discount: sale.discount,
+        saleType: sale.saleType,
+        cashReceived: sale.cashReceived,
+      ),
+      failure: PaystackRetryFailed.new,
+    );
+  }
 
   /// Re-polls a single sale found via [reconcilePendingSales] - for the
   /// pending-sales screen's per-row "Check now", so it only needs a

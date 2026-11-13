@@ -488,6 +488,23 @@ class CheckoutService {
   Future<String?> intasendReferenceFor(String saleId) =>
       paystackReferenceFor(saleId);
 
+  /// A recorded sale's lines as cart lines again (name, price, cost and quantity exactly as sold), so a sale whose
+  /// payment did not go through can be rung up again without retyping it. Catalog prices for switching retail and
+  /// wholesale are not kept on a recorded line, so they come back null here (the cart fills them in again).
+  Future<List<CartItem>> cartItemsForSale(String saleId) async {
+    final items = await _saleItemRepository.forSale(saleId);
+    return [
+      for (final item in items)
+        CartItem(
+          productId: item.productId,
+          name: item.itemName,
+          unitPrice: item.unitPrice,
+          costPrice: item.costPrice,
+          quantity: item.quantity,
+        ),
+    ];
+  }
+
   Future<void> _insertItemsAndStock(
     String saleId,
     String saleNumber,

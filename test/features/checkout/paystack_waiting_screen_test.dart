@@ -22,8 +22,9 @@ class _ScriptedPaystack implements PaystackPaymentService {
   Future<PaystackPollOutcome> poll(
     String saleId,
     String reference,
-    Money expectedAmount,
-  ) {
+    Money expectedAmount, {
+    bool viaPrompt = false,
+  }) {
     final index = polls++;
     return index < answers.length
         ? answers[index]()

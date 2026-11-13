@@ -35,24 +35,30 @@ class CartScreen extends ConsumerStatefulWidget {
 }
 
 class _CartScreenState extends ConsumerState<CartScreen> {
-  late final _discountController = TextEditingController(
-    text: ref.read(cartProvider).discount.cents == 0
-        ? ''
-        : ref.read(cartProvider).discount.toMajorDouble.toStringAsFixed(2),
-  );
-  late final _cashReceivedController = TextEditingController(
-    text: ref.read(cartProvider).cashReceived.cents == 0
-        ? ''
-        : ref.read(cartProvider).cashReceived.toMajorDouble.toStringAsFixed(2),
-  );
+  // Built here, not lazily: the cash and phone fields are only drawn for some payment methods, and a lazy controller
+  // that was never drawn would first be created inside dispose(), where reading the cart is no longer allowed (this
+  // crashed when a cart that came back with M-Pesa chosen was left without ever showing the cash field).
+  final _discountController = TextEditingController();
+  final _cashReceivedController = TextEditingController();
+  final _phoneController = TextEditingController();
   final _searchController = TextEditingController();
   String _query = '';
   bool _submitting = false;
 
   @override
+  void initState() {
+    super.initState();
+    final cart = ref.read(cartProvider);
+    _discountController.text = cart.discount.cents == 0 ? '' : cart.discount.toMajorDouble.toStringAsFixed(2);
+    _cashReceivedController.text = cart.cashReceived.cents == 0 ? '' : cart.cashReceived.toMajorDouble.toStringAsFixed(2);
+    _phoneController.text = cart.customerPhone;
+  }
+
+  @override
   void dispose() {
     _discountController.dispose();
     _cashReceivedController.dispose();
+    _phoneController.dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -104,6 +110,9 @@ class _CartScreenState extends ConsumerState<CartScreen> {
     final typedCash = Money.fromMajor(double.tryParse(_cashReceivedController.text.trim()) ?? 0);
     if (typedCash != next.cashReceived) {
       _cashReceivedController.text = next.cashReceived.cents == 0 ? '' : next.cashReceived.toMajorDouble.toStringAsFixed(2);
+    }
+    if (_phoneController.text != next.customerPhone) {
+      _phoneController.text = next.customerPhone;
     }
   }
 
@@ -169,8 +178,14 @@ class _CartScreenState extends ConsumerState<CartScreen> {
   Future<void> _submit(
     CartNotifier cart,
     String paymentMethod,
-    String userId,
-  ) async {
+    String userId, {
+    // The customer pays by card (or any way the payment page offers) instead of approving an M-Pesa prompt.
+    bool usePaymentPage = false,
+  }) async {
+    if (paymentMethod == 'paystack' && !usePaymentPage && !looksLikeMpesaNumber(ref.read(cartProvider).customerPhone)) {
+      _showError('Enter the customer\'s M-Pesa number, like 0712 345 678.');
+      return;
+    }
     setState(() => _submitting = true);
 
     if (paymentMethod == 'paystack') {
@@ -181,6 +196,7 @@ class _CartScreenState extends ConsumerState<CartScreen> {
         discount: state.discount,
         saleType: state.saleType,
         userId: userId,
+        mpesaPhone: usePaymentPage ? '' : state.customerPhone,
       );
       if (!mounted) return;
       setState(() => _submitting = false);
@@ -243,6 +259,10 @@ class _CartScreenState extends ConsumerState<CartScreen> {
     String userId,
     Money cashReceived,
   ) async {
+    if (!looksLikeMpesaNumber(ref.read(cartProvider).customerPhone)) {
+      _showError('Enter the customer\'s M-Pesa number, like 0712 345 678.');
+      return;
+    }
     setState(() => _submitting = true);
     final service = ref.read(paystackPaymentServiceProvider);
     final state = ref.read(cartProvider);
@@ -252,6 +272,7 @@ class _CartScreenState extends ConsumerState<CartScreen> {
       saleType: state.saleType,
       userId: userId,
       cashReceived: cashReceived,
+      mpesaPhone: state.customerPhone,
     );
     if (!mounted) return;
     setState(() => _submitting = false);
@@ -431,6 +452,32 @@ class _CartScreenState extends ConsumerState<CartScreen> {
                 )
                 .toList(),
           ),
+          if (cartState.paymentMethod == 'paystack') ...[
+            const SizedBox(height: 16),
+            TextField(
+              key: const Key('mpesa-phone'),
+              controller: _phoneController,
+              decoration: const InputDecoration(
+                labelText: 'Customer\'s M-Pesa number',
+                hintText: '0712 345 678',
+                helperText: 'An M-Pesa prompt is sent to this phone. The customer enters their M-Pesa PIN and this screen updates by itself.',
+                helperMaxLines: 3,
+                prefixIcon: Icon(Icons.phone_android),
+              ),
+              keyboardType: TextInputType.phone,
+              onChanged: cart.setCustomerPhone,
+            ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                key: const Key('use-payment-page'),
+                onPressed: (_submitting || cartState.isEmpty || userId == null)
+                    ? null
+                    : () => _submit(cart, 'paystack', userId, usePaymentPage: true),
+                child: const Text('Customer pays by card instead? Open the payment page'),
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
           TextField(
             controller: _discountController,
@@ -461,6 +508,18 @@ class _CartScreenState extends ConsumerState<CartScreen> {
               _ChangeDueRow(cashReceived: cartState.cashReceived, total: total),
             ],
             if (cashShortfall) ...[
+              const SizedBox(height: 12),
+              TextField(
+                key: const Key('mpesa-phone-split'),
+                controller: _phoneController,
+                decoration: const InputDecoration(
+                  labelText: 'Customer\'s M-Pesa number (for the rest)',
+                  hintText: '0712 345 678',
+                  prefixIcon: Icon(Icons.phone_android),
+                ),
+                keyboardType: TextInputType.phone,
+                onChanged: cart.setCustomerPhone,
+              ),
               const SizedBox(height: 12),
               OutlinedButton.icon(
                 onPressed: _submitting || userId == null
@@ -501,7 +560,7 @@ class _CartScreenState extends ConsumerState<CartScreen> {
                           width: 20,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Text('Complete Sale'),
+                      : Text(cartState.paymentMethod == 'paystack' ? 'Send M-Pesa prompt' : 'Complete Sale'),
                 ),
               ),
             ],

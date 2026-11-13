@@ -195,6 +195,9 @@ class CartNotifier extends _$CartNotifier {
 
   void setCashReceived(Money amount) => state = state.copyWith(cashReceived: amount);
 
+  /// The customer's M-Pesa number for an M-Pesa prompt.
+  void setCustomerPhone(String phone) => state = state.copyWith(customerPhone: phone);
+
   void clear() => state = const CartState();
 
   /// Replaces the whole cart, as when a held sale is opened again. Lines saved by an older

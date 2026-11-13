@@ -5,9 +5,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/utils/money.dart';
 import '../../domain/services/paystack_payment_service.dart';
 import '../../domain/services/pending_sales_notifier.dart';
 import '../dashboard/dashboard_screen.dart';
+import 'cart_notifier.dart';
+import 'cart_state.dart';
 import '../../core/checkout_return_bridge.dart';
 import '../../core/is_web.dart';
 import '../../core/payment_page_navigation.dart';
@@ -35,8 +38,10 @@ Future<void> _openCheckoutPageDefault(Uri uri, {required bool web}) async {
   await launchUrl(uri, mode: LaunchMode.externalApplication);
 }
 
-/// Shown after PaystackPaymentService.start() succeeds: opens the
-/// gateway's checkout page (the system browser on native builds, this same
+/// Shown after PaystackPaymentService.start() succeeds. For an M-Pesa prompt ([PaystackCheckoutSession.viaPrompt])
+/// nothing is opened: the prompt is already on the customer's phone, and this screen only waits, says so, notices
+/// when the customer declined, and can send the prompt again. Otherwise it opens
+/// the gateway's checkout page (the system browser on native builds, this same
 /// tab on web - no in-app WebView, see the plan notes on why a browser
 /// redirect is simpler and more portable than embedding one), then polls
 /// for confirmation. Stock was already reserved when the sale was recorded
@@ -80,7 +85,12 @@ class _PaystackWaitingScreenState extends ConsumerState<PaystackWaitingScreen>
   bool _cancelling = false;
   bool _resolved = false;
 
+  /// The M-Pesa prompt is over without being paid (the customer cancelled it or it ran out of time).
+  bool _ended = false;
+  bool _retrying = false;
+
   bool get _web => widget.forWeb ?? isWeb;
+  bool get _viaPrompt => widget.session.viaPrompt;
 
   @override
   void initState() {
@@ -91,7 +101,8 @@ class _PaystackWaitingScreenState extends ConsumerState<PaystackWaitingScreen>
     // Read now: the screen may be torn down (a logout, for one) while the sale
     // is still unpaid, and a ref is not safe to use from dispose().
     _pendingSales = ref.read(pendingPaystackSalesProvider.notifier);
-    _openCheckoutPage();
+    // An M-Pesa prompt has no page to open: it is already on the customer's phone.
+    if (!_viaPrompt) _openCheckoutPage();
     _restartTimer();
   }
 
@@ -153,6 +164,7 @@ class _PaystackWaitingScreenState extends ConsumerState<PaystackWaitingScreen>
           widget.session.sale.id,
           widget.session.reference,
           widget.session.sale.gatewayPortion,
+          viaPrompt: _viaPrompt,
         );
 
     // A newer check took over while this one was stalled; its answer counts.
@@ -179,8 +191,20 @@ class _PaystackWaitingScreenState extends ConsumerState<PaystackWaitingScreen>
       return;
     }
 
+    if (outcome is PaystackPollEnded) {
+      // Over without being paid. The sale stays pending (stock reserved) until the cashier sends the prompt again
+      // or cancels it, so no more checking is needed; "Check now" still works.
+      _timer?.cancel();
+      setState(() {
+        _checkingNow = false;
+        _ended = true;
+      });
+      return;
+    }
+
     setState(() {
       _checkingNow = false;
+      _ended = false;
       if (_attempts >= _maxAutoPolls) {
         _autoPollingStopped = true;
         _timer?.cancel();
@@ -193,6 +217,52 @@ class _PaystackWaitingScreenState extends ConsumerState<PaystackWaitingScreen>
     await _poll(force: true);
     if (!mounted || _resolved) return;
     if (!_autoPollingStopped) _restartTimer();
+  }
+
+  /// "Send the prompt again": the first sale is cancelled (stock back) only once it is certain the customer did not
+  /// approve it, and its items go back in the cart with the number filled in, ready to send again.
+  Future<void> _retryPrompt() async {
+    if (_retrying || _resolved) return;
+    setState(() => _retrying = true);
+    _timer?.cancel();
+    final messenger = ScaffoldMessenger.of(context);
+    final cart = ref.read(cartProvider.notifier);
+    final outcome = await ref
+        .read(paystackPaymentServiceProvider)
+        .retryPrompt(widget.session.sale, widget.session.reference);
+    if (!mounted) return;
+    switch (outcome) {
+      case PaystackRetryPaid(:final sale):
+        // They approved it after all: that sale stands, nothing is sent twice.
+        _resolved = true;
+        ref.invalidate(dashboardDataProvider);
+        context.go('/');
+        context.push('/receipt/${sale.id}');
+      case PaystackRetryNotYet():
+        setState(() {
+          _retrying = false;
+          _ended = false;
+        });
+        _restartTimer();
+        messenger.showSnackBar(const SnackBar(content: Text('The customer can still approve the first prompt. Wait a moment, or cancel the sale.')));
+      case PaystackRetryFailed(:final message):
+        setState(() => _retrying = false);
+        messenger.showSnackBar(SnackBar(content: Text(message)));
+      case PaystackRetryRestored():
+        _resolved = true;
+        await cart.replaceWith(CartState(
+          items: outcome.items,
+          discount: outcome.discount,
+          saleType: outcome.saleType,
+          // A split sale goes back as cash + the number, so the "M-Pesa prompt for the rest" button is there again.
+          paymentMethod: outcome.cashReceived != null ? 'cash' : 'paystack',
+          cashReceived: outcome.cashReceived ?? const Money.zero(),
+          customerPhone: widget.session.phone,
+        ));
+        if (!mounted) return;
+        messenger.showSnackBar(const SnackBar(content: Text('The items are back in the cart. Check the number, then send the prompt again.')));
+        Navigator.of(context).pop();
+    }
   }
 
   Future<void> _cancelSale() async {
@@ -262,15 +332,31 @@ class _PaystackWaitingScreenState extends ConsumerState<PaystackWaitingScreen>
                 ] else
                   Text('Total: ${widget.session.sale.total.format()}'),
                 const SizedBox(height: 24),
-                const CircularProgressIndicator(),
+                if (!_ended) const CircularProgressIndicator() else const Icon(Icons.phone_disabled, size: 40),
                 const SizedBox(height: 24),
-                Text(
-                  _autoPollingStopped
-                      ? 'Still waiting for confirmation. Check again once the customer has paid.'
-                      : 'Waiting for payment confirmation.',
-                  textAlign: TextAlign.center,
-                ),
-                if (_web && !_autoPollingStopped) ...[
+                if (_viaPrompt && _ended)
+                  const Text(
+                    'The customer did not approve the prompt (they cancelled it, or it ran out of time). '
+                    'Send it again (check the number first), or cancel the sale.',
+                    key: Key('prompt-ended'),
+                    textAlign: TextAlign.center,
+                  )
+                else if (_viaPrompt)
+                  Text(
+                    _autoPollingStopped
+                        ? 'Still waiting for the customer. Check again once they have approved the prompt.'
+                        : 'M-Pesa prompt sent to ${widget.session.phone}. Ask the customer to enter their M-Pesa PIN. This screen updates by itself.',
+                    key: const Key('prompt-sent'),
+                    textAlign: TextAlign.center,
+                  )
+                else
+                  Text(
+                    _autoPollingStopped
+                        ? 'Still waiting for confirmation. Check again once the customer has paid.'
+                        : 'Waiting for payment confirmation.',
+                    textAlign: TextAlign.center,
+                  ),
+                if (_web && !_viaPrompt && !_autoPollingStopped) ...[
                   const SizedBox(height: 8),
                   const Text(
                     'The payment page opens in this window. When the customer '
@@ -280,15 +366,26 @@ class _PaystackWaitingScreenState extends ConsumerState<PaystackWaitingScreen>
                   ),
                 ],
                 const SizedBox(height: 24),
-                OutlinedButton.icon(
-                  key: const Key('open-checkout-page'),
-                  onPressed: _openCheckoutPage,
-                  icon: const Icon(Icons.open_in_browser),
-                  label: Text(
-                    _web ? 'Open payment page' : 'Open checkout page again',
+                if (_viaPrompt && _ended) ...[
+                  FilledButton.icon(
+                    key: const Key('retry-prompt'),
+                    onPressed: _retrying ? null : _retryPrompt,
+                    icon: const Icon(Icons.send),
+                    label: const Text('Send the prompt again'),
                   ),
-                ),
-                const SizedBox(height: 12),
+                  const SizedBox(height: 12),
+                ],
+                if (!_viaPrompt) ...[
+                  OutlinedButton.icon(
+                    key: const Key('open-checkout-page'),
+                    onPressed: _openCheckoutPage,
+                    icon: const Icon(Icons.open_in_browser),
+                    label: Text(
+                      _web ? 'Open payment page' : 'Open checkout page again',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 FilledButton.icon(
                   onPressed: _checkingNow ? null : _checkNow,
                   icon: const Icon(Icons.refresh),
@@ -296,7 +393,7 @@ class _PaystackWaitingScreenState extends ConsumerState<PaystackWaitingScreen>
                 ),
                 const SizedBox(height: 12),
                 TextButton.icon(
-                  onPressed: _cancelling ? null : _cancelSale,
+                  onPressed: (_cancelling || _retrying) ? null : _cancelSale,
                   icon: const Icon(Icons.cancel_outlined),
                   label: const Text('Cancel sale'),
                 ),
