@@ -8,10 +8,16 @@ import '../tables/users_table.dart';
 part 'reports_dao.g.dart';
 
 class SalesStats {
+  /// Net of refunds: a refund is a sale with negative amounts, so it simply comes off the total.
   final int totalCents;
+
+  /// Real sales only - a refund is not a transaction.
   final int count;
 
-  const SalesStats({required this.totalCents, required this.count});
+  /// What was given back in the period (a positive amount).
+  final int refundsCents;
+
+  const SalesStats({required this.totalCents, required this.count, this.refundsCents = 0});
 }
 
 class ReportSaleRow {
@@ -36,6 +42,9 @@ class ReportSaleRow {
   /// report's cash-vs-M-Pesa split totals.
   final int? cashReceivedCents;
 
+  /// How much of this sale has been given back so far (positive; 0 when nothing has).
+  final int refundedCents;
+
   const ReportSaleRow({
     required this.id,
     required this.saleNumber,
@@ -47,7 +56,14 @@ class ReportSaleRow {
     required this.createdAt,
     required this.itemNames,
     required this.cashReceivedCents,
+    this.refundedCents = 0,
   });
+
+  /// 'refunded' once all of it has gone back, 'part refunded' while only some has, else the status as stored.
+  String get statusLabel {
+    if (refundedCents <= 0) return status;
+    return refundedCents >= totalCents ? 'refunded' : 'part refunded';
+  }
 
   static const _mpesaFamily = {'paystack', 'mpesa', 'mpesa_manual', 'intasend'};
 
@@ -68,6 +84,33 @@ class ReportSaleRow {
     if (!_mpesaFamily.contains(paymentMethod)) return 0;
     return totalCents - (cashReceivedCents ?? 0);
   }
+}
+
+/// One refund in the Reports screen's Refunds table (all amounts positive: money that went back).
+class ReportRefundRow {
+  final String id;
+  final String saleNumber;
+
+  /// The sale this refund gives back (null only if that sale has not reached this device yet).
+  final String? originalSaleNumber;
+  final String processedByName;
+  final String paymentMethod;
+  final String? reason;
+  final int totalCents;
+  final String createdAt;
+  final String? itemNames;
+
+  const ReportRefundRow({
+    required this.id,
+    required this.saleNumber,
+    required this.originalSaleNumber,
+    required this.processedByName,
+    required this.paymentMethod,
+    required this.reason,
+    required this.totalCents,
+    required this.createdAt,
+    required this.itemNames,
+  });
 }
 
 class ReportExpenseRow {
@@ -102,14 +145,20 @@ class ReportsDao extends DatabaseAccessor<AppDatabase> with _$ReportsDaoMixin {
   Future<SalesStats> salesStatsForRange(String startIsoUtc, String endIsoUtc) async {
     final row = await customSelect(
       '''
-      SELECT COALESCE(SUM(total_cents), 0) AS total_cents, COUNT(*) AS count
+      SELECT COALESCE(SUM(total_cents), 0) AS total_cents,
+             COUNT(CASE WHEN sale_type <> 'refund' THEN 1 END) AS count,
+             COALESCE(SUM(CASE WHEN sale_type = 'refund' THEN -total_cents ELSE 0 END), 0) AS refunds_cents
       FROM sales
       WHERE status = 'paid' AND created_at >= ?1 AND created_at < ?2 AND deleted_at IS NULL
       ''',
       variables: [Variable.withString(startIsoUtc), Variable.withString(endIsoUtc)],
       readsFrom: {sales},
     ).getSingle();
-    return SalesStats(totalCents: row.read<int>('total_cents'), count: row.read<int>('count'));
+    return SalesStats(
+      totalCents: row.read<int>('total_cents'),
+      count: row.read<int>('count'),
+      refundsCents: row.read<int>('refunds_cents'),
+    );
   }
 
   /// Mirrors PHP's grossProfitTotalForDate: per-sale cost is summed
@@ -167,11 +216,14 @@ class ReportsDao extends DatabaseAccessor<AppDatabase> with _$ReportsDaoMixin {
         s.total_cents AS total_cents,
         s.created_at AS created_at,
         s.cash_received_cents AS cash_received_cents,
+        COALESCE((SELECT SUM(-r.total_cents) FROM sales r
+                  WHERE r.refund_of_sale_id = s.id AND r.sale_type = 'refund' AND r.status = 'paid'
+                    AND r.deleted_at IS NULL), 0) AS refunded_cents,
         GROUP_CONCAT(si.item_name || ' x' || si.quantity, ', ') AS item_names
       FROM sales s
       JOIN users u ON u.id = s.user_id
       LEFT JOIN sale_items si ON si.sale_id = s.id AND si.deleted_at IS NULL
-      WHERE s.status = 'paid' AND s.created_at >= ?1 AND s.created_at < ?2 AND s.deleted_at IS NULL
+      WHERE s.status = 'paid' AND s.sale_type <> 'refund' AND s.created_at >= ?1 AND s.created_at < ?2 AND s.deleted_at IS NULL
       GROUP BY s.id
       ORDER BY s.created_at DESC
       ''',
@@ -190,6 +242,47 @@ class ReportsDao extends DatabaseAccessor<AppDatabase> with _$ReportsDaoMixin {
               createdAt: row.read<String>('created_at'),
               itemNames: row.readNullable<String>('item_names'),
               cashReceivedCents: row.readNullable<int>('cash_received_cents'),
+              refundedCents: row.read<int>('refunded_cents'),
+            ))
+        .toList();
+  }
+
+  /// Powers the Reports screen's Refunds table - newest first, like the Sales table.
+  Future<List<ReportRefundRow>> refundsForRange(String startIsoUtc, String endIsoUtc) async {
+    final rows = await customSelect(
+      '''
+      SELECT
+        r.id AS id,
+        r.sale_number AS sale_number,
+        o.sale_number AS original_sale_number,
+        u.name AS processed_by,
+        r.payment_method AS payment_method,
+        r.refund_reason AS refund_reason,
+        -r.total_cents AS total_cents,
+        r.created_at AS created_at,
+        GROUP_CONCAT(si.item_name || ' x' || (-si.quantity), ', ') AS item_names
+      FROM sales r
+      JOIN users u ON u.id = r.user_id
+      LEFT JOIN sales o ON o.id = r.refund_of_sale_id
+      LEFT JOIN sale_items si ON si.sale_id = r.id AND si.deleted_at IS NULL
+      WHERE r.sale_type = 'refund' AND r.status = 'paid' AND r.created_at >= ?1 AND r.created_at < ?2 AND r.deleted_at IS NULL
+      GROUP BY r.id
+      ORDER BY r.created_at DESC
+      ''',
+      variables: [Variable.withString(startIsoUtc), Variable.withString(endIsoUtc)],
+      readsFrom: {sales, saleItems, users},
+    ).get();
+    return rows
+        .map((row) => ReportRefundRow(
+              id: row.read<String>('id'),
+              saleNumber: row.read<String>('sale_number'),
+              originalSaleNumber: row.readNullable<String>('original_sale_number'),
+              processedByName: row.read<String>('processed_by'),
+              paymentMethod: row.read<String>('payment_method'),
+              reason: row.readNullable<String>('refund_reason'),
+              totalCents: row.read<int>('total_cents'),
+              createdAt: row.read<String>('created_at'),
+              itemNames: row.readNullable<String>('item_names'),
             ))
         .toList();
   }

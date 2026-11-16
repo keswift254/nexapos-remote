@@ -53,6 +53,15 @@ Future<Uint8List> buildReceiptPdf(ReceiptData data, PdfPageFormat _) async {
               textAlign: pw.TextAlign.center,
               style: pw.TextStyle(font: font, fontSize: 11),
             ),
+            if (sale.isRefund)
+              pw.Padding(
+                padding: const pw.EdgeInsets.only(top: 6),
+                child: pw.Text(
+                  'REFUND',
+                  textAlign: pw.TextAlign.center,
+                  style: pw.TextStyle(font: fontBold, fontSize: 18),
+                ),
+              ),
             if ((data.settings.address ?? '').isNotEmpty)
               pw.Text(data.settings.address!, textAlign: pw.TextAlign.center),
             if ((data.settings.phone ?? '').isNotEmpty)
@@ -63,7 +72,11 @@ Future<Uint8List> buildReceiptPdf(ReceiptData data, PdfPageFormat _) async {
             pw.Text(
               'Date: ${DateFormat('d MMM yyyy HH:mm').format(sale.createdAt.toLocal())}',
             ),
-            pw.Text('Cashier: ${data.cashierName}'),
+            if (sale.isRefund) ...[
+              if (data.originalSaleNumber != null) pw.Text('Refund of: ${data.originalSaleNumber}'),
+              if ((sale.refundReason ?? '').isNotEmpty) pw.Text('Reason: ${sale.refundReason}'),
+            ],
+            pw.Text('${data.personLabel}: ${data.cashierName}'),
             solidDivider(),
             for (final item in data.items) ...[
               pw.Row(
@@ -98,8 +111,13 @@ Future<Uint8List> buildReceiptPdf(ReceiptData data, PdfPageFormat _) async {
               prominent: true,
             ),
             solidDivider(),
-            pw.Text('Payment: ${sale.paymentMethodLabel}'),
-            if (sale.isSplitPayment) ...[
+            pw.Text('${data.paymentLabel}: ${sale.paymentMethodLabel}'),
+            if (sale.isRefund) ...[
+              if (data.refundSplit case final split?) ...[
+                _amountRow('Cash back', split.cash.format(currency: data.settings.currency), font),
+                _amountRow('M-Pesa back', split.mpesa.format(currency: data.settings.currency), font),
+              ],
+            ] else if (sale.isSplitPayment) ...[
               _amountRow(
                 'Cash received',
                 sale.cashReceived!.format(currency: data.settings.currency),
@@ -122,10 +140,14 @@ Future<Uint8List> buildReceiptPdf(ReceiptData data, PdfPageFormat _) async {
                 font,
               ),
             ],
-            pw.Text(
-              'Sale type: ${sale.saleType[0].toUpperCase()}${sale.saleType.substring(1)}',
-            ),
-            pw.Text('Status: ${sale.status.toUpperCase()}'),
+            if (!sale.isRefund) ...[
+              pw.Text(
+                'Sale type: ${sale.saleType[0].toUpperCase()}${sale.saleType.substring(1)}',
+              ),
+              pw.Text('Status: ${sale.status.toUpperCase()}'),
+              if (data.refundedTotal.cents > 0)
+                pw.Text('Refunded: ${data.refundedTotal.format(currency: data.settings.currency)}'),
+            ],
             pw.SizedBox(height: 8),
             solidDivider(),
             pw.Text(

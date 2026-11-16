@@ -712,9 +712,9 @@ class _DashboardStatsState extends State<_DashboardStats> {
                   value: _financialsVisible
                       ? today.salesTotal.format()
                       : hiddenValue,
-                  subtitle: today.salesCount == 1
-                      ? '1 transaction'
-                      : '${today.salesCount} transactions',
+                  subtitle:
+                      '${today.salesCount == 1 ? '1 transaction' : '${today.salesCount} transactions'}'
+                      '${_financialsVisible && today.refundsTotal.cents > 0 ? ' · refunds ${today.refundsTotal.format()}' : ''}',
                   change: _financialsVisible ? data.salesChange : null,
                   trailing: _visibilityButton(),
                   valueKey: const Key('sales-today-value'),

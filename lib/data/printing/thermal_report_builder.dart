@@ -72,6 +72,20 @@ Future<Uint8List> buildThermalReport({
   pair('Cash Received', money(data.cashReceivedTotal.cents));
   pair('Paid by M-Pesa', money(data.mpesaTotal.cents));
   divider();
+  if (data.refunds.isNotEmpty) {
+    text('REFUNDS', bold: true);
+    for (final refund in data.refunds) {
+      pair(
+        timeFormat.format(DateTime.parse(refund.createdAt).toLocal()),
+        '-${money(refund.totalCents)}',
+      );
+      text(refund.itemNames ?? refund.saleNumber);
+      if ((refund.reason ?? '').isNotEmpty) text('Reason: ${refund.reason}');
+    }
+    divider();
+    pair('Total Refunds', '-${money(data.refundsTotal.cents)}', bold: true);
+    divider();
+  }
   text('EXPENSES', bold: true);
   if (data.expenses.isEmpty) text('No expenses');
   for (final expense in data.expenses) {

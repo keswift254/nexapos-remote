@@ -28,6 +28,7 @@ Future<Uint8List> buildReportPdf({
     reportTitle,
     periodLabel,
     data.salesTotal.cents,
+    data.refundsTotal.cents,
     data.expensesTotal.cents,
     data.transactionCount,
   ].join('|');
@@ -134,6 +135,25 @@ Future<Uint8List> buildReportPdf({
             ),
             totalLine('Total Cash Received', money(data.cashReceivedTotal.cents)),
             totalLine('Total Paid by M-Pesa', money(data.mpesaTotal.cents)),
+            if (data.refunds.isNotEmpty) ...[
+              pw.SizedBox(height: 5),
+              sectionHeader('Refunds'),
+              for (final refund in data.refunds)
+                line(
+                  timeFormat.format(DateTime.parse(refund.createdAt).toLocal()),
+                  [
+                    refund.itemNames ?? refund.saleNumber,
+                    if ((refund.reason ?? '').isNotEmpty) '(${refund.reason})',
+                  ].join(' '),
+                  '-${money(refund.totalCents)}',
+                ),
+              divider(),
+              totalLine(
+                'Total Refunds',
+                '-${money(data.refundsTotal.cents)}',
+                bold: true,
+              ),
+            ],
             pw.SizedBox(height: 5),
             sectionHeader('Expenses'),
             if (data.expenses.isEmpty) line('', 'No expenses', money(0)),

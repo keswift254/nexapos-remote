@@ -6,6 +6,7 @@ import 'package:image/image.dart' as img;
 
 import '../../core/is_web.dart';
 import '../../data/printing/receipt_branding.dart';
+import '../../core/utils/money.dart';
 
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
@@ -18,6 +19,8 @@ import '../../data/repositories/user_repository_impl.dart';
 import '../../domain/entities/business_settings.dart';
 import '../../domain/entities/sale.dart';
 import '../../domain/entities/sale_item.dart';
+import '../../domain/services/refund_service.dart' show refundRoles;
+import '../../domain/services/session_service.dart';
 
 part 'receipt_screen.g.dart';
 
@@ -25,14 +28,38 @@ class ReceiptData {
   final Sale sale;
   final List<SaleItem> items;
   final BusinessSettings settings;
+  /// Whoever rang the sale up - or, on a refund, whoever gave the money back.
   final String cashierName;
+
+  /// On a refund: the number of the sale it gives back (null when that sale has not reached this device).
+  final String? originalSaleNumber;
+
+  /// On an ordinary sale: how much of it has been refunded so far (a positive amount, zero when none).
+  final Money refundedTotal;
 
   const ReceiptData({
     required this.sale,
     required this.items,
     required this.settings,
     required this.cashierName,
+    this.originalSaleNumber,
+    this.refundedTotal = const Money.zero(),
   });
+
+  bool get isRefund => sale.isRefund;
+
+  /// 'Cashier' on a sale, 'Refunded by' on a refund.
+  String get personLabel => isRefund ? 'Refunded by' : 'Cashier';
+
+  /// 'Payment' on a sale, 'Paid back via' on a refund.
+  String get paymentLabel => isRefund ? 'Paid back via' : 'Payment';
+
+  /// A refund of a split cash + M-Pesa sale: how much of it goes back as cash and how much as M-Pesa (positive).
+  ({Money cash, Money mpesa})? get refundSplit {
+    final cash = sale.cashReceived;
+    if (!isRefund || sale.paymentMethod != 'paystack' || cash == null) return null;
+    return (cash: Money(-cash.cents), mpesa: Money(-(sale.total.cents - cash.cents)));
+  }
 }
 
 @riverpod
@@ -42,11 +69,22 @@ Future<ReceiptData> receiptData(Ref ref, String saleId) async {
   final items = await ref.watch(saleItemRepositoryProvider).forSale(saleId);
   final settings = await ref.watch(businessSettingsRepositoryProvider).get();
   final cashier = await ref.watch(userRepositoryProvider).findById(sale.userId);
+  String? originalNumber;
+  var refunded = const Money.zero();
+  if (sale.isRefund) {
+    final of = sale.refundOfSaleId;
+    if (of != null) originalNumber = (await ref.watch(saleRepositoryProvider).findById(of))?.saleNumber;
+  } else if (sale.isPaid) {
+    final refunds = await ref.watch(saleRepositoryProvider).refundsOf(saleId);
+    refunded = Money(refunds.fold<int>(0, (sum, r) => sum - r.total.cents));
+  }
   return ReceiptData(
     sale: sale,
     items: items,
     settings: settings,
     cashierName: cashier?.name ?? 'Unknown',
+    originalSaleNumber: originalNumber,
+    refundedTotal: refunded,
   );
 }
 
@@ -62,6 +100,14 @@ class ReceiptScreen extends ConsumerStatefulWidget {
 
 class _ReceiptScreenState extends ConsumerState<ReceiptScreen> {
   bool _thermalPrinting = false;
+
+  /// An administrator or a manager can refund a paid sale that still has something left to give back.
+  bool _canRefund(ReceiptData data) {
+    final user = ref.watch(sessionProvider);
+    if (user == null || !refundRoles.contains(user.role)) return false;
+    final sale = data.sale;
+    return sale.isPaid && !sale.isRefund && data.refundedTotal < sale.total;
+  }
 
   Future<void> _printThermal(ReceiptData data) async {
     setState(() => _thermalPrinting = true);
@@ -121,7 +167,20 @@ class _ReceiptScreenState extends ConsumerState<ReceiptScreen> {
           data: (data) => SafeArea(
             child: Padding(
               padding: const EdgeInsets.all(12),
-              child: Row(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_canRefund(data))
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        key: const Key('receipt-refund-button'),
+                        onPressed: () => context.push('/refund/${data.sale.id}'),
+                        icon: const Icon(Icons.undo),
+                        label: const Text('Refund'),
+                      ),
+                    ),
+                  Row(
                 children: [
                   Expanded(
                     // A browser tab can't open the raw TCP socket a
@@ -169,6 +228,8 @@ class _ReceiptScreenState extends ConsumerState<ReceiptScreen> {
                   ),
                 ],
               ),
+                ],
+              ),
             ),
           ),
           orElse: () => null,
@@ -209,6 +270,16 @@ class _ReceiptBody extends StatelessWidget {
             textAlign: TextAlign.center,
             style: TextStyle(fontFamily: 'monospace', fontSize: 14),
           ),
+          if (sale.isRefund)
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Text(
+                'REFUND',
+                key: Key('receipt-refund-title'),
+                textAlign: TextAlign.center,
+                style: TextStyle(fontFamily: 'monospace', fontWeight: FontWeight.bold, fontSize: 22),
+              ),
+            ),
           if ((data.settings.address ?? '').isNotEmpty)
             Text(data.settings.address!, textAlign: TextAlign.center),
           if ((data.settings.phone ?? '').isNotEmpty)
@@ -219,7 +290,11 @@ class _ReceiptBody extends StatelessWidget {
           Text(
             'Date: ${DateFormat('d MMM yyyy HH:mm').format(sale.createdAt.toLocal())}',
           ),
-          Text('Cashier: ${data.cashierName}'),
+          if (sale.isRefund) ...[
+            if (data.originalSaleNumber != null) Text('Refund of: ${data.originalSaleNumber}'),
+            if ((sale.refundReason ?? '').isNotEmpty) Text('Reason: ${sale.refundReason}'),
+          ],
+          Text('${data.personLabel}: ${data.cashierName}'),
           const _SolidDivider(),
           for (final item in data.items) ...[
             Row(
@@ -251,8 +326,13 @@ class _ReceiptBody extends StatelessWidget {
             prominent: true,
           ),
           const _SolidDivider(),
-          Text('Payment: ${sale.paymentMethodLabel}'),
-          if (sale.isSplitPayment) ...[
+          Text('${data.paymentLabel}: ${sale.paymentMethodLabel}'),
+          if (sale.isRefund) ...[
+            if (data.refundSplit case final split?) ...[
+              _AmountRow('Cash back', split.cash.format(currency: data.settings.currency)),
+              _AmountRow('M-Pesa back', split.mpesa.format(currency: data.settings.currency)),
+            ],
+          ] else if (sale.isSplitPayment) ...[
             _AmountRow(
               'Cash received',
               sale.cashReceived!.format(currency: data.settings.currency),
@@ -271,10 +351,17 @@ class _ReceiptBody extends StatelessWidget {
               sale.changeDueAbs!.format(currency: data.settings.currency),
             ),
           ],
-          Text(
-            'Sale type: ${sale.saleType[0].toUpperCase()}${sale.saleType.substring(1)}',
-          ),
-          Text('Status: ${sale.status.toUpperCase()}'),
+          if (!sale.isRefund) ...[
+            Text(
+              'Sale type: ${sale.saleType[0].toUpperCase()}${sale.saleType.substring(1)}',
+            ),
+            Text('Status: ${sale.status.toUpperCase()}'),
+            if (data.refundedTotal.cents > 0)
+              Text(
+                'Refunded: ${data.refundedTotal.format(currency: data.settings.currency)}',
+                key: const Key('receipt-refunded-total'),
+              ),
+          ],
           const SizedBox(height: 12),
           const _SolidDivider(),
           const Text(

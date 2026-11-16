@@ -32,6 +32,7 @@ import 'features/checkout/cart_notifier.dart';
 import 'features/checkout/held_sales_notifier.dart';
 import 'features/checkout/cart_screen.dart';
 import 'features/checkout/receipt_screen.dart';
+import 'features/checkout/refund_screen.dart';
 import 'features/checkout/pending_sales_screen.dart';
 import 'domain/services/pending_sales_notifier.dart';
 import 'features/settings/payment_settings_screen.dart'
@@ -141,7 +142,8 @@ Future<String?> _redirectOrThrow(Ref ref, String location) async {
   const inventoryRoles = {UserRole.admin, UserRole.manager};
   if ((location == '/categories' ||
           location == '/products' ||
-          location == '/expenses') &&
+          location == '/expenses' ||
+          location.startsWith('/refund/')) &&
       !inventoryRoles.contains(user.role)) {
     return '/';
   }
@@ -210,6 +212,11 @@ GoRouter router(Ref ref) {
               ? '/reports'
               : '/',
         ),
+      ),
+      GoRoute(
+        path: '/refund/:saleId',
+        builder: (context, state) =>
+            RefundScreen(saleId: state.pathParameters['saleId']!),
       ),
       GoRoute(
         path: '/payment-settings',

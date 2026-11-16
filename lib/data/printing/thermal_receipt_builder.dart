@@ -37,6 +37,14 @@ Future<Uint8List> buildThermalReceipt(ReceiptData data) async {
       styles: const PosStyles(align: PosAlign.center),
     ),
   );
+  if (sale.isRefund) {
+    bytes.addAll(
+      generator.text(
+        'REFUND',
+        styles: const PosStyles(align: PosAlign.center, bold: true, height: PosTextSize.size2, width: PosTextSize.size2),
+      ),
+    );
+  }
   if ((data.settings.address ?? '').isNotEmpty) {
     bytes.addAll(
       generator.text(
@@ -60,7 +68,11 @@ Future<Uint8List> buildThermalReceipt(ReceiptData data) async {
       'Date: ${DateFormat('d MMM yyyy HH:mm').format(sale.createdAt.toLocal())}',
     ),
   );
-  bytes.addAll(generator.text('Cashier: ${data.cashierName}'));
+  if (sale.isRefund) {
+    if (data.originalSaleNumber != null) bytes.addAll(generator.text('Refund of: ${data.originalSaleNumber}'));
+    if ((sale.refundReason ?? '').isNotEmpty) bytes.addAll(generator.text('Reason: ${sale.refundReason}'));
+  }
+  bytes.addAll(generator.text('${data.personLabel}: ${data.cashierName}'));
   bytes.addAll(generator.hr());
 
   for (final item in data.items) {
@@ -98,8 +110,14 @@ Future<Uint8List> buildThermalReceipt(ReceiptData data) async {
   );
   bytes.addAll(generator.hr());
 
-  bytes.addAll(generator.text('Payment: ${sale.paymentMethodLabel}'));
-  if (sale.isSplitPayment) {
+  bytes.addAll(generator.text('${data.paymentLabel}: ${sale.paymentMethodLabel}'));
+  if (sale.isRefund) {
+    final split = data.refundSplit;
+    if (split != null) {
+      bytes.addAll(_amountRow(generator, 'Cash back', split.cash.format(currency: currency)));
+      bytes.addAll(_amountRow(generator, 'M-Pesa back', split.mpesa.format(currency: currency)));
+    }
+  } else if (sale.isSplitPayment) {
     bytes.addAll(
       _amountRow(generator, 'Cash received', sale.cashReceived!.format(currency: currency)),
     );
@@ -122,12 +140,17 @@ Future<Uint8List> buildThermalReceipt(ReceiptData data) async {
       ),
     );
   }
-  bytes.addAll(
-    generator.text(
-      'Sale type: ${sale.saleType[0].toUpperCase()}${sale.saleType.substring(1)}',
-    ),
-  );
-  bytes.addAll(generator.text('Status: ${sale.status.toUpperCase()}'));
+  if (!sale.isRefund) {
+    bytes.addAll(
+      generator.text(
+        'Sale type: ${sale.saleType[0].toUpperCase()}${sale.saleType.substring(1)}',
+      ),
+    );
+    bytes.addAll(generator.text('Status: ${sale.status.toUpperCase()}'));
+    if (data.refundedTotal.cents > 0) {
+      bytes.addAll(generator.text('Refunded: ${data.refundedTotal.format(currency: currency)}'));
+    }
+  }
   bytes.addAll(generator.hr());
   bytes.addAll(
     generator.text(

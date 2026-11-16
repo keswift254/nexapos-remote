@@ -600,6 +600,11 @@ class _ReportBody extends StatelessWidget {
               label: 'Paid Sales',
               value: data.salesTotal.format(currency: currency),
             ),
+            if (data.refunds.isNotEmpty)
+              _MetricTile(
+                label: 'Refunds',
+                value: data.refundsTotal.format(currency: currency),
+              ),
             _MetricTile(
               label: 'Total Cash Received',
               value: data.cashReceivedTotal.format(currency: currency),
@@ -681,7 +686,7 @@ class _ReportBody extends StatelessWidget {
                     DataCell(Text(sale.cashierName)),
                     DataCell(Text(sale.saleType)),
                     DataCell(Text(sale.paymentMethod)),
-                    DataCell(Text(sale.status)),
+                    DataCell(Text(sale.statusLabel)),
                     DataCell(
                       Text(Money(sale.totalCents).format(currency: currency)),
                     ),
@@ -720,6 +725,74 @@ class _ReportBody extends StatelessWidget {
             ),
           ),
         ),
+        if (data.refunds.isNotEmpty) ...[
+          const SizedBox(height: 20),
+          Text('Refunds', key: const Key('report-refunds-heading'), style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: DataTable(
+              dataRowMinHeight: 56,
+              dataRowMaxHeight: 64,
+              columns: const [
+                DataColumn(label: Text('Refund / items')),
+                DataColumn(label: Text('Sale')),
+                DataColumn(label: Text('Reason')),
+                DataColumn(label: Text('Refunded by')),
+                DataColumn(label: Text('Payment')),
+                DataColumn(label: Text('Total'), numeric: true),
+                DataColumn(label: Text('Time')),
+              ],
+              rows: [
+                for (final refund in data.refunds)
+                  DataRow(
+                    cells: [
+                      DataCell(
+                        Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              refund.saleNumber,
+                              style: const TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                            if ((refund.itemNames ?? '').isNotEmpty)
+                              Text(
+                                refund.itemNames!,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                          ],
+                        ),
+                        onTap: () => context.push('/receipt/${refund.id}?from=reports'),
+                      ),
+                      DataCell(Text(refund.originalSaleNumber ?? '-')),
+                      DataCell(Text(refund.reason ?? '')),
+                      DataCell(Text(refund.processedByName)),
+                      DataCell(Text(refund.paymentMethod)),
+                      DataCell(Text(Money(refund.totalCents).format(currency: currency))),
+                      DataCell(
+                        Text(
+                          timeFormat.format(DateTime.parse(refund.createdAt).toLocal()),
+                        ),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(
+                'Total Refunds: ${data.refundsTotal.format(currency: currency)}',
+                style: Theme.of(context).textTheme.titleSmall
+                    ?.copyWith(fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
+        ],
         const SizedBox(height: 20),
         Text('Expenses', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),

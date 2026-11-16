@@ -14,8 +14,12 @@ ReportsService reportsService(Ref ref) {
 }
 
 class DailyStats {
+  /// Net of refunds (see SalesStats.totalCents).
   final Money salesTotal;
   final int salesCount;
+
+  /// What was given back in the day (positive).
+  final Money refundsTotal;
   final Money expensesTotal;
   final Money grossProfit;
   final Money netProfit;
@@ -23,6 +27,7 @@ class DailyStats {
   const DailyStats({
     required this.salesTotal,
     required this.salesCount,
+    this.refundsTotal = const Money.zero(),
     required this.expensesTotal,
     required this.grossProfit,
     required this.netProfit,
@@ -104,6 +109,7 @@ class ReportsService {
     return DailyStats(
       salesTotal: Money(salesStats.totalCents),
       salesCount: salesStats.count,
+      refundsTotal: Money(salesStats.refundsCents),
       expensesTotal: expensesTotal,
       grossProfit: grossProfit,
       netProfit: grossProfit - expensesTotal,
@@ -139,25 +145,30 @@ class ReportsService {
     final dateFormat = DateFormat('yyyy-MM-dd');
 
     final sales = await _dao.salesForRange(startUtc, endUtc);
+    final refunds = await _dao.refundsForRange(startUtc, endUtc);
     final expenses = await _dao.expensesForRange(
       dateFormat.format(startLocal),
       dateFormat.format(endLocalExclusive),
     );
     final grossProfitTotal = Money(await _dao.grossProfitCentsForRange(startUtc, endUtc));
 
+    // Paid Sales is what customers paid; Refunds is what went back; Grand Total is what the shop kept.
     final salesTotal = Money(sales.fold<int>(0, (sum, s) => sum + s.totalCents));
+    final refundsTotal = Money(refunds.fold<int>(0, (sum, r) => sum + r.totalCents));
     final expensesTotal = Money(expenses.fold<int>(0, (sum, e) => sum + e.amountCents));
     final cashReceivedTotal = Money(sales.fold<int>(0, (sum, s) => sum + s.cashPortionCents));
     final mpesaTotal = Money(sales.fold<int>(0, (sum, s) => sum + s.mpesaPortionCents));
 
     return ReportData(
       sales: sales,
+      refunds: refunds,
       expenses: expenses,
       salesTotal: salesTotal,
+      refundsTotal: refundsTotal,
       expensesTotal: expensesTotal,
       grossProfitTotal: grossProfitTotal,
       netProfit: grossProfitTotal - expensesTotal,
-      grandTotal: salesTotal - expensesTotal,
+      grandTotal: salesTotal - refundsTotal - expensesTotal,
       transactionCount: sales.length,
       cashReceivedTotal: cashReceivedTotal,
       mpesaTotal: mpesaTotal,
@@ -167,8 +178,10 @@ class ReportsService {
 
 class ReportData {
   final List<ReportSaleRow> sales;
+  final List<ReportRefundRow> refunds;
   final List<ReportExpenseRow> expenses;
   final Money salesTotal;
+  final Money refundsTotal;
   final Money expensesTotal;
   final Money grossProfitTotal;
   final Money netProfit;
@@ -179,8 +192,10 @@ class ReportData {
 
   const ReportData({
     required this.sales,
+    this.refunds = const [],
     required this.expenses,
     required this.salesTotal,
+    this.refundsTotal = const Money.zero(),
     required this.expensesTotal,
     required this.grossProfitTotal,
     required this.netProfit,
