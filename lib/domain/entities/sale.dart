@@ -3,7 +3,7 @@ import '../../core/utils/money.dart';
 
 part 'sale.freezed.dart';
 
-/// saleType: 'retail', 'wholesale'.
+/// saleType: 'retail', 'wholesale', or 'refund' (money given back for an earlier sale: every amount is negative).
 /// paymentMethod: 'cash', 'mpesa', 'mpesa_manual', 'paystack', 'intasend'
 /// (the first 4 match PHP; intasend is mobile-only, added 1.0.32).
 /// status: 'paid', 'pending' (paystack/intasend only, while awaiting
@@ -27,9 +27,15 @@ abstract class Sale with _$Sale {
     // Cash sales only - see SalesTable.cashReceivedCents. Null means not
     // recorded, never a real 0 tendered.
     Money? cashReceived,
+    // Refunds only - see SalesTable.refundOfSaleId. Null on every ordinary sale.
+    String? refundOfSaleId,
+    String? refundReason,
   }) = _Sale;
 
   const Sale._();
+
+  /// A refund is its own sale row with negative amounts (saleType 'refund').
+  bool get isRefund => saleType == 'refund';
 
   bool get isPaid => status == 'paid';
 

@@ -8,9 +8,8 @@ part of 'session_service.dart';
 
 // GENERATED CODE - DO NOT MODIFY BY HAND
 // ignore_for_file: type=lint, type=warning
-/// Current logged-in user as reactive state, persisted via
-/// flutter_secure_storage so app resume behaves like PHP's session
-/// cookie. Role checks are enforced here at the use-case boundary, not
+/// Current logged-in user as reactive state, stored for this app session
+/// only (native process or browser tab). Role checks are enforced here at the use-case boundary, not
 /// just by hiding buttons - on a phone there's no separate server tier
 /// to fall back on the way Auth::requireRole() protects a PHP route
 /// even if the UI is bypassed. go_router's redirect guard calls [can]
@@ -19,18 +18,16 @@ part of 'session_service.dart';
 @ProviderFor(SessionNotifier)
 final sessionProvider = SessionNotifierProvider._();
 
-/// Current logged-in user as reactive state, persisted via
-/// flutter_secure_storage so app resume behaves like PHP's session
-/// cookie. Role checks are enforced here at the use-case boundary, not
+/// Current logged-in user as reactive state, stored for this app session
+/// only (native process or browser tab). Role checks are enforced here at the use-case boundary, not
 /// just by hiding buttons - on a phone there's no separate server tier
 /// to fall back on the way Auth::requireRole() protects a PHP route
 /// even if the UI is bypassed. go_router's redirect guard calls [can]
 /// too, so there is exactly one source of truth for "who can do what".
 final class SessionNotifierProvider
     extends $NotifierProvider<SessionNotifier, User?> {
-  /// Current logged-in user as reactive state, persisted via
-  /// flutter_secure_storage so app resume behaves like PHP's session
-  /// cookie. Role checks are enforced here at the use-case boundary, not
+  /// Current logged-in user as reactive state, stored for this app session
+  /// only (native process or browser tab). Role checks are enforced here at the use-case boundary, not
   /// just by hiding buttons - on a phone there's no separate server tier
   /// to fall back on the way Auth::requireRole() protects a PHP route
   /// even if the UI is bypassed. go_router's redirect guard calls [can]
@@ -64,9 +61,8 @@ final class SessionNotifierProvider
 
 String _$sessionNotifierHash() => r'de96daf371259de201d2fbd5432316104cf40e14';
 
-/// Current logged-in user as reactive state, persisted via
-/// flutter_secure_storage so app resume behaves like PHP's session
-/// cookie. Role checks are enforced here at the use-case boundary, not
+/// Current logged-in user as reactive state, stored for this app session
+/// only (native process or browser tab). Role checks are enforced here at the use-case boundary, not
 /// just by hiding buttons - on a phone there's no separate server tier
 /// to fall back on the way Auth::requireRole() protects a PHP route
 /// even if the UI is bypassed. go_router's redirect guard calls [can]

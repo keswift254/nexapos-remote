@@ -69,7 +69,7 @@ final class PendingPaystackSalesNotifierProvider
 }
 
 String _$pendingPaystackSalesNotifierHash() =>
-    r'0ef228b0964d09b4d8c48e992a393ff937a4a11e';
+    r'105a33acdea121e669f06d4bf7b72e513c08ec41';
 
 /// Holds whichever online-gateway sales (Paystack or IntaSend) are still
 /// stranded in 'pending' after the startup reconciliation pass - starts

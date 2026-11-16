@@ -14,4 +14,7 @@ abstract class SaleRepository {
 
   /// Sales left stranded in 'pending' - see Sales table's status doc.
   Future<List<Sale>> findPendingPaystack();
+
+  /// The refunds recorded against [saleId] (each one its own sale row with negative amounts), oldest first.
+  Future<List<Sale>> refundsOf(String saleId);
 }

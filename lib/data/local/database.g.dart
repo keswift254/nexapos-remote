@@ -3148,6 +3148,28 @@ class $SalesTable extends Sales with TableInfo<$SalesTable, Sale> {
     type: DriftSqlType.int,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _refundOfSaleIdMeta = const VerificationMeta(
+    'refundOfSaleId',
+  );
+  @override
+  late final GeneratedColumn<String> refundOfSaleId = GeneratedColumn<String>(
+    'refund_of_sale_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _refundReasonMeta = const VerificationMeta(
+    'refundReason',
+  );
+  @override
+  late final GeneratedColumn<String> refundReason = GeneratedColumn<String>(
+    'refund_reason',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -3168,6 +3190,8 @@ class $SalesTable extends Sales with TableInfo<$SalesTable, Sale> {
     totalCents,
     status,
     cashReceivedCents,
+    refundOfSaleId,
+    refundReason,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -3331,6 +3355,24 @@ class $SalesTable extends Sales with TableInfo<$SalesTable, Sale> {
         ),
       );
     }
+    if (data.containsKey('refund_of_sale_id')) {
+      context.handle(
+        _refundOfSaleIdMeta,
+        refundOfSaleId.isAcceptableOrUnknown(
+          data['refund_of_sale_id']!,
+          _refundOfSaleIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('refund_reason')) {
+      context.handle(
+        _refundReasonMeta,
+        refundReason.isAcceptableOrUnknown(
+          data['refund_reason']!,
+          _refundReasonMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -3412,6 +3454,14 @@ class $SalesTable extends Sales with TableInfo<$SalesTable, Sale> {
         DriftSqlType.int,
         data['${effectivePrefix}cash_received_cents'],
       ),
+      refundOfSaleId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}refund_of_sale_id'],
+      ),
+      refundReason: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}refund_reason'],
+      ),
     );
   }
 
@@ -3440,6 +3490,8 @@ class Sale extends DataClass implements Insertable<Sale> {
   final int totalCents;
   final String status;
   final int? cashReceivedCents;
+  final String? refundOfSaleId;
+  final String? refundReason;
   const Sale({
     required this.id,
     required this.createdAt,
@@ -3459,6 +3511,8 @@ class Sale extends DataClass implements Insertable<Sale> {
     required this.totalCents,
     required this.status,
     this.cashReceivedCents,
+    this.refundOfSaleId,
+    this.refundReason,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -3488,6 +3542,12 @@ class Sale extends DataClass implements Insertable<Sale> {
     map['status'] = Variable<String>(status);
     if (!nullToAbsent || cashReceivedCents != null) {
       map['cash_received_cents'] = Variable<int>(cashReceivedCents);
+    }
+    if (!nullToAbsent || refundOfSaleId != null) {
+      map['refund_of_sale_id'] = Variable<String>(refundOfSaleId);
+    }
+    if (!nullToAbsent || refundReason != null) {
+      map['refund_reason'] = Variable<String>(refundReason);
     }
     return map;
   }
@@ -3520,6 +3580,12 @@ class Sale extends DataClass implements Insertable<Sale> {
       cashReceivedCents: cashReceivedCents == null && nullToAbsent
           ? const Value.absent()
           : Value(cashReceivedCents),
+      refundOfSaleId: refundOfSaleId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(refundOfSaleId),
+      refundReason: refundReason == null && nullToAbsent
+          ? const Value.absent()
+          : Value(refundReason),
     );
   }
 
@@ -3547,6 +3613,8 @@ class Sale extends DataClass implements Insertable<Sale> {
       totalCents: serializer.fromJson<int>(json['totalCents']),
       status: serializer.fromJson<String>(json['status']),
       cashReceivedCents: serializer.fromJson<int?>(json['cashReceivedCents']),
+      refundOfSaleId: serializer.fromJson<String?>(json['refundOfSaleId']),
+      refundReason: serializer.fromJson<String?>(json['refundReason']),
     );
   }
   @override
@@ -3571,6 +3639,8 @@ class Sale extends DataClass implements Insertable<Sale> {
       'totalCents': serializer.toJson<int>(totalCents),
       'status': serializer.toJson<String>(status),
       'cashReceivedCents': serializer.toJson<int?>(cashReceivedCents),
+      'refundOfSaleId': serializer.toJson<String?>(refundOfSaleId),
+      'refundReason': serializer.toJson<String?>(refundReason),
     };
   }
 
@@ -3593,6 +3663,8 @@ class Sale extends DataClass implements Insertable<Sale> {
     int? totalCents,
     String? status,
     Value<int?> cashReceivedCents = const Value.absent(),
+    Value<String?> refundOfSaleId = const Value.absent(),
+    Value<String?> refundReason = const Value.absent(),
   }) => Sale(
     id: id ?? this.id,
     createdAt: createdAt ?? this.createdAt,
@@ -3616,6 +3688,10 @@ class Sale extends DataClass implements Insertable<Sale> {
     cashReceivedCents: cashReceivedCents.present
         ? cashReceivedCents.value
         : this.cashReceivedCents,
+    refundOfSaleId: refundOfSaleId.present
+        ? refundOfSaleId.value
+        : this.refundOfSaleId,
+    refundReason: refundReason.present ? refundReason.value : this.refundReason,
   );
   Sale copyWithCompanion(SalesCompanion data) {
     return Sale(
@@ -3655,6 +3731,12 @@ class Sale extends DataClass implements Insertable<Sale> {
       cashReceivedCents: data.cashReceivedCents.present
           ? data.cashReceivedCents.value
           : this.cashReceivedCents,
+      refundOfSaleId: data.refundOfSaleId.present
+          ? data.refundOfSaleId.value
+          : this.refundOfSaleId,
+      refundReason: data.refundReason.present
+          ? data.refundReason.value
+          : this.refundReason,
     );
   }
 
@@ -3678,7 +3760,9 @@ class Sale extends DataClass implements Insertable<Sale> {
           ..write('discountCents: $discountCents, ')
           ..write('totalCents: $totalCents, ')
           ..write('status: $status, ')
-          ..write('cashReceivedCents: $cashReceivedCents')
+          ..write('cashReceivedCents: $cashReceivedCents, ')
+          ..write('refundOfSaleId: $refundOfSaleId, ')
+          ..write('refundReason: $refundReason')
           ..write(')'))
         .toString();
   }
@@ -3703,6 +3787,8 @@ class Sale extends DataClass implements Insertable<Sale> {
     totalCents,
     status,
     cashReceivedCents,
+    refundOfSaleId,
+    refundReason,
   );
   @override
   bool operator ==(Object other) =>
@@ -3725,7 +3811,9 @@ class Sale extends DataClass implements Insertable<Sale> {
           other.discountCents == this.discountCents &&
           other.totalCents == this.totalCents &&
           other.status == this.status &&
-          other.cashReceivedCents == this.cashReceivedCents);
+          other.cashReceivedCents == this.cashReceivedCents &&
+          other.refundOfSaleId == this.refundOfSaleId &&
+          other.refundReason == this.refundReason);
 }
 
 class SalesCompanion extends UpdateCompanion<Sale> {
@@ -3747,6 +3835,8 @@ class SalesCompanion extends UpdateCompanion<Sale> {
   final Value<int> totalCents;
   final Value<String> status;
   final Value<int?> cashReceivedCents;
+  final Value<String?> refundOfSaleId;
+  final Value<String?> refundReason;
   final Value<int> rowid;
   const SalesCompanion({
     this.id = const Value.absent(),
@@ -3767,6 +3857,8 @@ class SalesCompanion extends UpdateCompanion<Sale> {
     this.totalCents = const Value.absent(),
     this.status = const Value.absent(),
     this.cashReceivedCents = const Value.absent(),
+    this.refundOfSaleId = const Value.absent(),
+    this.refundReason = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   SalesCompanion.insert({
@@ -3788,6 +3880,8 @@ class SalesCompanion extends UpdateCompanion<Sale> {
     required int totalCents,
     required String status,
     this.cashReceivedCents = const Value.absent(),
+    this.refundOfSaleId = const Value.absent(),
+    this.refundReason = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        createdAt = Value(createdAt),
@@ -3820,6 +3914,8 @@ class SalesCompanion extends UpdateCompanion<Sale> {
     Expression<int>? totalCents,
     Expression<String>? status,
     Expression<int>? cashReceivedCents,
+    Expression<String>? refundOfSaleId,
+    Expression<String>? refundReason,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -3841,6 +3937,8 @@ class SalesCompanion extends UpdateCompanion<Sale> {
       if (totalCents != null) 'total_cents': totalCents,
       if (status != null) 'status': status,
       if (cashReceivedCents != null) 'cash_received_cents': cashReceivedCents,
+      if (refundOfSaleId != null) 'refund_of_sale_id': refundOfSaleId,
+      if (refundReason != null) 'refund_reason': refundReason,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -3864,6 +3962,8 @@ class SalesCompanion extends UpdateCompanion<Sale> {
     Value<int>? totalCents,
     Value<String>? status,
     Value<int?>? cashReceivedCents,
+    Value<String?>? refundOfSaleId,
+    Value<String?>? refundReason,
     Value<int>? rowid,
   }) {
     return SalesCompanion(
@@ -3885,6 +3985,8 @@ class SalesCompanion extends UpdateCompanion<Sale> {
       totalCents: totalCents ?? this.totalCents,
       status: status ?? this.status,
       cashReceivedCents: cashReceivedCents ?? this.cashReceivedCents,
+      refundOfSaleId: refundOfSaleId ?? this.refundOfSaleId,
+      refundReason: refundReason ?? this.refundReason,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -3946,6 +4048,12 @@ class SalesCompanion extends UpdateCompanion<Sale> {
     if (cashReceivedCents.present) {
       map['cash_received_cents'] = Variable<int>(cashReceivedCents.value);
     }
+    if (refundOfSaleId.present) {
+      map['refund_of_sale_id'] = Variable<String>(refundOfSaleId.value);
+    }
+    if (refundReason.present) {
+      map['refund_reason'] = Variable<String>(refundReason.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -3973,6 +4081,8 @@ class SalesCompanion extends UpdateCompanion<Sale> {
           ..write('totalCents: $totalCents, ')
           ..write('status: $status, ')
           ..write('cashReceivedCents: $cashReceivedCents, ')
+          ..write('refundOfSaleId: $refundOfSaleId, ')
+          ..write('refundReason: $refundReason, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -4143,6 +4253,17 @@ class $SaleItemsTable extends SaleItems
     type: DriftSqlType.int,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _refundOfItemIdMeta = const VerificationMeta(
+    'refundOfItemId',
+  );
+  @override
+  late final GeneratedColumn<String> refundOfItemId = GeneratedColumn<String>(
+    'refund_of_item_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -4159,6 +4280,7 @@ class $SaleItemsTable extends SaleItems
     unitPriceCents,
     costPriceCents,
     lineTotalCents,
+    refundOfItemId,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -4287,6 +4409,15 @@ class $SaleItemsTable extends SaleItems
     } else if (isInserting) {
       context.missing(_lineTotalCentsMeta);
     }
+    if (data.containsKey('refund_of_item_id')) {
+      context.handle(
+        _refundOfItemIdMeta,
+        refundOfItemId.isAcceptableOrUnknown(
+          data['refund_of_item_id']!,
+          _refundOfItemIdMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -4352,6 +4483,10 @@ class $SaleItemsTable extends SaleItems
         DriftSqlType.int,
         data['${effectivePrefix}line_total_cents'],
       )!,
+      refundOfItemId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}refund_of_item_id'],
+      ),
     );
   }
 
@@ -4376,6 +4511,7 @@ class SaleItem extends DataClass implements Insertable<SaleItem> {
   final int unitPriceCents;
   final int costPriceCents;
   final int lineTotalCents;
+  final String? refundOfItemId;
   const SaleItem({
     required this.id,
     required this.createdAt,
@@ -4391,6 +4527,7 @@ class SaleItem extends DataClass implements Insertable<SaleItem> {
     required this.unitPriceCents,
     required this.costPriceCents,
     required this.lineTotalCents,
+    this.refundOfItemId,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -4413,6 +4550,9 @@ class SaleItem extends DataClass implements Insertable<SaleItem> {
     map['unit_price_cents'] = Variable<int>(unitPriceCents);
     map['cost_price_cents'] = Variable<int>(costPriceCents);
     map['line_total_cents'] = Variable<int>(lineTotalCents);
+    if (!nullToAbsent || refundOfItemId != null) {
+      map['refund_of_item_id'] = Variable<String>(refundOfItemId);
+    }
     return map;
   }
 
@@ -4436,6 +4576,9 @@ class SaleItem extends DataClass implements Insertable<SaleItem> {
       unitPriceCents: Value(unitPriceCents),
       costPriceCents: Value(costPriceCents),
       lineTotalCents: Value(lineTotalCents),
+      refundOfItemId: refundOfItemId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(refundOfItemId),
     );
   }
 
@@ -4459,6 +4602,7 @@ class SaleItem extends DataClass implements Insertable<SaleItem> {
       unitPriceCents: serializer.fromJson<int>(json['unitPriceCents']),
       costPriceCents: serializer.fromJson<int>(json['costPriceCents']),
       lineTotalCents: serializer.fromJson<int>(json['lineTotalCents']),
+      refundOfItemId: serializer.fromJson<String?>(json['refundOfItemId']),
     );
   }
   @override
@@ -4479,6 +4623,7 @@ class SaleItem extends DataClass implements Insertable<SaleItem> {
       'unitPriceCents': serializer.toJson<int>(unitPriceCents),
       'costPriceCents': serializer.toJson<int>(costPriceCents),
       'lineTotalCents': serializer.toJson<int>(lineTotalCents),
+      'refundOfItemId': serializer.toJson<String?>(refundOfItemId),
     };
   }
 
@@ -4497,6 +4642,7 @@ class SaleItem extends DataClass implements Insertable<SaleItem> {
     int? unitPriceCents,
     int? costPriceCents,
     int? lineTotalCents,
+    Value<String?> refundOfItemId = const Value.absent(),
   }) => SaleItem(
     id: id ?? this.id,
     createdAt: createdAt ?? this.createdAt,
@@ -4512,6 +4658,9 @@ class SaleItem extends DataClass implements Insertable<SaleItem> {
     unitPriceCents: unitPriceCents ?? this.unitPriceCents,
     costPriceCents: costPriceCents ?? this.costPriceCents,
     lineTotalCents: lineTotalCents ?? this.lineTotalCents,
+    refundOfItemId: refundOfItemId.present
+        ? refundOfItemId.value
+        : this.refundOfItemId,
   );
   SaleItem copyWithCompanion(SaleItemsCompanion data) {
     return SaleItem(
@@ -4537,6 +4686,9 @@ class SaleItem extends DataClass implements Insertable<SaleItem> {
       lineTotalCents: data.lineTotalCents.present
           ? data.lineTotalCents.value
           : this.lineTotalCents,
+      refundOfItemId: data.refundOfItemId.present
+          ? data.refundOfItemId.value
+          : this.refundOfItemId,
     );
   }
 
@@ -4556,7 +4708,8 @@ class SaleItem extends DataClass implements Insertable<SaleItem> {
           ..write('quantity: $quantity, ')
           ..write('unitPriceCents: $unitPriceCents, ')
           ..write('costPriceCents: $costPriceCents, ')
-          ..write('lineTotalCents: $lineTotalCents')
+          ..write('lineTotalCents: $lineTotalCents, ')
+          ..write('refundOfItemId: $refundOfItemId')
           ..write(')'))
         .toString();
   }
@@ -4577,6 +4730,7 @@ class SaleItem extends DataClass implements Insertable<SaleItem> {
     unitPriceCents,
     costPriceCents,
     lineTotalCents,
+    refundOfItemId,
   );
   @override
   bool operator ==(Object other) =>
@@ -4595,7 +4749,8 @@ class SaleItem extends DataClass implements Insertable<SaleItem> {
           other.quantity == this.quantity &&
           other.unitPriceCents == this.unitPriceCents &&
           other.costPriceCents == this.costPriceCents &&
-          other.lineTotalCents == this.lineTotalCents);
+          other.lineTotalCents == this.lineTotalCents &&
+          other.refundOfItemId == this.refundOfItemId);
 }
 
 class SaleItemsCompanion extends UpdateCompanion<SaleItem> {
@@ -4613,6 +4768,7 @@ class SaleItemsCompanion extends UpdateCompanion<SaleItem> {
   final Value<int> unitPriceCents;
   final Value<int> costPriceCents;
   final Value<int> lineTotalCents;
+  final Value<String?> refundOfItemId;
   final Value<int> rowid;
   const SaleItemsCompanion({
     this.id = const Value.absent(),
@@ -4629,6 +4785,7 @@ class SaleItemsCompanion extends UpdateCompanion<SaleItem> {
     this.unitPriceCents = const Value.absent(),
     this.costPriceCents = const Value.absent(),
     this.lineTotalCents = const Value.absent(),
+    this.refundOfItemId = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   SaleItemsCompanion.insert({
@@ -4646,6 +4803,7 @@ class SaleItemsCompanion extends UpdateCompanion<SaleItem> {
     required int unitPriceCents,
     required int costPriceCents,
     required int lineTotalCents,
+    this.refundOfItemId = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        createdAt = Value(createdAt),
@@ -4673,6 +4831,7 @@ class SaleItemsCompanion extends UpdateCompanion<SaleItem> {
     Expression<int>? unitPriceCents,
     Expression<int>? costPriceCents,
     Expression<int>? lineTotalCents,
+    Expression<String>? refundOfItemId,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -4690,6 +4849,7 @@ class SaleItemsCompanion extends UpdateCompanion<SaleItem> {
       if (unitPriceCents != null) 'unit_price_cents': unitPriceCents,
       if (costPriceCents != null) 'cost_price_cents': costPriceCents,
       if (lineTotalCents != null) 'line_total_cents': lineTotalCents,
+      if (refundOfItemId != null) 'refund_of_item_id': refundOfItemId,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -4709,6 +4869,7 @@ class SaleItemsCompanion extends UpdateCompanion<SaleItem> {
     Value<int>? unitPriceCents,
     Value<int>? costPriceCents,
     Value<int>? lineTotalCents,
+    Value<String?>? refundOfItemId,
     Value<int>? rowid,
   }) {
     return SaleItemsCompanion(
@@ -4726,6 +4887,7 @@ class SaleItemsCompanion extends UpdateCompanion<SaleItem> {
       unitPriceCents: unitPriceCents ?? this.unitPriceCents,
       costPriceCents: costPriceCents ?? this.costPriceCents,
       lineTotalCents: lineTotalCents ?? this.lineTotalCents,
+      refundOfItemId: refundOfItemId ?? this.refundOfItemId,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -4775,6 +4937,9 @@ class SaleItemsCompanion extends UpdateCompanion<SaleItem> {
     if (lineTotalCents.present) {
       map['line_total_cents'] = Variable<int>(lineTotalCents.value);
     }
+    if (refundOfItemId.present) {
+      map['refund_of_item_id'] = Variable<String>(refundOfItemId.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -4798,6 +4963,7 @@ class SaleItemsCompanion extends UpdateCompanion<SaleItem> {
           ..write('unitPriceCents: $unitPriceCents, ')
           ..write('costPriceCents: $costPriceCents, ')
           ..write('lineTotalCents: $lineTotalCents, ')
+          ..write('refundOfItemId: $refundOfItemId, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -10573,6 +10739,8 @@ typedef $$SalesTableCreateCompanionBuilder = SalesCompanion Function({
   required int totalCents,
   required String status,
   Value<int?> cashReceivedCents,
+  Value<String?> refundOfSaleId,
+  Value<String?> refundReason,
   Value<int> rowid,
 });
 typedef $$SalesTableUpdateCompanionBuilder = SalesCompanion Function({
@@ -10594,6 +10762,8 @@ typedef $$SalesTableUpdateCompanionBuilder = SalesCompanion Function({
   Value<int> totalCents,
   Value<String> status,
   Value<int?> cashReceivedCents,
+  Value<String?> refundOfSaleId,
+  Value<String?> refundReason,
   Value<int> rowid,
 });
 
@@ -10745,6 +10915,16 @@ class $$SalesTableFilterComposer extends Composer<_$AppDatabase, $SalesTable> {
 
   ColumnFilters<int> get cashReceivedCents => $composableBuilder(
     column: $table.cashReceivedCents,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get refundOfSaleId => $composableBuilder(
+    column: $table.refundOfSaleId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get refundReason => $composableBuilder(
+    column: $table.refundReason,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -10916,6 +11096,16 @@ class $$SalesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get refundOfSaleId => $composableBuilder(
+    column: $table.refundOfSaleId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get refundReason => $composableBuilder(
+    column: $table.refundReason,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   $$UsersTableOrderingComposer get userId {
     final $$UsersTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -11015,6 +11205,16 @@ class $$SalesTableAnnotationComposer
 
   GeneratedColumn<int> get cashReceivedCents => $composableBuilder(
     column: $table.cashReceivedCents,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get refundOfSaleId => $composableBuilder(
+    column: $table.refundOfSaleId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get refundReason => $composableBuilder(
+    column: $table.refundReason,
     builder: (column) => column,
   );
 
@@ -11142,6 +11342,8 @@ class $$SalesTableTableManager
                 Value<int> totalCents = const Value.absent(),
                 Value<String> status = const Value.absent(),
                 Value<int?> cashReceivedCents = const Value.absent(),
+                Value<String?> refundOfSaleId = const Value.absent(),
+                Value<String?> refundReason = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => SalesCompanion(
                 id: id,
@@ -11162,6 +11364,8 @@ class $$SalesTableTableManager
                 totalCents: totalCents,
                 status: status,
                 cashReceivedCents: cashReceivedCents,
+                refundOfSaleId: refundOfSaleId,
+                refundReason: refundReason,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -11184,6 +11388,8 @@ class $$SalesTableTableManager
                 required int totalCents,
                 required String status,
                 Value<int?> cashReceivedCents = const Value.absent(),
+                Value<String?> refundOfSaleId = const Value.absent(),
+                Value<String?> refundReason = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => SalesCompanion.insert(
                 id: id,
@@ -11204,6 +11410,8 @@ class $$SalesTableTableManager
                 totalCents: totalCents,
                 status: status,
                 cashReceivedCents: cashReceivedCents,
+                refundOfSaleId: refundOfSaleId,
+                refundReason: refundReason,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -11337,6 +11545,7 @@ typedef $$SaleItemsTableCreateCompanionBuilder = SaleItemsCompanion Function({
   required int unitPriceCents,
   required int costPriceCents,
   required int lineTotalCents,
+  Value<String?> refundOfItemId,
   Value<int> rowid,
 });
 typedef $$SaleItemsTableUpdateCompanionBuilder = SaleItemsCompanion Function({
@@ -11354,6 +11563,7 @@ typedef $$SaleItemsTableUpdateCompanionBuilder = SaleItemsCompanion Function({
   Value<int> unitPriceCents,
   Value<int> costPriceCents,
   Value<int> lineTotalCents,
+  Value<String?> refundOfItemId,
   Value<int> rowid,
 });
 
@@ -11462,6 +11672,11 @@ class $$SaleItemsTableFilterComposer
 
   ColumnFilters<int> get lineTotalCents => $composableBuilder(
     column: $table.lineTotalCents,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get refundOfItemId => $composableBuilder(
+    column: $table.refundOfItemId,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -11581,6 +11796,11 @@ class $$SaleItemsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get refundOfItemId => $composableBuilder(
+    column: $table.refundOfItemId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   $$SalesTableOrderingComposer get saleId {
     final $$SalesTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -11681,6 +11901,11 @@ class $$SaleItemsTableAnnotationComposer
     builder: (column) => column,
   );
 
+  GeneratedColumn<String> get refundOfItemId => $composableBuilder(
+    column: $table.refundOfItemId,
+    builder: (column) => column,
+  );
+
   $$SalesTableAnnotationComposer get saleId {
     final $$SalesTableAnnotationComposer composer = $composerBuilder(
       composer: this,
@@ -11770,6 +11995,7 @@ class $$SaleItemsTableTableManager
                 Value<int> unitPriceCents = const Value.absent(),
                 Value<int> costPriceCents = const Value.absent(),
                 Value<int> lineTotalCents = const Value.absent(),
+                Value<String?> refundOfItemId = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => SaleItemsCompanion(
                 id: id,
@@ -11786,6 +12012,7 @@ class $$SaleItemsTableTableManager
                 unitPriceCents: unitPriceCents,
                 costPriceCents: costPriceCents,
                 lineTotalCents: lineTotalCents,
+                refundOfItemId: refundOfItemId,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -11804,6 +12031,7 @@ class $$SaleItemsTableTableManager
                 required int unitPriceCents,
                 required int costPriceCents,
                 required int lineTotalCents,
+                Value<String?> refundOfItemId = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => SaleItemsCompanion.insert(
                 id: id,
@@ -11820,6 +12048,7 @@ class $$SaleItemsTableTableManager
                 unitPriceCents: unitPriceCents,
                 costPriceCents: costPriceCents,
                 lineTotalCents: lineTotalCents,
+                refundOfItemId: refundOfItemId,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

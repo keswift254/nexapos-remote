@@ -48,6 +48,8 @@ class SaleRepositoryImpl implements SaleRepository {
         status: row.status,
         createdAt: DateTime.parse(row.createdAt),
         cashReceived: row.cashReceivedCents == null ? null : Money(row.cashReceivedCents!),
+        refundOfSaleId: row.refundOfSaleId,
+        refundReason: row.refundReason,
       );
 
   @override
@@ -76,6 +78,8 @@ class SaleRepositoryImpl implements SaleRepository {
         totalCents: sale.total.cents,
         status: sale.status,
         cashReceivedCents: Value(sale.cashReceived?.cents),
+        refundOfSaleId: Value(sale.refundOfSaleId),
+        refundReason: Value(sale.refundReason),
         createdAt: now,
         updatedAt: now,
         localRev: rev,
@@ -92,6 +96,12 @@ class SaleRepositoryImpl implements SaleRepository {
       final rev = await _syncMeta.nextLocalRev();
       await _dao.updateStatus(id, status, now, rev);
     });
+  }
+
+  @override
+  Future<List<Sale>> refundsOf(String saleId) async {
+    final rows = await _dao.refundsOf(saleId);
+    return rows.map(_toEntity).toList();
   }
 
   @override

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../domain/entities/user_role.dart';
 import '../../domain/services/sensitive_action_service.dart';
 import '../../domain/services/session_service.dart';
 import '../../domain/services/license_service.dart';
@@ -13,21 +14,25 @@ Future<ActionApproval?> requestSensitiveApproval(
   BuildContext context, {
   required String action,
   bool requireAuthenticator = true,
+  Set<UserRole> roles = administratorsOnly,
 }) => showDialog<ActionApproval>(
   context: context,
   barrierDismissible: false,
   builder: (_) => _ApprovalDialog(
     action: action,
     requireAuthenticator: requireAuthenticator,
+    roles: roles,
   ),
 );
 
 class _ApprovalDialog extends ConsumerStatefulWidget {
   final String action;
   final bool requireAuthenticator;
+  final Set<UserRole> roles;
   const _ApprovalDialog({
     required this.action,
     this.requireAuthenticator = true,
+    this.roles = administratorsOnly,
   });
   @override
   ConsumerState<_ApprovalDialog> createState() => _ApprovalDialogState();
@@ -99,6 +104,7 @@ class _ApprovalDialogState extends ConsumerState<_ApprovalDialog> {
           username: username,
           password: password.text,
           action: widget.action,
+          roles: widget.roles,
         );
         if (mounted) Navigator.pop(context, approval);
         return;
@@ -143,8 +149,10 @@ class _ApprovalDialogState extends ConsumerState<_ApprovalDialog> {
               controller: password,
               obscureText: true,
               enabled: !busy && !verifiedPassword,
-              decoration: const InputDecoration(
-                labelText: 'Administrator password',
+              decoration: InputDecoration(
+                labelText: widget.roles == administratorsOnly
+                    ? 'Administrator password'
+                    : 'Your password',
               ),
               onSubmitted: (_) => busy ? null : verify(),
             ),

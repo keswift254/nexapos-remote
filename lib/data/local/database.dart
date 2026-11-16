@@ -109,7 +109,7 @@ class AppDatabase extends _$AppDatabase {
   }
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -150,6 +150,13 @@ class AppDatabase extends _$AppDatabase {
             // has no barcode recorded until someone scans or types one
             // in, same as a newly added product that skips the field.
             await _addColumnIfMissing(m, products, products.barcode);
+          }
+          if (from < 6) {
+            // Refunds: three nullable columns, nothing to backfill - every existing
+            // sale and sale line simply is not a refund.
+            await _addColumnIfMissing(m, sales, sales.refundOfSaleId);
+            await _addColumnIfMissing(m, sales, sales.refundReason);
+            await _addColumnIfMissing(m, saleItems, saleItems.refundOfItemId);
           }
         },
         beforeOpen: (details) async {

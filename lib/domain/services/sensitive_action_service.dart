@@ -25,9 +25,14 @@ class ActionApproval {
   final String userId;
   final String action;
   final DateTime expires;
+  /// Which roles may have given this approval (an administrator only, unless the action says otherwise).
+  final Set<UserRole> roles;
   bool _used = false;
-  ActionApproval._(this.userId, this.action, this.expires);
+  ActionApproval._(this.userId, this.action, this.expires, this.roles);
 }
+
+/// Who may confirm an action that only administrators may do (almost all of them).
+const administratorsOnly = {UserRole.admin};
 
 /// Device-local second factor, never exported or shared through shop sync.
 class SensitiveActionService {
@@ -51,7 +56,11 @@ class SensitiveActionService {
         : Map<String, dynamic>.from(jsonDecode(value) as Map);
   }
 
-  Future<String> verifyPassword(String username, String password) async {
+  Future<String> verifyPassword(
+    String username,
+    String password, {
+    Set<UserRole> roles = administratorsOnly,
+  }) async {
     final id = currentUserId();
     if (id == null) throw StateError('Sign in as an administrator first.');
     final state = await _state(id);
@@ -61,9 +70,13 @@ class SensitiveActionService {
     }
     final result = await auth.login(username, password);
     final user = result.when(ok: (user) => user, failure: (_) => null);
-    if (user == null || user.id != id || user.role != UserRole.admin) {
+    if (user == null || user.id != id || !roles.contains(user.role)) {
       await _failure(id, state);
-      throw StateError('Administrator credentials were not accepted.');
+      throw StateError(
+        roles == administratorsOnly
+            ? 'Administrator credentials were not accepted.'
+            : 'Your password was not accepted.',
+      );
     }
     return id;
   }
@@ -139,6 +152,7 @@ class SensitiveActionService {
       id,
       action,
       clock.now().add(const Duration(minutes: 5)),
+      administratorsOnly,
     );
   }
 
@@ -150,16 +164,21 @@ class SensitiveActionService {
   /// extra step earns its friction. Being logged in as an admin to reach
   /// the screen this guards is already required and unaffected by this -
   /// this is the SECOND check, re-confirming the same admin right now.
+  ///
+  /// [roles] widens who may confirm for an action an administrator AND a manager may do (a refund):
+  /// the person still re-types their own password, they just do not have to be an administrator.
   Future<ActionApproval> approveWithPasswordOnly({
     required String username,
     required String password,
     required String action,
+    Set<UserRole> roles = administratorsOnly,
   }) async {
-    final id = await verifyPassword(username, password);
+    final id = await verifyPassword(username, password, roles: roles);
     return ActionApproval._(
       id,
       action,
       clock.now().add(const Duration(minutes: 5)),
+      roles,
     );
   }
 
@@ -173,9 +192,16 @@ class SensitiveActionService {
     approval._used = true;
     final users = await auth.getAllUsers();
     if (!users.any(
-      (u) => u.id == approval.userId && u.isActive && u.role == UserRole.admin,
+      (u) =>
+          u.id == approval.userId &&
+          u.isActive &&
+          approval.roles.contains(u.role),
     )) {
-      throw StateError('Administrator access is required.');
+      throw StateError(
+        approval.roles == administratorsOnly
+            ? 'Administrator access is required.'
+            : 'You are not allowed to do this.',
+      );
     }
   }
 }

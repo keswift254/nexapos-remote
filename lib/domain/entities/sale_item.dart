@@ -19,6 +19,8 @@ abstract class SaleItem with _$SaleItem {
     required Money unitPrice,
     required Money costPrice,
     required Money lineTotal,
+    // Refund lines only: the line of the original sale this one gives back.
+    String? refundOfItemId,
   }) = _SaleItem;
 
   const SaleItem._();

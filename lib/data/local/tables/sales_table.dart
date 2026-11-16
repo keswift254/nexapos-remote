@@ -32,4 +32,14 @@ class Sales extends Table with SyncedColumns {
   // recorded" - a cash sale where the cashier didn't bother entering it
   // (exact change, or just skipped the field), not a real 0 tendered.
   IntColumn get cashReceivedCents => integer().nullable()();
+
+  // Refunds are recorded as their OWN sale row (saleType 'refund') with negative
+  // amounts - never as an edit of the original sale. A device only ever pushes the
+  // rows it created, so an edit made on another device than the one that rang up the
+  // sale would never reach the shop, while a new row always does. A negative sale also
+  // makes every older app version's totals come out right without knowing about refunds.
+  // [refundOfSaleId] is the sale being refunded and [refundReason] what the person who
+  // refunded typed; both are null on every ordinary sale.
+  TextColumn get refundOfSaleId => text().nullable()();
+  TextColumn get refundReason => text().nullable()();
 }

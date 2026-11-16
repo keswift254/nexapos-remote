@@ -18,4 +18,9 @@ class SaleItems extends Table with SyncedColumns {
   IntColumn get unitPriceCents => integer()();
   IntColumn get costPriceCents => integer()();
   IntColumn get lineTotalCents => integer()();
+
+  // Set on a line of a refund sale (negative quantity and line total): the line of
+  // the ORIGINAL sale it gives back, so what is still refundable can be worked out
+  // exactly (names and prices repeat, ids do not). Null on every ordinary sale line.
+  TextColumn get refundOfItemId => text().nullable()();
 }

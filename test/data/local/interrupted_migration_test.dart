@@ -30,14 +30,14 @@ void main() {
 
     final second = AppDatabase(NativeDatabase(file));
     addTearDown(second.close);
-    // Opening runs onUpgrade(4 -> 5); it used to throw here.
+    // Opening runs onUpgrade(4 -> 6); it used to throw here.
     final columns = await second
         .customSelect('PRAGMA table_info("products")')
         .get();
     expect(columns.map((r) => r.read<String>('name')), contains('barcode'));
 
     final version = await second.customSelect('PRAGMA user_version').getSingle();
-    expect(version.read<int>('user_version'), 5);
+    expect(version.read<int>('user_version'), 6);
   });
 
   test('an old database that genuinely lacks the column still gets it added', () async {

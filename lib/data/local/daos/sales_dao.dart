@@ -16,6 +16,19 @@ class SalesDao extends DatabaseAccessor<AppDatabase> with _$SalesDaoMixin {
     return (select(sales)..where((s) => s.id.equals(id) & s.deletedAt.isNull())).getSingleOrNull();
   }
 
+  /// The refunds recorded against one sale (each is its own sale row, see
+  /// sales_table.dart), oldest first. Only finished ones: a refund is never pending.
+  Future<List<Sale>> refundsOf(String saleId) {
+    return (select(sales)
+          ..where((s) =>
+              s.refundOfSaleId.equals(saleId) &
+              s.saleType.equals('refund') &
+              s.status.equals('paid') &
+              s.deletedAt.isNull())
+          ..orderBy([(s) => OrderingTerm.asc(s.createdAt)]))
+        .get();
+  }
+
   /// A sale only ever sits in 'pending' while it's awaiting confirmation
   /// from an online gateway - paystack or intasend, see sales_table.dart's
   /// status doc. Used at app startup to reconcile any left stranded by

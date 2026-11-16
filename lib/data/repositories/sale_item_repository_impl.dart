@@ -43,6 +43,7 @@ class SaleItemRepositoryImpl implements SaleItemRepository {
         unitPrice: Money(row.unitPriceCents),
         costPrice: Money(row.costPriceCents),
         lineTotal: Money(row.lineTotalCents),
+        refundOfItemId: row.refundOfItemId,
       );
 
   @override
@@ -69,6 +70,7 @@ class SaleItemRepositoryImpl implements SaleItemRepository {
           unitPriceCents: item.unitPrice.cents,
           costPriceCents: item.costPrice.cents,
           lineTotalCents: item.lineTotal.cents,
+          refundOfItemId: Value(item.refundOfItemId),
           createdAt: now,
           updatedAt: now,
           localRev: rev,
