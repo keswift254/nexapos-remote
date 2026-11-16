@@ -776,7 +776,7 @@ class _DashboardStatsState extends State<_DashboardStats> {
           ),
         ),
         const SizedBox(height: 12),
-        _SalesTrendCard(points: data.last7Days),
+        SalesTrendCard(points: data.last7Days, financialsVisible: _financialsVisible),
       ],
     );
   }
@@ -895,13 +895,36 @@ class _PercentBadge extends StatelessWidget {
   }
 }
 
-class _SalesTrendCard extends StatelessWidget {
+/// "Last 7 Days": three bars a day (Sales, Expenses, Net Profit). Tap a day - anywhere in its column - and that day's exact
+/// figures are written under the chart; the other days fade so the tapped one stands out (the same as the Lite till).
+@visibleForTesting
+class SalesTrendCard extends StatefulWidget {
   final List<DailyPoint> points;
 
-  const _SalesTrendCard({required this.points});
+  /// False while the dashboard hides its money figures: the tapped day's amounts are then stars, as on the stat cards.
+  final bool financialsVisible;
+
+  const SalesTrendCard({required this.points, this.financialsVisible = true});
+
+  @override
+  State<SalesTrendCard> createState() => SalesTrendCardState();
+}
+
+@visibleForTesting
+class SalesTrendCardState extends State<SalesTrendCard> {
+  int? _selected;
+
+  @override
+  void didUpdateWidget(SalesTrendCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // New figures (a new day, a refresh): the old selection no longer means the same day.
+    if (!identical(oldWidget.points, widget.points)) _selected = null;
+  }
 
   @override
   Widget build(BuildContext context) {
+    final points = widget.points;
+    final selected = _selected != null && _selected! < points.length ? _selected : null;
     final theme = Theme.of(context);
     final salesColor = theme.colorScheme.primary;
     const expensesColor = Colors.red;
@@ -934,7 +957,7 @@ class _SalesTrendCard extends StatelessWidget {
             Text('Last 7 Days', style: theme.textTheme.titleMedium),
             const SizedBox(height: 2),
             Text(
-              'Tap a bar for the exact total',
+              'Tap a day for the exact figures',
               style: theme.textTheme.bodySmall,
             ),
             const SizedBox(height: 10),
@@ -954,25 +977,18 @@ class _SalesTrendCard extends StatelessWidget {
                   maxY: maxY,
                   minY: minY,
                   barTouchData: BarTouchData(
-                    touchTooltipData: BarTouchTooltipData(
-                      getTooltipItem: (group, groupIndex, rod, rodIndex) {
-                        final point = points[group.x];
-                        const labels = ['Sales', 'Expenses', 'Net Profit'];
-                        final values = [
-                          point.salesTotal,
-                          point.expensesTotal,
-                          point.netProfit,
-                        ];
-                        return BarTooltipItem(
-                          '${DateFormat('EEE, d MMM').format(point.date)}\n${labels[rodIndex]}: ${values[rodIndex].format()}',
-                          const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                          ),
-                        );
-                      },
-                    ),
+                    // The day's figures are written under the chart (below), not in a pop-up over the bars.
+                    handleBuiltInTouches: false,
+                    // A day is picked by touching anywhere in its column: the invisible full-height bar behind each rod counts too.
+                    allowTouchBarBackDraw: true,
+                    touchExtraThreshold: const EdgeInsets.symmetric(horizontal: 12, vertical: 2000),
+                    touchCallback: (event, response) {
+                      if (event is! FlTapUpEvent) return;
+                      final index = response?.spot?.touchedBarGroupIndex;
+                      if (index != null && index >= 0 && index < points.length) {
+                        setState(() => _selected = index);
+                      }
+                    },
                   ),
                   gridData: FlGridData(
                     drawVerticalLine: false,
@@ -1029,45 +1045,58 @@ class _SalesTrendCard extends StatelessWidget {
                         x: i,
                         barsSpace: 3,
                         barRods: [
-                          BarChartRodData(
-                            toY: points[i].salesTotal.toMajorDouble,
-                            color: salesColor,
-                            width: 7,
-                            borderRadius: const BorderRadius.vertical(
-                              top: Radius.circular(2),
+                          for (final rod in [
+                            (points[i].salesTotal.toMajorDouble, salesColor, 2.0, 0.0),
+                            (points[i].expensesTotal.toMajorDouble, expensesColor, 2.0, 0.0),
+                            (
+                              points[i].netProfit.toMajorDouble,
+                              profitColor,
+                              points[i].netProfit.cents >= 0 ? 2.0 : 0.0,
+                              points[i].netProfit.cents < 0 ? 2.0 : 0.0,
                             ),
-                          ),
-                          BarChartRodData(
-                            toY: points[i].expensesTotal.toMajorDouble,
-                            color: expensesColor,
-                            width: 7,
-                            borderRadius: const BorderRadius.vertical(
-                              top: Radius.circular(2),
-                            ),
-                          ),
-                          BarChartRodData(
-                            toY: points[i].netProfit.toMajorDouble,
-                            color: profitColor,
-                            width: 7,
-                            borderRadius: BorderRadius.vertical(
-                              top: Radius.circular(
-                                points[i].netProfit.cents >= 0 ? 2 : 0,
+                          ])
+                            BarChartRodData(
+                              toY: rod.$1,
+                              color: selected == null || selected == i
+                                  ? rod.$2
+                                  : rod.$2.withValues(alpha: 0.3),
+                              width: 7,
+                              borderRadius: BorderRadius.vertical(
+                                top: Radius.circular(rod.$3),
+                                bottom: Radius.circular(rod.$4),
                               ),
-                              bottom: Radius.circular(
-                                points[i].netProfit.cents < 0 ? 2 : 0,
+                              backDrawRodData: BackgroundBarChartRodData(
+                                show: true,
+                                fromY: minY,
+                                toY: maxY,
+                                color: Colors.transparent,
                               ),
                             ),
-                          ),
                         ],
                       ),
                   ],
                 ),
               ),
             ),
+            const SizedBox(height: 8),
+            Text(
+              selected == null
+                  ? 'Tap a day for the exact figures'
+                  : _dayFigures(points[selected], widget.financialsVisible),
+              key: const Key('trend-detail'),
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium,
+            ),
           ],
         ),
       ),
     );
+  }
+
+  /// "Sun, 15 Nov  \u00b7  Sales KES 770.00  \u00b7  Expenses KES 150.00  \u00b7  Net Profit KES 30.00"
+  static String _dayFigures(DailyPoint point, bool visible) {
+    String money(Money value) => visible ? value.format() : '******';
+    return '${DateFormat('EEE, d MMM').format(point.date)}  \u00b7  Sales ${money(point.salesTotal)}  \u00b7  Expenses ${money(point.expensesTotal)}  \u00b7  Net Profit ${money(point.netProfit)}';
   }
 }
 
