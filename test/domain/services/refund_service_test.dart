@@ -18,6 +18,7 @@ import 'package:nexapos_mobile/domain/entities/cart_item.dart';
 import 'package:nexapos_mobile/domain/entities/category.dart';
 import 'package:nexapos_mobile/domain/entities/product.dart';
 import 'package:nexapos_mobile/domain/entities/sale.dart';
+import 'package:nexapos_mobile/domain/entities/sale_item.dart';
 import 'package:nexapos_mobile/domain/entities/user.dart';
 import 'package:nexapos_mobile/domain/entities/user_role.dart';
 import 'package:nexapos_mobile/domain/services/auth_service.dart';
@@ -444,6 +445,74 @@ void main() {
     });
   });
 
+  group('refunds that were recorded by something else', () {
+    // Another version of the app, or a hand-fixed record, may have given back more (or less) of the discount or the
+    // cash than this version would. The next refund must never go negative or past its own amount because of it.
+    Future<void> recordEarlierRefund(Sale of, {required int subtotal, required int discount, int? cash, required String itemId, required int quantity}) async {
+      final id = await sales.create(Sale(
+        id: '',
+        saleNumber: 'EARLIER-${DateTime.now().microsecondsSinceEpoch}',
+        userId: manager.id,
+        customerName: of.customerName,
+        saleType: 'refund',
+        paymentMethod: of.paymentMethod,
+        subtotal: Money(-subtotal),
+        discount: Money(-discount),
+        total: Money(-(subtotal - discount)),
+        status: 'paid',
+        createdAt: DateTime.now(),
+        cashReceived: cash == null ? null : Money(-cash),
+        refundOfSaleId: of.id,
+        refundReason: 'earlier',
+      ));
+      final original = (await saleItems.forSale(of.id)).firstWhere((l) => l.id == itemId);
+      await saleItems.createMany([
+        SaleItem(
+          id: '',
+          saleId: id,
+          productId: original.productId,
+          itemName: original.itemName,
+          quantity: -quantity,
+          unitPrice: original.unitPrice,
+          costPrice: original.costPrice,
+          lineTotal: Money(-quantity * original.unitPrice.cents),
+          refundOfItemId: original.id,
+        ),
+      ]);
+    }
+
+    test('an earlier refund that took too much of the discount: the next one gives back none, not a negative amount', () async {
+      final sale = await sell([line(widgetId, 'Widget', 10000, 6000, 2)], discount: 2000); // total 180.00
+      final item = (await saleItems.forSale(sale.id)).single;
+      await recordEarlierRefund(sale, subtotal: 10000, discount: 3000, itemId: item.id, quantity: 1); // 30.00 where 10.00 was its share
+      final source = (await refunds.refundableSale(sale.id))!;
+      final q = refunds.quote(source, [RefundChoice(itemId: item.id, quantity: 1)]);
+      final amounts = q.when(ok: (a) => a, failure: (m) => fail(m));
+      expect(amounts.discount.cents, 0, reason: 'its share would be 20.00 - 30.00: nothing more to take off, never less than nothing');
+      expect(amounts.total.cents, 10000);
+    });
+
+    test('an earlier refund that took too much of the cash: the next one gives back no cash, not a negative amount', () async {
+      final sale = await sellSplit([line(widgetId, 'Widget', 10000, 6000, 4)], 10000); // 40000, 10000 of it in cash
+      final item = (await saleItems.forSale(sale.id)).single;
+      await recordEarlierRefund(sale, subtotal: 10000, discount: 0, cash: 9000, itemId: item.id, quantity: 1); // 90.00 of cash back where 25.00 was its share
+      final source = (await refunds.refundableSale(sale.id))!;
+      final amounts = refunds.quote(source, [RefundChoice(itemId: item.id, quantity: 1)]).when(ok: (a) => a, failure: (m) => fail(m));
+      expect(amounts.cash!.cents, 0, reason: 'cumulative 25.00 of cash in total - 90.00 already: nothing more, never less than nothing');
+      expect(amounts.total.cents, 10000);
+    });
+
+    test('an earlier refund that took too little of the cash: the next one never gives back more cash than its own amount', () async {
+      final sale = await sellSplit([line(widgetId, 'Widget', 10000, 6000, 4)], 30000); // 40000, 30000 of it in cash
+      final item = (await saleItems.forSale(sale.id)).single;
+      await recordEarlierRefund(sale, subtotal: 20000, discount: 0, cash: 0, itemId: item.id, quantity: 2); // all of it recorded as M-Pesa
+      final source = (await refunds.refundableSale(sale.id))!;
+      final amounts = refunds.quote(source, [RefundChoice(itemId: item.id, quantity: 1)]).when(ok: (a) => a, failure: (m) => fail(m));
+      expect(amounts.total.cents, 10000);
+      expect(amounts.cash!.cents, 10000, reason: '22500 of cash would be owed by the proportion, but this refund is only 10000');
+    });
+  });
+
   group('what cannot be refunded', () {
     test('nothing chosen, an unknown line, a repeated line, zero or negative quantities', () async {
       final sale = await sell([line(widgetId, 'Widget', 10000, 6000, 2)]);
@@ -541,6 +610,16 @@ void main() {
       expect(refunds.canRefund, isFalse);
       current = null;
       expect(refunds.canRefund, isFalse);
+    });
+
+    test('a person who is no longer active cannot refund, whatever their role', () async {
+      current = manager.copyWith(status: 'inactive');
+      expect(refunds.canRefund, isFalse);
+      final sale = await sell([line(widgetId, 'Widget', 10000, 6000, 1)]);
+      final approval = await approvalFor(manager);
+      current = manager.copyWith(status: 'inactive');
+      final result = await refunds.refund(saleId: sale.id, choices: await everything(sale.id), reason: 'x', approval: approval);
+      expect(failureOf(result), 'Only an administrator or a manager can refund.');
     });
 
     test('an administrator can refund too', () async {
