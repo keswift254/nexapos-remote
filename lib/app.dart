@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import 'core/providers.dart';
+import 'core/cart_shortcuts.dart';
 import 'core/keyboard_back.dart';
 import 'core/utils/monotonic_clock.dart';
 import 'domain/services/session_service.dart';
@@ -597,6 +598,7 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
             const SingleActivator(LogicalKeyboardKey.arrowLeft, alt: true): () {
               keyboardBack(router);
             },
+            ...CartShortcuts.bindings,
             const SingleActivator(LogicalKeyboardKey.f1): () {
               final navigatorContext =
                   router.routerDelegate.navigatorKey.currentContext;
@@ -606,7 +608,7 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
                 builder: (context) => AlertDialog(
                   title: const Text('Keyboard controls'),
                   content: const Text(
-                    'Tab / Shift+Tab: next / previous control\nEnter or Space: activate a button\nArrow keys: choose menu options\nEsc: close a dialog or go back\nF2: new sale\nF4: cart\nAlt+Home: dashboard\nAlt+Left: back\nF1: this help',
+                    'Tab / Shift+Tab: next / previous control\nEnter or Space: activate a button\nArrow keys: choose menu options\nEsc: close a dialog or go back\nF2: new sale\nF4: cart\nAlt+Home: dashboard\nAlt+Left: back\nIn the cart:\nF8: switch between Cash and M-Pesa Prompt\nF9 or Ctrl+Enter: complete the sale / send the M-Pesa prompt\nF1: this help',
                   ),
                   actions: [
                     TextButton(

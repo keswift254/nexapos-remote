@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/cart_shortcuts.dart';
 import '../../core/utils/money.dart';
 import '../../domain/entities/product.dart';
 import '../../domain/services/checkout_service.dart';
@@ -42,6 +43,10 @@ class _CartScreenState extends ConsumerState<CartScreen> {
   final _cashReceivedController = TextEditingController();
   final _phoneController = TextEditingController();
   final _searchController = TextEditingController();
+  // Where the cursor goes when the payment method is chosen: the customer's M-Pesa number for the prompt, the cash
+  // received for cash. Each is drawn for one method only, and the two are never on screen together.
+  final _phoneFocus = FocusNode();
+  final _cashFocus = FocusNode();
   String _query = '';
   bool _submitting = false;
 
@@ -52,15 +57,61 @@ class _CartScreenState extends ConsumerState<CartScreen> {
     _discountController.text = cart.discount.cents == 0 ? '' : cart.discount.toMajorDouble.toStringAsFixed(2);
     _cashReceivedController.text = cart.cashReceived.cents == 0 ? '' : cart.cashReceived.toMajorDouble.toStringAsFixed(2);
     _phoneController.text = cart.customerPhone;
+    CartShortcuts.register(owner: this, switchPayment: _switchPaymentFromKeyboard, complete: _completeFromKeyboard);
   }
 
   @override
   void dispose() {
+    CartShortcuts.unregister(this);
+    _phoneFocus.dispose();
+    _cashFocus.dispose();
     _discountController.dispose();
     _cashReceivedController.dispose();
     _phoneController.dispose();
     _searchController.dispose();
     super.dispose();
+  }
+
+  /// Chooses how the sale is paid and puts the cursor where the cashier types next: the customer's M-Pesa number for
+  /// an M-Pesa prompt, the cash received for cash. (Nothing happens when that method is already the chosen one.)
+  void _choosePayment(String method) {
+    if (ref.read(cartProvider).paymentMethod == method) return;
+    ref.read(cartProvider.notifier).setPaymentMethod(method);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      (method == 'paystack' ? _phoneFocus : _cashFocus).requestFocus();
+    });
+  }
+
+  /// Keys act on this cart only while it is the screen being looked at (not while a dialog or another page is on top).
+  bool get _isOnTop => ModalRoute.of(context)?.isCurrent ?? false;
+
+  /// F8: Cash <-> M-Pesa Prompt.
+  void _switchPaymentFromKeyboard() {
+    if (!mounted || !_isOnTop || _submitting) return;
+    _choosePayment(ref.read(cartProvider).paymentMethod == 'paystack' ? 'cash' : 'paystack');
+  }
+
+  /// F9 / Ctrl+Enter: exactly what the big button at the bottom does for the chosen method.
+  void _completeFromKeyboard() {
+    if (!mounted || !_isOnTop || _submitting) return;
+    final state = ref.read(cartProvider);
+    final userId = ref.read(sessionProvider)?.id;
+    if (state.isEmpty || userId == null) return;
+    if (_isCashShortfall(state)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('The cash received is less than the total. Enter enough cash, or send an M-Pesa prompt for the rest.')),
+      );
+      return;
+    }
+    _submit(ref.read(cartProvider.notifier), state.paymentMethod, userId);
+  }
+
+  /// A genuine, entered-but-insufficient cash amount - not simply "nothing typed in" (cents == 0), which is the
+  /// existing "didn't bother recording it" case and completes as an ordinary cash sale.
+  static bool _isCashShortfall(CartState state) {
+    final total = state.discount > state.subtotal ? const Money.zero() : state.subtotal - state.discount;
+    return state.paymentMethod == 'cash' && state.cashReceived.cents > 0 && state.cashReceived < total;
   }
 
   List<Product> _matchesFor(List<Product> products, String query) {
@@ -305,12 +356,7 @@ class _CartScreenState extends ConsumerState<CartScreen> {
     final total = discount > cartState.subtotal
         ? const Money.zero()
         : cartState.subtotal - discount;
-    // A genuine, entered-but-insufficient cash amount - not simply
-    // "nothing typed in" (cents == 0), which is the existing "didn't
-    // bother recording it" case and completes as an ordinary cash sale.
-    final cashShortfall = cartState.paymentMethod == 'cash' &&
-        cartState.cashReceived.cents > 0 &&
-        cartState.cashReceived < total;
+    final cashShortfall = _isCashShortfall(cartState);
     final searchMatches = _matchesFor(
       ref.watch(allProductsProvider).value ?? const [],
       _query,
@@ -444,10 +490,13 @@ class _CartScreenState extends ConsumerState<CartScreen> {
             spacing: 8,
             children: _paymentMethodLabels.entries
                 .map(
-                  (entry) => ChoiceChip(
-                    label: Text(entry.value),
-                    selected: cartState.paymentMethod == entry.key,
-                    onSelected: (_) => cart.setPaymentMethod(entry.key),
+                  (entry) => Tooltip(
+                    message: 'Switch between Cash and M-Pesa Prompt (${CartShortcuts.switchPaymentHint})',
+                    child: ChoiceChip(
+                      label: Text(entry.value),
+                      selected: cartState.paymentMethod == entry.key,
+                      onSelected: (_) => _choosePayment(entry.key),
+                    ),
                   ),
                 )
                 .toList(),
@@ -457,6 +506,7 @@ class _CartScreenState extends ConsumerState<CartScreen> {
             TextField(
               key: const Key('mpesa-phone'),
               controller: _phoneController,
+              focusNode: _phoneFocus,
               decoration: const InputDecoration(
                 labelText: 'Customer\'s M-Pesa number',
                 hintText: '0712 345 678',
@@ -495,6 +545,7 @@ class _CartScreenState extends ConsumerState<CartScreen> {
             const SizedBox(height: 16),
             TextField(
               controller: _cashReceivedController,
+              focusNode: _cashFocus,
               decoration: const InputDecoration(
                 labelText: 'Cash received (optional)',
               ),
@@ -550,7 +601,9 @@ class _CartScreenState extends ConsumerState<CartScreen> {
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: FilledButton(
+                child: Tooltip(
+                  message: '${cartState.paymentMethod == 'paystack' ? 'Send the M-Pesa prompt' : 'Complete the sale'} (${CartShortcuts.completeHint})',
+                  child: FilledButton(
                   onPressed: (_submitting || cartState.isEmpty || userId == null || cashShortfall)
                       ? null
                       : () => _submit(cart, cartState.paymentMethod, userId),
@@ -561,6 +614,7 @@ class _CartScreenState extends ConsumerState<CartScreen> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : Text(cartState.paymentMethod == 'paystack' ? 'Send M-Pesa prompt' : 'Complete Sale'),
+                  ),
                 ),
               ),
             ],

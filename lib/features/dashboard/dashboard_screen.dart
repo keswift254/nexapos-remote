@@ -301,7 +301,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           children: [
             IconButton(
               icon: const Icon(Icons.home),
-              tooltip: 'Home',
+              tooltip: 'Home (Alt+Home)',
               onPressed: () => context.go('/'),
             ),
             if (isWindows)
@@ -437,7 +437,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                     const SizedBox(height: 12),
                     Card(
                       color: Theme.of(context).colorScheme.tertiaryContainer,
-                      child: ListTile(
+                      child: Tooltip(
+                        message: 'Cart (F4)',
+                        child: ListTile(
                         leading: const Icon(Icons.shopping_cart_outlined),
                         title: Text(
                           cartState.itemCount == 1
@@ -446,7 +448,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                         ),
                         subtitle: const Text('Go to cart to complete sale.'),
                         onTap: () => context.push('/checkout/cart'),
-                      ),
+                      )),
                     ),
                   ],
                   if (_supportBannerReplies.isNotEmpty) ...[
@@ -579,10 +581,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                   ),
                   const SizedBox(height: 24),
                   Center(
-                    child: FilledButton.icon(
-                      onPressed: () => context.push('/new-sale'),
-                      icon: const Icon(Icons.point_of_sale),
-                      label: const Text('New Sale'),
+                    child: Tooltip(
+                      message: 'New sale (F2)',
+                      child: FilledButton.icon(
+                        onPressed: () => context.push('/new-sale'),
+                        icon: const Icon(Icons.point_of_sale),
+                        label: const Text('New Sale'),
+                      ),
                     ),
                   ),
                   if (canManageInventory) ...[

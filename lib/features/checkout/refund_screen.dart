@@ -120,7 +120,12 @@ class _RefundScreenState extends ConsumerState<RefundScreen> {
         );
     if (!mounted) return;
     result.when(
-      ok: (refund) => context.go('/receipt/${refund.id}?from=reports'),
+      ok: (refund) {
+        // go() alone would leave the receipt as the only page (no back arrow, no way to the dashboard): put Reports under it,
+        // as the checkout does with the dashboard, so back and the dashboard are one tap away.
+        context.go('/reports');
+        context.push('/receipt/${refund.id}?from=reports');
+      },
       failure: (message) => setState(() {
         _busy = false;
         _error = message;

@@ -110,10 +110,13 @@ class _NewSaleScreenState extends ConsumerState<NewSaleScreen> {
       bottomNavigationBar: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(12),
-          child: FilledButton(
-            onPressed: () => context.push('/checkout/cart'),
-            child: Text(
-              cart.isEmpty ? 'View cart' : 'View cart (${cart.itemCount}) · ${cart.subtotal.format()}',
+          child: Tooltip(
+            message: 'Cart (F4)',
+            child: FilledButton(
+              onPressed: () => context.push('/checkout/cart'),
+              child: Text(
+                cart.isEmpty ? 'View cart' : 'View cart (${cart.itemCount}) · ${cart.subtotal.format()}',
+              ),
             ),
           ),
         ),

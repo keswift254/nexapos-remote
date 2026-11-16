@@ -41,6 +41,10 @@ void main() {
           builder: (context, state) => RefundScreen(saleId: state.pathParameters['saleId']!),
         ),
         GoRoute(
+          path: '/reports',
+          builder: (context, state) => const Scaffold(body: Text('REPORTS PAGE')),
+        ),
+        GoRoute(
           path: '/receipt/:saleId',
           builder: (context, state) {
             openedReceipt = state.pathParameters['saleId'];
@@ -111,6 +115,7 @@ void main() {
     await confirmWithPassword(tester, 'long-password');
 
     expect(find.text('RECEIPT PAGE'), findsOneWidget);
+    expect(tester.state<NavigatorState>(find.byType(Navigator)).canPop(), isTrue, reason: 'Reports is underneath the receipt, so there is always a way back');
     final refunds = await tester.runAsync(() => shop.db.salesDao.refundsOf(sale.id));
     expect(refunds, hasLength(1));
     expect(openedReceipt, refunds!.single.id);

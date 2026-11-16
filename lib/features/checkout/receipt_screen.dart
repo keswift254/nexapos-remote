@@ -143,7 +143,24 @@ class _ReceiptScreenState extends ConsumerState<ReceiptScreen> {
         context.go(widget.returnPath);
       },
       child: Scaffold(
-        appBar: AppBar(title: const Text('Receipt')),
+        // The back arrow and the Dashboard button are always there: a receipt reached with go() (the refund screen
+        // does that) has nothing underneath it, so the automatic back arrow would not be drawn and the only way out
+        // would have been "New Sale".
+        appBar: AppBar(
+          leading: BackButton(
+            key: const Key('receipt-back'),
+            onPressed: () => context.go(widget.returnPath),
+          ),
+          title: const Text('Receipt'),
+          actions: [
+            IconButton(
+              key: const Key('receipt-dashboard'),
+              icon: const Icon(Icons.home),
+              tooltip: 'Dashboard (Alt+Home)',
+              onPressed: () => context.go('/'),
+            ),
+          ],
+        ),
         body: dataAsync.when(
           loading: () => const Center(child: CircularProgressIndicator()),
           error: (error, _) =>
@@ -214,16 +231,19 @@ class _ReceiptScreenState extends ConsumerState<ReceiptScreen> {
                   ),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: FilledButton.icon(
-                      onPressed: () {
-                        // Same reasoning as the checkout success handlers:
-                        // collapse to the dashboard first so New Sale
-                        // isn't left as the only thing on the stack.
-                        context.go('/');
-                        context.push('/new-sale');
-                      },
-                      icon: const Icon(Icons.point_of_sale),
-                      label: const Text('New Sale'),
+                    child: Tooltip(
+                      message: 'New sale (F2)',
+                      child: FilledButton.icon(
+                        onPressed: () {
+                          // Same reasoning as the checkout success handlers:
+                          // collapse to the dashboard first so New Sale
+                          // isn't left as the only thing on the stack.
+                          context.go('/');
+                          context.push('/new-sale');
+                        },
+                        icon: const Icon(Icons.point_of_sale),
+                        label: const Text('New Sale'),
+                      ),
                     ),
                   ),
                 ],

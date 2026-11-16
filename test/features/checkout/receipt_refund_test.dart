@@ -202,4 +202,74 @@ void main() {
       expect(find.widgetWithText(OutlinedButton, 'Print to thermal printer'), findsOneWidget);
     });
   });
+
+  group('a receipt that is the only page open (a refund opens it that way)', () {
+    ReceiptData refundData() => ReceiptData(
+          sale: _sale(type: 'refund', subtotal: -20000, refundOf: 'orig', reason: 'Wrong goods'),
+          items: [_item(-2)],
+          settings: _settings,
+          cashierName: 'Otieno',
+          originalSaleNumber: 'SALE-1',
+        );
+
+    Future<GoRouter> open(WidgetTester tester, {String from = 'reports'}) async {
+      final data = refundData();
+      _Session.who = _user(UserRole.manager);
+      await tester.pumpWidget(const SizedBox());
+      final router = GoRouter(
+        initialLocation: '/receipt/sale-1?from=$from',
+        routes: [
+          GoRoute(path: '/', builder: (context, state) => const Scaffold(body: Text('DASHBOARD PAGE'))),
+          GoRoute(path: '/reports', builder: (context, state) => const Scaffold(body: Text('REPORTS PAGE'))),
+          GoRoute(
+            path: '/receipt/:saleId',
+            builder: (context, state) => ReceiptScreen(
+              saleId: state.pathParameters['saleId']!,
+              returnPath: state.uri.queryParameters['from'] == 'reports' ? '/reports' : '/',
+            ),
+          ),
+        ],
+      );
+      addTearDown(router.dispose);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            receiptDataProvider('sale-1').overrideWith((ref) async => data),
+            sessionProvider.overrideWith(_Session.new),
+          ],
+          child: MaterialApp.router(routerConfig: router),
+        ),
+      );
+      await tester.pumpAndSettle();
+      return router;
+    }
+
+    testWidgets('has a back arrow even though nothing is underneath, and it goes where the receipt came from', (tester) async {
+      await open(tester);
+      expect(find.byKey(const Key('receipt-back')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('receipt-back')));
+      await tester.pumpAndSettle();
+      expect(find.text('REPORTS PAGE'), findsOneWidget);
+    });
+
+    testWidgets('has a Dashboard button that goes home', (tester) async {
+      await open(tester);
+      expect(find.byTooltip('Dashboard (Alt+Home)'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('receipt-dashboard')));
+      await tester.pumpAndSettle();
+      expect(find.text('DASHBOARD PAGE'), findsOneWidget);
+    });
+
+    testWidgets('a receipt that came from a sale goes back to the dashboard', (tester) async {
+      await open(tester, from: 'home');
+      await tester.tap(find.byKey(const Key('receipt-back')));
+      await tester.pumpAndSettle();
+      expect(find.text('DASHBOARD PAGE'), findsOneWidget);
+    });
+
+    testWidgets('New Sale says its key on hover', (tester) async {
+      await open(tester);
+      expect(find.byTooltip('New sale (F2)'), findsOneWidget);
+    });
+  });
 }
