@@ -207,6 +207,22 @@ class ShopHarness {
     return result.when(ok: (s) => s, failure: (m) => throw StateError(m));
   }
 
+  /// A split sale: [cash] collected up front, the rest by M-Pesa prompt (as the cart screen does it), then confirmed paid.
+  Future<Sale> sellSplit(List<CartItem> cart, int cash, {int discount = 0}) async {
+    final begun = await checkout.beginPaystackSale(
+      cart: cart,
+      discount: Money(discount),
+      saleType: 'retail',
+      userId: cashier.id,
+      saleNumber: await checkout.generateSaleNumber(),
+      paystackReference: 'PAYSTACK-REF-TEST',
+      cashReceived: Money(cash),
+    );
+    final sale = begun.when(ok: (s) => s, failure: (m) => throw StateError(m));
+    await checkout.finalizePaystackSale(sale.id);
+    return (await sales.findById(sale.id))!;
+  }
+
   Future<ActionApproval> approvalFor(User who) async {
     current = who;
     return security.approveWithPasswordOnly(
