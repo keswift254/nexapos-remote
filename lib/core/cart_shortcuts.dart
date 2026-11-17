@@ -7,7 +7,7 @@ import 'package:flutter/widgets.dart' show ShortcutActivator, SingleActivator;
 /// (typing in the search box, the phone number, or nowhere at all). The cart screen registers what each key does
 /// while it is on screen; with no cart open the keys do nothing at all.
 ///
-///  * F8                 switch between Cash and M-Pesa Prompt
+///  * F8                 switch the payment method: Cash, M-Pesa Prompt, M-Pesa Till/Paybill
 ///  * F9 or Ctrl+Enter   complete the sale (cash) / send the M-Pesa prompt (M-Pesa Prompt)
 class CartShortcuts {
   CartShortcuts._();

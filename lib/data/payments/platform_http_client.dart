@@ -27,7 +27,11 @@ const nexaposPlatformBaseUrl =
 class PaystackException implements Exception {
   final String message;
   final int? statusCode;
-  const PaystackException(this.message, {this.statusCode});
+
+  /// The whole answer the server refused with, when there was one: some refusals carry more than words (a
+  /// machine-readable `reason`, an amount) that a caller may need.
+  final Map<String, dynamic>? body;
+  const PaystackException(this.message, {this.statusCode, this.body});
 
   @override
   String toString() => message;
@@ -152,6 +156,7 @@ Future<Map<String, dynamic>> platformRequest(
         'The payments server rejected the request.',
       ),
       statusCode: response.statusCode,
+      body: decoded,
     );
   }
   return decoded;

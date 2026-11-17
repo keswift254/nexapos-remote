@@ -608,7 +608,7 @@ class _NexaPosAppState extends ConsumerState<NexaPosApp>
                 builder: (context) => AlertDialog(
                   title: const Text('Keyboard controls'),
                   content: const Text(
-                    'Tab / Shift+Tab: next / previous control\nEnter or Space: activate a button\nArrow keys: choose menu options\nEsc: close a dialog or go back\nF2: new sale\nF4: cart\nAlt+Home: dashboard\nAlt+Left: back\nIn the cart:\nF8: switch between Cash and M-Pesa Prompt\nF9 or Ctrl+Enter: complete the sale / send the M-Pesa prompt\nF1: this help',
+                    'Tab / Shift+Tab: next / previous control\nEnter or Space: activate a button\nArrow keys: choose menu options\nEsc: close a dialog or go back\nF2: new sale\nF4: cart\nAlt+Home: dashboard\nAlt+Left: back\nIn the cart:\nF8: switch the payment method (Cash, M-Pesa Prompt, M-Pesa Till/Paybill)\nF9 or Ctrl+Enter: complete the sale / send the M-Pesa prompt\nF1: this help',
                   ),
                   actions: [
                     TextButton(

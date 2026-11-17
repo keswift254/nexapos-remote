@@ -109,6 +109,22 @@ void main() {
       expect(decoded, contains('Thank you for shopping with us!'));
       expect(decoded, isNot(contains('Thank you for shopping with us\n')));
     });
+
+    test('an M-Pesa (Manual) sale - paid to the shop\'s till or paybill - prints the customer\'s M-Pesa code as Reference', () async {
+      final data = buildData(paperWidthMm: 58);
+      final till = ReceiptData(
+        sale: data.sale.copyWith(paymentMethod: 'mpesa_manual'),
+        items: data.items,
+        settings: data.settings,
+        cashierName: data.cashierName,
+        mpesaReference: 'UKH3R3NLTU',
+      );
+      final decoded = latin1.decode(await buildThermalReceipt(till), allowInvalid: true);
+      expect(decoded, contains('Payment: M-Pesa (Manual)'));
+      expect(decoded, contains('Reference: UKH3R3NLTU'));
+      final cash = latin1.decode(await buildThermalReceipt(data), allowInvalid: true);
+      expect(cash, isNot(contains('Reference:')), reason: 'no reference line on other sales');
+    });
   });
 
   group('buildTestTicket', () {

@@ -111,6 +111,8 @@ Future<Uint8List> buildThermalReceipt(ReceiptData data) async {
   bytes.addAll(generator.hr());
 
   bytes.addAll(generator.text('${data.paymentLabel}: ${sale.paymentMethodLabel}'));
+  final reference = data.mpesaReference;
+  if (reference != null) bytes.addAll(generator.text('Reference: $reference'));
   if (sale.isRefund) {
     final split = data.refundSplit;
     if (split != null) {

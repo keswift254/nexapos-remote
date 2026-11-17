@@ -8,6 +8,7 @@ import '../../domain/entities/product.dart';
 import '../../domain/services/checkout_service.dart';
 import '../../domain/services/paystack_payment_service.dart';
 import '../../domain/services/session_service.dart';
+import '../../domain/services/till_sale_service.dart';
 import '../dashboard/dashboard_screen.dart';
 import '../products/products_screen.dart' show allProductsProvider;
 import 'add_item_actions.dart';
@@ -16,6 +17,7 @@ import 'cart_state.dart';
 import 'held_sales_notifier.dart';
 import 'held_sales_sheet.dart';
 import 'paystack_waiting_screen.dart';
+import 'till_payments_panel.dart';
 
 // IntaSend deliberately removed from here, not from CheckoutService/
 // IntaSendPaymentService/IntaSendWaitingScreen - those stay, since a sale
@@ -23,7 +25,13 @@ import 'paystack_waiting_screen.dart';
 // before this change) still needs to read/reconcile correctly. This map
 // is the one and only place a cashier can newly choose it, so removing
 // the entry here is the whole of "remove the option".
-const _paymentMethodLabels = {'cash': 'Cash', 'paystack': 'M-Pesa Prompt'};
+//
+// 'mpesa_manual' is "M-Pesa Till/Paybill": the customer paid the shop's own till or paybill, the cashier picks their payment
+// (passed on by the shop phone) and the code is checked with the shop's server before the sale is saved (TillSaleService).
+const _paymentMethodLabels = {'cash': 'Cash', 'paystack': 'M-Pesa Prompt', 'mpesa_manual': 'M-Pesa Till/Paybill'};
+
+/// F8 goes round the payment methods in this order.
+const _paymentCycle = ['cash', 'paystack', 'mpesa_manual'];
 
 /// Cart review + checkout details. Cash completes
 /// immediately through CheckoutService; paystack hands off to its own
@@ -47,6 +55,10 @@ class _CartScreenState extends ConsumerState<CartScreen> {
   // received for cash. Each is drawn for one method only, and the two are never on screen together.
   final _phoneFocus = FocusNode();
   final _cashFocus = FocusNode();
+  // M-Pesa Till/Paybill: the customer's M-Pesa code (tapped in the list, or typed), and the list itself.
+  final _tillCodeController = TextEditingController();
+  final _tillCodeFocus = FocusNode();
+  final _tillPanelKey = GlobalKey<TillPaymentsPanelState>();
   String _query = '';
   bool _submitting = false;
 
@@ -65,6 +77,8 @@ class _CartScreenState extends ConsumerState<CartScreen> {
     CartShortcuts.unregister(this);
     _phoneFocus.dispose();
     _cashFocus.dispose();
+    _tillCodeFocus.dispose();
+    _tillCodeController.dispose();
     _discountController.dispose();
     _cashReceivedController.dispose();
     _phoneController.dispose();
@@ -79,6 +93,8 @@ class _CartScreenState extends ConsumerState<CartScreen> {
     ref.read(cartProvider.notifier).setPaymentMethod(method);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      // For M-Pesa Till/Paybill the cashier usually taps the customer's payment in the list, so no keyboard is opened.
+      if (method == 'mpesa_manual') return;
       (method == 'paystack' ? _phoneFocus : _cashFocus).requestFocus();
     });
   }
@@ -86,10 +102,11 @@ class _CartScreenState extends ConsumerState<CartScreen> {
   /// Keys act on this cart only while it is the screen being looked at (not while a dialog or another page is on top).
   bool get _isOnTop => ModalRoute.of(context)?.isCurrent ?? false;
 
-  /// F8: Cash <-> M-Pesa Prompt.
+  /// F8: Cash -> M-Pesa Prompt -> M-Pesa Till/Paybill -> Cash.
   void _switchPaymentFromKeyboard() {
     if (!mounted || !_isOnTop || _submitting) return;
-    _choosePayment(ref.read(cartProvider).paymentMethod == 'paystack' ? 'cash' : 'paystack');
+    final at = _paymentCycle.indexOf(ref.read(cartProvider).paymentMethod);
+    _choosePayment(_paymentCycle[(at + 1) % _paymentCycle.length]);
   }
 
   /// F9 / Ctrl+Enter: exactly what the big button at the bottom does for the chosen method.
@@ -182,6 +199,7 @@ class _CartScreenState extends ConsumerState<CartScreen> {
     if (held == null || !mounted) return;
     _discountController.clear();
     _cashReceivedController.clear();
+    _tillCodeController.clear();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('Sale held as "${held.label}". Find it under Held sales.')),
     );
@@ -235,6 +253,10 @@ class _CartScreenState extends ConsumerState<CartScreen> {
   }) async {
     if (paymentMethod == 'paystack' && !usePaymentPage && !looksLikeMpesaNumber(ref.read(cartProvider).customerPhone)) {
       _showError('Enter the customer\'s M-Pesa number, like 0712 345 678.');
+      return;
+    }
+    if (paymentMethod == 'mpesa_manual') {
+      await _submitTill(cart, userId);
       return;
     }
     setState(() => _submitting = true);
@@ -338,6 +360,59 @@ class _CartScreenState extends ConsumerState<CartScreen> {
       },
       failure: (message) => _showError(message),
     );
+  }
+
+  /// M-Pesa Till/Paybill: the shop's server is asked to use the customer's code on this sale, then the sale is saved. A
+  /// payment bigger than the sale (or one whose amount could not be read) is asked about first.
+  Future<void> _submitTill(CartNotifier cart, String userId, {bool acceptAmount = false}) async {
+    setState(() => _submitting = true);
+    final state = ref.read(cartProvider);
+    final outcome = await ref.read(tillSaleServiceProvider).complete(
+      cart: state.items,
+      discount: state.discount,
+      saleType: state.saleType,
+      userId: userId,
+      typedCode: _tillCodeController.text,
+      acceptAmount: acceptAmount,
+    );
+    if (!mounted) return;
+    setState(() => _submitting = false);
+    switch (outcome) {
+      case TillSaleDone():
+        cart.clear();
+        _tillCodeController.clear();
+        ref.invalidate(dashboardDataProvider);
+        final messenger = ScaffoldMessenger.of(context);
+        context.go('/');
+        context.push('/receipt/${outcome.sale.id}');
+        if (outcome.change.cents > 0) {
+          messenger.showSnackBar(SnackBar(
+            duration: const Duration(seconds: 10),
+            content: Text('The customer paid ${outcome.payment.amount!.format()}. Give back ${outcome.change.format()} in cash.'),
+          ));
+        }
+      case TillSaleNeedsConfirmation():
+        final paid = outcome.paid;
+        final goAhead = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text(paid == null ? 'Amount not read' : 'The customer paid more'),
+            content: Text(paid == null
+                ? 'The amount in this M-Pesa message could not be read. Check the message on the shop phone. '
+                    'Did the customer pay at least ${outcome.total.format()}?'
+                : 'The customer paid ${paid.format()} for a sale of ${outcome.total.format()}. '
+                    'Give back ${(paid - outcome.total).format()} in cash and complete the sale?'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+              FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Complete the sale')),
+            ],
+          ),
+        );
+        if (goAhead == true && mounted) await _submitTill(cart, userId, acceptAmount: true);
+      case TillSaleRefused():
+        _showError(outcome.message);
+        if (outcome.refreshList) _tillPanelKey.currentState?.reload();
+    }
   }
 
   void _showError(String message) {
@@ -491,7 +566,7 @@ class _CartScreenState extends ConsumerState<CartScreen> {
             children: _paymentMethodLabels.entries
                 .map(
                   (entry) => Tooltip(
-                    message: 'Switch between Cash and M-Pesa Prompt (${CartShortcuts.switchPaymentHint})',
+                    message: 'Switch the payment method (${CartShortcuts.switchPaymentHint})',
                     child: ChoiceChip(
                       label: Text(entry.value),
                       selected: cartState.paymentMethod == entry.key,
@@ -541,6 +616,15 @@ class _CartScreenState extends ConsumerState<CartScreen> {
           _TotalsRow(label: 'Subtotal', value: cartState.subtotal),
           _TotalsRow(label: 'Discount', value: discount),
           _TotalsRow(label: 'Total', value: total, emphasize: true),
+          if (cartState.paymentMethod == 'mpesa_manual') ...[
+            const SizedBox(height: 16),
+            TillPaymentsPanel(
+              key: _tillPanelKey,
+              codeController: _tillCodeController,
+              codeFocus: _tillCodeFocus,
+              total: total,
+            ),
+          ],
           if (cartState.paymentMethod == 'cash') ...[
             const SizedBox(height: 16),
             TextField(

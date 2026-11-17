@@ -112,6 +112,7 @@ Future<Uint8List> buildReceiptPdf(ReceiptData data, PdfPageFormat _) async {
             ),
             solidDivider(),
             pw.Text('${data.paymentLabel}: ${sale.paymentMethodLabel}'),
+            if (data.mpesaReference case final reference?) pw.Text('Reference: $reference'),
             if (sale.isRefund) ...[
               if (data.refundSplit case final split?) ...[
                 _amountRow('Cash back', split.cash.format(currency: data.settings.currency), font),

@@ -182,12 +182,11 @@ class CartNotifier extends _$CartNotifier {
   void setDiscount(Money discount) => state = state.copyWith(discount: discount);
 
   void setPaymentMethod(String method) {
-    // 'intasend' retired alongside 'mpesa'/'mpesa_manual' - no cashier
-    // can select it anymore (cart_screen.dart's picker no longer offers
-    // it), so a new cart should never be settable to it either. Already
-    // recorded/still-pending 'intasend' sales are untouched by this -
-    // this only governs new cart state, never historical data.
-    if (method != 'cash' && method != 'paystack') return;
+    // 'intasend' and 'mpesa' are retired - no cashier can select them anymore (cart_screen.dart's picker no longer offers
+    // them), so a new cart is never settable to them either. Already recorded/still-pending sales are untouched by this -
+    // this only governs new cart state, never historical data. 'mpesa_manual' is back as "M-Pesa Till/Paybill": the
+    // customer paid the shop's own till or paybill, and the code is checked with the shop's server (TillSaleService).
+    if (method != 'cash' && method != 'paystack' && method != 'mpesa_manual') return;
     state = state.copyWith(paymentMethod: method);
   }
 

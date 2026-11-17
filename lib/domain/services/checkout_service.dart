@@ -185,6 +185,10 @@ class CheckoutService {
     // a cashier from completing a legitimate sale (a partial/rounded
     // payment, a correction, etc.).
     Money? cashReceived,
+    // Given only by the M-Pesa Till/Paybill flow (TillSaleService): the shop's server is asked to use the customer's
+    // M-Pesa code on THIS sale before it is saved, so the sale's id and number must exist first. Null: made here.
+    String? saleId,
+    String? saleNumber,
   }) async {
     if (!saleTypes.contains(saleType)) {
       return const Result.failure('Select a valid sale type.');
@@ -205,13 +209,13 @@ class CheckoutService {
     final isExternal =
         paymentMethod == 'mpesa' || paymentMethod == 'mpesa_manual';
     final totals = _computeTotals(validated.subtotal, discount);
-    final saleNumber = await generateSaleNumber();
-    final saleId = _idGenerator.newId();
+    final number = saleNumber ?? await generateSaleNumber();
+    final id = saleId ?? _idGenerator.newId();
     final trimmedPhone = customerPhone.trim();
 
     final sale = Sale(
-      id: saleId,
-      saleNumber: saleNumber,
+      id: id,
+      saleNumber: number,
       userId: userId,
       customerName: customerName.trim().isEmpty
           ? 'Walk-in customer'
@@ -232,13 +236,13 @@ class CheckoutService {
     try {
       await _db.transaction(() async {
         await _saleRepository.create(sale);
-        await _insertItemsAndStock(saleId, saleNumber, validated.items, userId);
+        await _insertItemsAndStock(id, number, validated.items, userId);
         if (isExternal) {
           final trimmedNote = referenceNote?.trim();
           await _paymentRecordRepository.create(
             PaymentRecord(
               id: '',
-              saleId: saleId,
+              saleId: id,
               method: paymentMethod,
               amount: totals.total,
               referenceNote: (trimmedNote == null || trimmedNote.isEmpty)

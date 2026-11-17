@@ -24,7 +24,7 @@ import 'package:nexapos_mobile/features/checkout/cart_notifier.dart';
 import 'package:nexapos_mobile/features/checkout/cart_screen.dart';
 import 'package:nexapos_mobile/features/products/products_screen.dart';
 
-/// The cashier's keyboard in the cart: F8 switches Cash <-> M-Pesa Prompt, F9 (or Ctrl+Enter) does what the big button does,
+/// The cashier's keyboard in the cart: F8 goes round the payment methods (Cash, M-Pesa Prompt, M-Pesa Till/Paybill), F9 (or Ctrl+Enter) does what the big button does,
 /// choosing M-Pesa Prompt puts the cursor in the customer's number, and the hover hints name the keys.
 class _Session extends SessionNotifier {
   @override
@@ -104,6 +104,8 @@ class _RecordingCheckout implements CheckoutService {
     String? referenceNote,
     required String userId,
     Money? cashReceived,
+    String? saleId,
+    String? saleNumber,
   }) async {
     sales.add((paymentMethod: paymentMethod, cashReceived: cashReceived));
     return const Result.failure('Pretend the sale was refused.');
@@ -171,13 +173,18 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('F8 switches Cash -> M-Pesa Prompt -> Cash, and back again each time', (tester) async {
+  testWidgets('F8 goes round Cash -> M-Pesa Prompt -> M-Pesa Till/Paybill -> Cash, and round again', (tester) async {
     await pumpCart(tester);
     expect(methodOf(), 'cash');
 
     await pressKey(tester, LogicalKeyboardKey.f8);
     expect(methodOf(), 'paystack');
     expect(find.text('Send M-Pesa prompt'), findsOneWidget);
+
+    await pressKey(tester, LogicalKeyboardKey.f8);
+    expect(methodOf(), 'mpesa_manual');
+    expect(find.text('Complete Sale'), findsOneWidget);
+    expect(find.byKey(const Key('till-code')), findsOneWidget, reason: 'the till payments and the code box are shown');
 
     await pressKey(tester, LogicalKeyboardKey.f8);
     expect(methodOf(), 'cash');
@@ -207,8 +214,9 @@ void main() {
 
   testWidgets('going back to Cash puts the cursor in the cash received field', (tester) async {
     await pumpCart(tester);
-    await pressKey(tester, LogicalKeyboardKey.f8);
-    await pressKey(tester, LogicalKeyboardKey.f8);
+    await pressKey(tester, LogicalKeyboardKey.f8); // M-Pesa Prompt
+    await pressKey(tester, LogicalKeyboardKey.f8); // M-Pesa Till/Paybill
+    await pressKey(tester, LogicalKeyboardKey.f8); // Cash
 
     final cash = tester.widget<TextField>(find.widgetWithText(TextField, 'Cash received (optional)'));
     expect(cash.focusNode!.hasPrimaryFocus, isTrue);
@@ -356,7 +364,8 @@ void main() {
     await pumpCart(tester);
 
     final chipTips = tester.widgetList<Tooltip>(find.ancestor(of: find.byType(ChoiceChip), matching: find.byType(Tooltip)));
-    expect(chipTips.map((t) => t.message), contains('Switch between Cash and M-Pesa Prompt (F8)'));
+    expect(chipTips.map((t) => t.message), contains('Switch the payment method (F8)'));
+    expect(chipTips, hasLength(3), reason: 'Cash, M-Pesa Prompt and M-Pesa Till/Paybill');
 
     final bottom = tester.widget<Tooltip>(find.ancestor(of: find.widgetWithText(FilledButton, 'Complete Sale'), matching: find.byType(Tooltip)).first);
     expect(bottom.message, 'Complete the sale (F9 or Ctrl+Enter)');

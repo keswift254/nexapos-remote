@@ -12,6 +12,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import 'browser_print.dart';
 import '../../data/printing/thermal_printer_service.dart';
+import '../../data/repositories/payment_record_repository_impl.dart';
 import '../../data/repositories/sale_item_repository_impl.dart';
 import '../../data/repositories/sale_repository_impl.dart';
 import '../../data/repositories/business_settings_repository_impl.dart';
@@ -37,6 +38,10 @@ class ReceiptData {
   /// On an ordinary sale: how much of it has been refunded so far (a positive amount, zero when none).
   final Money refundedTotal;
 
+  /// On an M-Pesa (Manual) sale - paid to the shop's own till or paybill - the customer's M-Pesa code, printed as
+  /// "Reference" (null otherwise).
+  final String? mpesaReference;
+
   const ReceiptData({
     required this.sale,
     required this.items,
@@ -44,6 +49,7 @@ class ReceiptData {
     required this.cashierName,
     this.originalSaleNumber,
     this.refundedTotal = const Money.zero(),
+    this.mpesaReference,
   });
 
   bool get isRefund => sale.isRefund;
@@ -78,6 +84,11 @@ Future<ReceiptData> receiptData(Ref ref, String saleId) async {
     final refunds = await ref.watch(saleRepositoryProvider).refundsOf(saleId);
     refunded = Money(refunds.fold<int>(0, (sum, r) => sum - r.total.cents));
   }
+  String? reference;
+  if (!sale.isRefund && sale.paymentMethod == 'mpesa_manual') {
+    final note = (await ref.watch(paymentRecordRepositoryProvider).forSale(saleId))?.referenceNote?.trim();
+    if (note != null && note.isNotEmpty) reference = note;
+  }
   return ReceiptData(
     sale: sale,
     items: items,
@@ -85,6 +96,7 @@ Future<ReceiptData> receiptData(Ref ref, String saleId) async {
     cashierName: cashier?.name ?? 'Unknown',
     originalSaleNumber: originalNumber,
     refundedTotal: refunded,
+    mpesaReference: reference,
   );
 }
 
@@ -347,6 +359,7 @@ class _ReceiptBody extends StatelessWidget {
           ),
           const _SolidDivider(),
           Text('${data.paymentLabel}: ${sale.paymentMethodLabel}'),
+          if (data.mpesaReference case final reference?) Text('Reference: $reference'),
           if (sale.isRefund) ...[
             if (data.refundSplit case final split?) ...[
               _AmountRow('Cash back', split.cash.format(currency: data.settings.currency)),
