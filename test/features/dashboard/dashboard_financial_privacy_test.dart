@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 
 import 'package:nexapos_mobile/core/utils/money.dart';
 import 'package:nexapos_mobile/domain/entities/user.dart';
@@ -8,6 +9,7 @@ import 'package:nexapos_mobile/domain/entities/user_role.dart';
 import 'package:nexapos_mobile/domain/services/reports_service.dart';
 import 'package:nexapos_mobile/domain/services/session_service.dart';
 import 'package:nexapos_mobile/features/dashboard/dashboard_screen.dart';
+import 'package:nexapos_mobile/features/settings/settings_menu_screen.dart';
 
 class _Session extends SessionNotifier {
   @override
@@ -81,7 +83,14 @@ void main() {
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const MaterialApp(home: DashboardScreen()),
+          child: MaterialApp.router(
+            routerConfig: GoRouter(
+              routes: [
+                GoRoute(path: '/', builder: (_, _) => const DashboardScreen()),
+                GoRoute(path: '/settings', builder: (_, _) => const SettingsMenuScreen()),
+              ],
+            ),
+          ),
         ),
       );
       await tester.pumpAndSettle();
@@ -95,7 +104,7 @@ void main() {
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
       expect(find.text('Backup & Restore'), findsOneWidget);
-      await tester.tapAt(const Offset(1, 1));
+      await tester.pageBack();
       await tester.pumpAndSettle();
 
       await tester.tap(find.byTooltip('Show financial values').first);

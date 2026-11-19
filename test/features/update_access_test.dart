@@ -15,6 +15,8 @@ import 'package:nexapos_mobile/domain/services/session_service.dart';
 import 'package:nexapos_mobile/domain/services/update_service.dart';
 import 'package:nexapos_mobile/features/settings/payment_settings_screen.dart'
     show currentPaymentCredentialsProvider;
+import 'package:nexapos_mobile/features/settings/settings_menu_screen.dart';
+
 import '../support/fake_secure_storage.dart';
 
 class _Session extends SessionNotifier {
@@ -99,6 +101,12 @@ void main() {
       // may happen again on later navigation in this same test; what
       // actually matters is that each explicit tap below adds exactly
       // one more call of its own.
+      // Software Update is the last row: on a short screen the list scrolls to it.
+      await tester.scrollUntilVisible(
+        find.text('Software Update'),
+        100,
+        scrollable: find.descendant(of: find.byType(SettingsMenuScreen), matching: find.byType(Scrollable)),
+      );
       final checksBeforeFirstTap = updates.checks;
       await tester.tap(find.text('Software Update'));
       await tester.pumpAndSettle();

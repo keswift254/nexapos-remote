@@ -45,6 +45,7 @@ import 'features/settings/device_sync_screen.dart';
 import 'features/settings/license_screen.dart';
 import 'features/settings/region_time_screen.dart';
 import 'features/settings/till_phone_screen.dart';
+import 'features/settings/settings_menu_screen.dart';
 import 'features/settings/update_screen.dart';
 import 'features/expenses/expenses_screen.dart';
 import 'features/reports/reports_screen.dart';
@@ -223,6 +224,10 @@ GoRouter router(Ref ref) {
       GoRoute(
         path: '/payment-settings',
         builder: (context, state) => const PaymentSettingsScreen(),
+      ),
+      GoRoute(
+        path: '/settings',
+        builder: (context, state) => const SettingsMenuScreen(),
       ),
       GoRoute(
         path: '/till-phone',

@@ -258,10 +258,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     }
   }
 
-  void _handleSettingsAction(String action) {
-    context.push(action);
-  }
-
   /// Desktop has no pull-to-refresh gesture, so Windows gets an explicit
   /// button for the same thing Android's pull-to-refresh does below
   /// (`onRefresh: () async => ref.invalidate(dashboardDataProvider)`) -
@@ -331,53 +327,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
             onPressed: () => context.push('/reports'),
           ),
           if (user != null)
-            PopupMenuButton<String>(
+            IconButton(
               icon: const Icon(Icons.settings_outlined),
               tooltip: 'Settings',
-              onSelected: _handleSettingsAction,
-              itemBuilder: (context) => [
-                const PopupMenuItem(
-                  value: '/privacy-settings',
-                  child: Text('Security & Privacy'),
-                ),
-                if (user.role == UserRole.admin)
-                  const PopupMenuItem(
-                    value: '/business-settings',
-                    child: Text('Business, Receipts & Themes'),
-                  ),
-                if (user.role == UserRole.admin)
-                  const PopupMenuItem(
-                    value: '/payment-settings',
-                    child: Text('Payments & Payouts'),
-                  ),
-                if (user.role == UserRole.admin)
-                  const PopupMenuItem(
-                    value: '/till-phone',
-                    child: Text('M-Pesa Till Phone'),
-                  ),
-                if (user.role == UserRole.admin)
-                  const PopupMenuItem(
-                    value: '/device-sync',
-                    child: Text('Sync & Invites'),
-                  ),
-                if (user.role == UserRole.admin)
-                  const PopupMenuItem(
-                    value: '/connected-devices',
-                    child: Text('Devices in This Shop'),
-                  ),
-                if (user.role == UserRole.admin)
-                  const PopupMenuItem(value: '/backup', child: Text('Backup & Restore')),
-                if (user.role == UserRole.admin)
-                  const PopupMenuItem(
-                    value: '/region-time',
-                    child: Text('Date, Time & Region'),
-                  ),
-                const PopupMenuItem(value: '/license', child: Text('My License')),
-                const PopupMenuItem(
-                  value: '/update',
-                  child: Text('Software Update'),
-                ),
-              ],
+              onPressed: () => context.push('/settings'),
             ),
           // Support sits exactly between Settings and Users & Roles so it is
           // reachable by every logged-in cashier/manager/admin without hiding
