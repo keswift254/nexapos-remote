@@ -64,9 +64,9 @@ class _Credentials implements PaystackCredentialsService {
 
 /// The shop's list of payments: [lists] counts how often it was asked.
 class _Inbox extends PaymentInboxGateway {
-  _Inbox(this.payments, {this.phones = 1, this.offline = false});
+  _Inbox(this.payments, {this.phoneCount = 1, this.offline = false});
   List<TillPayment> payments;
-  int phones;
+  int phoneCount;
   bool offline;
   int lists = 0;
   final archived = <String>[];
@@ -76,7 +76,7 @@ class _Inbox extends PaymentInboxGateway {
   Future<({List<TillPayment> payments, int phones})> list({required String baseUrl, required String apiKey, int hours = 24}) async {
     lists++;
     if (offline) throw const PaystackOfflineException();
-    return (payments: payments, phones: phones);
+    return (payments: payments, phones: phoneCount);
   }
 
   @override
@@ -153,7 +153,7 @@ void main() {
           received('USED1PAYM3', 10000, 'ALREADY USED', used: true),
           const TillPayment(code: 'TYP3DCODE1', messageReceived: false, usedOnSaleNumber: 'N-2'),
           received('EX4CT10000', 10000, 'EXACT PAYER'),
-        ], phones: phones, offline: offline);
+        ], phoneCount: phones, offline: offline);
     till = _Till();
     container = ProviderContainer(
       overrides: [

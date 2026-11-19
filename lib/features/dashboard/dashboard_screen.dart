@@ -352,6 +352,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                   ),
                 if (user.role == UserRole.admin)
                   const PopupMenuItem(
+                    value: '/till-phone',
+                    child: Text('M-Pesa Till Phone'),
+                  ),
+                if (user.role == UserRole.admin)
+                  const PopupMenuItem(
                     value: '/device-sync',
                     child: Text('Sync & Invites'),
                   ),

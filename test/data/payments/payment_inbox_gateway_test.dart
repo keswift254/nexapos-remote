@@ -192,6 +192,92 @@ void main() {
     });
   });
 
+  group('phones', () {
+    Map<String, dynamic> phoneJson(int id, String label) => {
+          'id': id,
+          'label': label,
+          'added_by': 'owner',
+          'added_at': '2026-11-17T11:16:00Z',
+          'last_message_at': id == 3 ? '2026-11-17T11:52:00Z' : null,
+        };
+
+    test('the list: phones with when they were added and last heard from; rows without a real id are left out', () async {
+      final result = await gateway(200, {
+        'success': true,
+        'max_phones': 5,
+        'phones': [phoneJson(3, "Mama's iPhone"), phoneJson(4, 'Spare'), {'id': '5', 'label': 'text id'}, 'x'],
+      }).phones(baseUrl: base, apiKey: key);
+      expect(requests.single.method, 'GET');
+      expect(requests.single.url.queryParameters, {'action': 'payment_inbox_sources'});
+      expect(requests.single.headers['Authorization'], 'Bearer device-key');
+      expect(result.max, 5);
+      expect(result.phones.map((p) => p.label), ["Mama's iPhone", 'Spare']);
+      expect(result.phones.first.lastMessageAt, DateTime.utc(2026, 11, 17, 11, 52));
+      expect(result.phones.last.lastMessageAt, isNull);
+      expect(result.phones.first.addedBy, 'owner');
+    });
+
+    test('the most phones defaults to 5 when the shop does not say; an unreadable list is refused', () async {
+      expect((await gateway(200, {'success': true, 'phones': []}).phones(baseUrl: base, apiKey: key)).max, 5);
+      await expectLater(gateway(200, {'success': true}).phones(baseUrl: base, apiKey: key), throwsA(isA<PaystackException>()));
+    });
+
+    test('setting a phone up sends the name, who asks and their password, and gives back the key, the phone and the address', () async {
+      final made = await gateway(201, {'success': true, 'key': 'npk_0123456789abcdef0123456789abcdef0123456789abcdef', 'phone': phoneJson(9, 'Shop iPhone')})
+          .addPhone(baseUrl: base, apiKey: key, label: 'Shop iPhone', userId: 'admin-1', password: 'pw');
+      expect(requests.single.method, 'POST');
+      expect(requests.single.url.queryParameters, {'action': 'payment_inbox_add_source'});
+      expect(jsonDecode(requests.single.body), {'label': 'Shop iPhone', 'user_id': 'admin-1', 'password': 'pw'});
+      expect(made.key, 'npk_0123456789abcdef0123456789abcdef0123456789abcdef');
+      expect(made.phone.id, 9);
+      expect(made.address, '$base?action=payment_inbox_ingest');
+      expect(made.setupPageLink, 'https://nexapos.cc/lite/phone.html#k=npk_0123456789abcdef0123456789abcdef0123456789abcdef');
+    });
+
+    test('a key that is not a key, or no phone with it, is never passed off as one', () async {
+      for (final body in [
+        {'success': true, 'key': 'npk_short', 'phone': phoneJson(9, 'P')},
+        {'success': true, 'key': 'NPK_0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF', 'phone': phoneJson(9, 'P')},
+        {'success': true, 'phone': phoneJson(9, 'P')},
+        {'success': true, 'key': 'npk_0123456789abcdef0123456789abcdef0123456789abcdef'},
+        {'success': true, 'key': 'npk_0123456789abcdef0123456789abcdef0123456789abcdef', 'phone': {'id': 0, 'label': 'P'}},
+      ]) {
+        await expectLater(
+          gateway(201, body).addPhone(baseUrl: base, apiKey: key, label: 'P', userId: 'a', password: 'p'),
+          throwsA(isA<PaystackException>().having((e) => e.message, 'message', contains('cannot read'))),
+          reason: '$body',
+        );
+      }
+    });
+
+    test('the shop\'s refusals keep its own words (wrong password, locked, not an administrator, too many)', () async {
+      for (final refusal in [
+        (403, 'wrong_password', 'That password is not right.'),
+        (429, 'locked', 'Too many wrong passwords. Wait 10 minutes and try again.'),
+        (403, 'not_admin', 'Only an administrator of the shop can do this.'),
+        (409, 'too_many', 'This shop already has 5 phones set up. Remove one first.'),
+      ]) {
+        final body = {'success': false, 'reason': refusal.$2, 'message': refusal.$3};
+        await expectLater(
+          gateway(refusal.$1, body).addPhone(baseUrl: base, apiKey: key, label: 'P', userId: 'a', password: 'p'),
+          throwsA(isA<PaystackException>().having((e) => e.message, 'message', refusal.$3)),
+        );
+        await expectLater(
+          gateway(refusal.$1, body).removePhone(baseUrl: base, apiKey: key, phoneId: 3, userId: 'a', password: 'p'),
+          throwsA(isA<PaystackException>().having((e) => e.message, 'message', refusal.$3)),
+        );
+      }
+    });
+
+    test('removing a phone sends which phone, who asks and their password, and reads the phones left', () async {
+      final left = await gateway(200, {'success': true, 'phones': [phoneJson(4, 'Spare')]})
+          .removePhone(baseUrl: base, apiKey: key, phoneId: 3, userId: 'admin-1', password: 'pw');
+      expect(requests.single.url.queryParameters, {'action': 'payment_inbox_remove_source'});
+      expect(jsonDecode(requests.single.body), {'phone_id': 3, 'user_id': 'admin-1', 'password': 'pw'});
+      expect(left.map((p) => p.id), [4]);
+    });
+  });
+
   group('archive', () {
     test('sends the code and whether to archive it, and reads when it was archived', () async {
       final archived = await gateway(200, {'success': true, 'payment': {...paymentJson('ARCH1VED11'), 'archived_at': '2026-11-18T09:00:00Z'}})

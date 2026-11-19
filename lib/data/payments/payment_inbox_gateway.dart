@@ -97,6 +97,46 @@ DateTime? _instant(Object? value) {
   return DateTime.tryParse(value.trim())?.toUtc();
 }
 
+/// A phone that passes the shop's M-Pesa payment messages on (Settings > M-Pesa Till Phone). Its key is never listed.
+class TillPhone {
+  const TillPhone({required this.id, required this.label, this.addedBy = '', this.addedAt, this.lastMessageAt});
+
+  final int id;
+  final String label;
+  final String addedBy;
+  final DateTime? addedAt;
+
+  /// When this phone last passed a message on (any message, a payment or not); null when it never has.
+  final DateTime? lastMessageAt;
+
+  factory TillPhone.fromJson(Map<String, dynamic> json) => TillPhone(
+        id: json['id'] is int ? json['id'] as int : 0,
+        label: _text(json['label']),
+        addedBy: _text(json['added_by']),
+        addedAt: _instant(json['added_at']),
+        lastMessageAt: _instant(json['last_message_at']),
+      );
+}
+
+List<TillPhone> _phones(Object? rows) => [
+      if (rows is List)
+        for (final row in rows)
+          if (row is Map) TillPhone.fromJson(row.cast<String, dynamic>()),
+    ].where((phone) => phone.id > 0).toList();
+
+/// What setting a phone up gives back - ONCE: the shop keeps only a fingerprint of the key.
+class TillPhoneKey {
+  const TillPhoneKey({required this.key, required this.phone, required this.address});
+  final String key;
+  final TillPhone phone;
+
+  /// Where the phone sends each message.
+  final String address;
+
+  /// The page the phone opens (by scanning a code) to be set up: the key goes after the #, which is never sent to a server.
+  String get setupPageLink => 'https://nexapos.cc/lite/phone.html#k=$key';
+}
+
 /// What the platform said no to when a code was to be used on a sale.
 class TillClaimRefused implements Exception {
   const TillClaimRefused(this.reason, this.message, {this.paidAmount});
@@ -234,6 +274,77 @@ class PaymentInboxGateway {
       throw const PaystackException('The shop server sent an answer this device cannot read.');
     }
     return read;
+  }
+
+  /// The shop's phones, and the most it may have.
+  Future<({List<TillPhone> phones, int max})> phones({required String baseUrl, required String apiKey}) async {
+    final Map<String, dynamic> response;
+    try {
+      response = await platformRequest(_client, 'GET', 'payment_inbox_sources', baseUrl, apiKey: apiKey);
+    } on PaystackException catch (e) {
+      throw _plain(e);
+    }
+    if (response['phones'] is! List) {
+      throw const PaystackException('The shop server sent a list of phones this device cannot read. Try again later.');
+    }
+    final max = response['max_phones'];
+    return (phones: _phones(response['phones']), max: max is int && max > 0 ? max : 5);
+  }
+
+  /// Sets a phone up. [userId] and [password] are the administrator's own: the SHOP checks them (whoever holds a key
+  /// could pass on a made-up payment). The key comes back this once only.
+  Future<TillPhoneKey> addPhone({
+    required String baseUrl,
+    required String apiKey,
+    required String label,
+    required String userId,
+    required String password,
+  }) async {
+    final Map<String, dynamic> response;
+    try {
+      response = await platformRequest(
+        _client,
+        'POST',
+        'payment_inbox_add_source',
+        baseUrl,
+        apiKey: apiKey,
+        body: {'label': label, 'user_id': userId, 'password': password},
+      );
+    } on PaystackException catch (e) {
+      throw _plain(e);
+    }
+    final key = response['key'];
+    final phone = response['phone'];
+    final read = phone is Map ? TillPhone.fromJson(phone.cast<String, dynamic>()) : null;
+    if (key is! String || !RegExp(r'^npk_[a-f0-9]{48}$').hasMatch(key) || read == null || read.id <= 0) {
+      throw const PaystackException(
+          'The shop server sent a key this device cannot read. Remove the new phone from the list and set it up again.');
+    }
+    return TillPhoneKey(key: key, phone: read, address: '$baseUrl?action=payment_inbox_ingest');
+  }
+
+  /// Removes a phone (its key stops working at once). Same password rule as [addPhone]. Returns the phones left.
+  Future<List<TillPhone>> removePhone({
+    required String baseUrl,
+    required String apiKey,
+    required int phoneId,
+    required String userId,
+    required String password,
+  }) async {
+    final Map<String, dynamic> response;
+    try {
+      response = await platformRequest(
+        _client,
+        'POST',
+        'payment_inbox_remove_source',
+        baseUrl,
+        apiKey: apiKey,
+        body: {'phone_id': phoneId, 'user_id': userId, 'password': password},
+      );
+    } on PaystackException catch (e) {
+      throw _plain(e);
+    }
+    return _phones(response['phones']);
   }
 
   /// Gives a code back (its sale was not saved after all). Best effort: a failure only leaves that code blocked.
