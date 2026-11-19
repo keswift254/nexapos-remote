@@ -110,12 +110,13 @@ class _Till implements TillSaleService {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
-TillPayment received(String code, int cents, String payer, {bool used = false}) => TillPayment(
+TillPayment received(String code, int cents, String payer, {bool used = false, Duration? ago}) => TillPayment(
       code: code,
       messageReceived: true,
       amount: Money(cents),
       payerName: payer,
       paidAtText: '18/11/26 1:05 PM',
+      receivedAt: ago == null ? null : DateTime.now().toUtc().subtract(ago),
       usedOnSaleNumber: used ? 'N-1' : null,
     );
 
@@ -140,7 +141,14 @@ void main() {
   late _Till till;
 
   /// The cart with 2 x 50.00 (total 100.00) and M-Pesa Till/Paybill chosen.
-  Future<void> pumpCart(WidgetTester tester, {List<TillPayment>? payments, int phones = 1, bool offline = false, bool connected = true}) async {
+  Future<void> pumpCart(
+    WidgetTester tester, {
+    List<TillPayment>? payments,
+    int phones = 1,
+    bool offline = false,
+    bool connected = true,
+    List<TillSaleOutcome> answers = const [],
+  }) async {
     tester.view.physicalSize = const Size(1200, 2600);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -154,7 +162,7 @@ void main() {
           const TillPayment(code: 'TYP3DCODE1', messageReceived: false, usedOnSaleNumber: 'N-2'),
           received('EX4CT10000', 10000, 'EXACT PAYER'),
         ], phoneCount: phones, offline: offline);
-    till = _Till();
+    till = _Till()..answers = [...answers];
     container = ProviderContainer(
       overrides: [
         sessionProvider.overrideWith(_Session.new),
@@ -200,18 +208,116 @@ void main() {
     expect(find.widgetWithText(FilledButton, 'Complete Sale'), findsOneWidget);
   });
 
-  testWidgets('only the payments that arrived and no sale used are listed; the one equal to the total is marked', (tester) async {
+  testWidgets('only the payment of the sale total is shown; other amounts only when asked for; used or unarrived never', (tester) async {
     await pumpCart(tester);
-    expect(find.byKey(const Key('till-payment-NEW1PAYM3N')), findsOneWidget);
     expect(find.byKey(const Key('till-payment-EX4CT10000')), findsOneWidget);
-    expect(find.byKey(const Key('till-payment-USED1PAYM3')), findsNothing, reason: 'used on another sale');
-    expect(find.byKey(const Key('till-payment-TYP3DCODE1')), findsNothing, reason: 'no message arrived for it');
-    expect(find.text('JACINTA OMWENGA'), findsOneWidget);
-    expect(find.text('KES 610.00'), findsOneWidget);
     final exact = find.byKey(const Key('till-payment-EX4CT10000'));
     expect(find.descendant(of: exact, matching: find.textContaining('the sale total', findRichText: true)), findsOneWidget);
+    expect(find.byKey(const Key('till-payment-NEW1PAYM3N')), findsNothing, reason: 'another amount is not suggested');
+    expect(find.text('Customer paid a different amount? Show the other payments (1)'), findsOneWidget);
+    expect(till.calls, isEmpty, reason: 'a payment with no arrival time never completes a sale by itself');
+    await tester.tap(find.byKey(const Key('till-others')));
+    await tester.pump();
+    expect(find.byKey(const Key('till-payment-NEW1PAYM3N')), findsOneWidget);
+    expect(find.text('Payments of other amounts:'), findsOneWidget);
+    expect(find.text('JACINTA OMWENGA'), findsOneWidget);
+    expect(find.text('KES 610.00'), findsOneWidget);
     final other = find.byKey(const Key('till-payment-NEW1PAYM3N'));
     expect(find.descendant(of: other, matching: find.textContaining('the sale total', findRichText: true)), findsNothing);
+    expect(find.byKey(const Key('till-payment-USED1PAYM3')), findsNothing, reason: 'used on another sale');
+    expect(find.byKey(const Key('till-payment-TYP3DCODE1')), findsNothing, reason: 'no message arrived for it');
+    await tester.tap(find.byKey(const Key('till-others')));
+    await tester.pump();
+    expect(find.byKey(const Key('till-payment-NEW1PAYM3N')), findsNothing, reason: 'hidden again');
+  });
+
+  testWidgets('the ONLY new payment of the sale total completes the sale by itself and shows the receipt', (tester) async {
+    till.answers = [];
+    await pumpCart(tester, payments: [
+      received('AUT0PAYM3N', 10000, 'NEW PAYER', ago: const Duration(minutes: 1)),
+      received('NEW1PAYM3N', 61000, 'JACINTA OMWENGA', ago: Duration.zero),
+    ], answers: [TillSaleDone(soldFor(10000), received('AUT0PAYM3N', 10000, 'NEW PAYER'))]);
+    expect(till.calls.single, (code: 'AUT0PAYM3N', acceptAmount: false, items: 1));
+    expect(find.text('Receipt sale-1'), findsOneWidget);
+    expect(container.read(cartProvider).isEmpty, isTrue);
+  });
+
+  testWidgets('two payments of the sale total: the cashier chooses; nothing is completed by itself', (tester) async {
+    await pumpCart(tester, payments: [
+      received('TW0PAYM3NA', 10000, 'FIRST PAYER', ago: Duration.zero),
+      received('TW0PAYM3NB', 10000, 'SECOND PAYER', ago: const Duration(minutes: 2)),
+    ], answers: [TillSaleDone(soldFor(10000), received('TW0PAYM3NB', 10000, 'SECOND PAYER'))]);
+    await tester.pump(const Duration(seconds: 9));
+    await tester.pump();
+    expect(till.calls, isEmpty);
+    expect(find.byKey(const Key('till-choose')), findsOneWidget);
+    expect(find.textContaining('2 payments of KES 100.00 have arrived'), findsOneWidget);
+    expect(find.byKey(const Key('till-payment-TW0PAYM3NA')), findsOneWidget);
+    expect(find.byKey(const Key('till-payment-TW0PAYM3NB')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('till-payment-TW0PAYM3NB')));
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'Complete Sale'));
+    await tester.pumpAndSettle();
+    expect(till.calls.single.code, 'TW0PAYM3NB');
+    expect(find.text('Receipt sale-1'), findsOneWidget);
+  });
+
+  testWidgets("a lone payment over 10 minutes old is only suggested: it may be an earlier customer's", (tester) async {
+    await pumpCart(tester, payments: [received('0LDPAYM3NT', 10000, 'EARLIER PAYER', ago: const Duration(minutes: 20))]);
+    await tester.pump(const Duration(seconds: 9));
+    await tester.pump();
+    expect(till.calls, isEmpty);
+    expect(find.byKey(const Key('till-older')), findsOneWidget);
+    expect(find.textContaining('arrived more than 10 minutes ago'), findsOneWidget);
+    expect(find.byKey(const Key('till-payment-0LDPAYM3NT')), findsOneWidget);
+  });
+
+  testWidgets('a payment that arrives while the cart waits completes the sale on the next refresh', (tester) async {
+    await pumpCart(tester, payments: const [], answers: [TillSaleDone(soldFor(10000), received('LAT3ARR1VE', 10000, 'LATE PAYER'))]);
+    expect(find.byKey(const Key('till-waiting')), findsOneWidget);
+    expect(find.textContaining('Waiting for a payment of KES 100.00'), findsOneWidget);
+    inbox.payments = [received('LAT3ARR1VE', 10000, 'LATE PAYER', ago: Duration.zero)];
+    await tester.pump(const Duration(seconds: 9));
+    await tester.pumpAndSettle();
+    expect(till.calls.single.code, 'LAT3ARR1VE');
+    expect(find.text('Receipt sale-1'), findsOneWidget);
+  });
+
+  testWidgets('a change to the total that makes a new payment fit completes the sale', (tester) async {
+    await pumpCart(tester, payments: [received('D1SCOUNT90', 9000, 'DISCOUNT PAYER', ago: Duration.zero)],
+        answers: [TillSaleDone(soldFor(9000), received('D1SCOUNT90', 9000, 'DISCOUNT PAYER'))]);
+    expect(till.calls, isEmpty, reason: '90.00 does not fit a sale of 100.00');
+    await tester.enterText(find.widgetWithText(TextField, 'Discount'), '10');
+    await tester.pumpAndSettle();
+    expect(till.calls.single.code, 'D1SCOUNT90');
+    expect(find.text('Receipt sale-1'), findsOneWidget);
+  });
+
+  testWidgets('a refused automatic try is said once and not repeated every refresh', (tester) async {
+    await pumpCart(tester, payments: [received('R3FUS3DPAY', 10000, 'TAKEN PAYER', ago: Duration.zero)],
+        answers: [const TillSaleRefused('This M-Pesa code was already used on sale ABC-1.', refreshList: true)]);
+    expect(till.calls, hasLength(1));
+    expect(find.text('This M-Pesa code was already used on sale ABC-1.'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 9));
+    await tester.pump(const Duration(seconds: 9));
+    await tester.pumpAndSettle();
+    expect(till.calls, hasLength(1), reason: 'the same payment is not tried again by itself');
+    // even once the cashier empties the code box, that payment is not tried again by itself
+    await tester.enterText(find.byKey(const Key('till-code')), '');
+    await tester.pump(const Duration(seconds: 9));
+    await tester.pumpAndSettle();
+    expect(till.calls, hasLength(1), reason: 'an emptied box does not start the refused payment again');
+    expect(container.read(cartProvider).isEmpty, isFalse, reason: 'nothing was sold');
+  });
+
+  testWidgets('a code the cashier typed is left alone: nothing is completed by itself', (tester) async {
+    await pumpCart(tester, payments: const []);
+    await tester.enterText(find.byKey(const Key('till-code')), 'MYC0DE1234');
+    inbox.payments = [received('N3WFITT1NG', 10000, 'NEW PAYER', ago: Duration.zero)];
+    await tester.pump(const Duration(seconds: 9));
+    await tester.pumpAndSettle();
+    expect(till.calls, isEmpty);
+    expect(codeTyped(tester), 'MYC0DE1234');
   });
 
   testWidgets('tapping a payment puts its code in the box', (tester) async {
@@ -250,6 +356,8 @@ void main() {
       const TillSaleNeedsConfirmation(paid: Money(61000), total: Money(10000)),
       TillSaleDone(soldFor(10000), received('NEW1PAYM3N', 61000, 'JACINTA OMWENGA')),
     ];
+    await tester.tap(find.byKey(const Key('till-others')));
+    await tester.pump();
     await tester.tap(find.byKey(const Key('till-payment-NEW1PAYM3N')));
     await tester.pump();
     await tester.tap(find.widgetWithText(FilledButton, 'Complete Sale'));
@@ -321,6 +429,10 @@ void main() {
       received('NEW1PAYM3N', 61000, 'JACINTA OMWENGA'),
       TillPayment(code: 'ARCH1VED11', messageReceived: true, amount: const Money(10000), payerName: 'OLD PAYER', archivedAt: DateTime.utc(2026, 11, 18)),
     ]);
+    expect(find.byKey(const Key('till-payment-ARCH1VED11')), findsNothing, reason: 'not even as the sale total');
+    expect(find.byKey(const Key('till-waiting')), findsOneWidget, reason: 'nothing of 100.00 left to suggest');
+    await tester.tap(find.byKey(const Key('till-others')));
+    await tester.pump();
     expect(find.byKey(const Key('till-payment-NEW1PAYM3N')), findsOneWidget);
     expect(find.byKey(const Key('till-payment-ARCH1VED11')), findsNothing);
   });
@@ -340,7 +452,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(inbox.archived, ['EX4CT10000']);
     expect(find.byKey(const Key('till-payment-EX4CT10000')), findsNothing);
-    expect(find.byKey(const Key('till-payment-NEW1PAYM3N')), findsOneWidget, reason: 'the others stay');
+    expect(find.text('Customer paid a different amount? Show the other payments (1)'), findsOneWidget, reason: 'the others stay');
     expect(find.textContaining('Archived: EXACT PAYER'), findsOneWidget);
     expect(codeTyped(tester), '', reason: 'the code of the archived payment is taken out of the box');
   });

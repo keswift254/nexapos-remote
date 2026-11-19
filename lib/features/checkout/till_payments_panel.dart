@@ -8,22 +8,30 @@ import '../../core/utils/money.dart';
 import '../../data/payments/payment_inbox_gateway.dart';
 import '../../data/payments/platform_http_client.dart';
 import '../../domain/services/paystack_credentials_service.dart';
+import '../../domain/services/till_matches.dart';
 
-/// "M-Pesa Till/Paybill" in the cart: the payments the shop phone passed on that no sale has used yet (newest first, the
-/// one equal to the sale total marked), refreshed by itself every few seconds while it is on screen. A tap puts that
-/// payment's M-Pesa code in [codeController]; the code can also be typed.
+/// "M-Pesa Till/Paybill" in the cart: the payments the shop phone passed on that no sale has used yet, refreshed by itself
+/// every few seconds while it is on screen. Only the ones of exactly the sale total are shown (newest first); the ONLY one
+/// of that amount, if it is new, is handed to [onAutoPay] so the sale completes by itself (see [tillMatches]). Two or more
+/// are for the cashier to choose from: a tap puts that payment's M-Pesa code in [codeController], and the rest stay
+/// suggested for the next sales until used or archived. Payments of other amounts are shown only when asked for. The code
+/// can also be typed.
 class TillPaymentsPanel extends ConsumerStatefulWidget {
   const TillPaymentsPanel({
     super.key,
     required this.codeController,
     required this.codeFocus,
     required this.total,
+    this.onAutoPay,
     this.refreshEvery = const Duration(seconds: 8),
   });
 
   final TextEditingController codeController;
   final FocusNode codeFocus;
   final Money total;
+
+  /// Completes the sale with this payment. Null while it must not (a sale is being completed): nothing is tried then.
+  final ValueChanged<TillPayment>? onAutoPay;
   final Duration refreshEvery;
 
   @override
@@ -36,6 +44,10 @@ class TillPaymentsPanelState extends ConsumerState<TillPaymentsPanel> {
   int? _phones;
   String? _problem;
   bool _loading = false;
+  bool _showOthers = false;
+
+  /// Payments already handed to [TillPaymentsPanel.onAutoPay] here: a refusal is said once, not tried every few seconds.
+  final _tried = <String>{};
 
   @override
   void initState() {
@@ -43,6 +55,13 @@ class TillPaymentsPanelState extends ConsumerState<TillPaymentsPanel> {
     widget.codeController.addListener(_codeChanged);
     reload();
     _timer = Timer.periodic(widget.refreshEvery, (_) => reload());
+  }
+
+  @override
+  void didUpdateWidget(TillPaymentsPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // a changed cart (or a sale no longer being completed) may make a payment fit now
+    if (oldWidget.total != widget.total || (oldWidget.onAutoPay == null && widget.onAutoPay != null)) _autoPayLater();
   }
 
   @override
@@ -54,6 +73,19 @@ class TillPaymentsPanelState extends ConsumerState<TillPaymentsPanel> {
 
   void _codeChanged() {
     if (mounted) setState(() {});
+  }
+
+  void _autoPayLater() => WidgetsBinding.instance.addPostFrameCallback((_) => _autoPay());
+
+  /// Hands the one new payment of exactly the sale total over - unless the cashier picked or typed a code.
+  void _autoPay() {
+    final onAutoPay = widget.onAutoPay;
+    final payments = _payments;
+    if (!mounted || onAutoPay == null || payments == null) return;
+    if (widget.codeController.text.trim().isNotEmpty) return;
+    final auto = tillMatches(payments, widget.total, DateTime.now()).auto;
+    if (auto == null || !_tried.add(auto.code)) return;
+    onAutoPay(auto);
   }
 
   /// Loads the list again (also called by the cart when a code turned out to be used or not there).
@@ -80,6 +112,7 @@ class TillPaymentsPanelState extends ConsumerState<TillPaymentsPanel> {
         _phones = result.phones;
         _problem = null;
       });
+      _autoPayLater();
     } on PaystackOfflineException {
       if (mounted) {
         setState(() {
@@ -155,17 +188,80 @@ class TillPaymentsPanelState extends ConsumerState<TillPaymentsPanel> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  Widget _row(ThemeData theme, TillPayment payment, String? picked) {
+    return Dismissible(
+      key: Key('till-swipe-${payment.code}'),
+      direction: DismissDirection.endToStart,
+      confirmDismiss: (_) => _confirmArchive(payment),
+      onDismissed: (_) => _archived(payment),
+      background: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        alignment: Alignment.centerRight,
+        decoration: BoxDecoration(color: theme.colorScheme.error, borderRadius: BorderRadius.circular(12)),
+        child: Text('Archive', style: TextStyle(color: theme.colorScheme.onError, fontWeight: FontWeight.w700)),
+      ),
+      child: Card(
+        key: Key('till-payment-${payment.code}'),
+        margin: const EdgeInsets.only(bottom: 6),
+        color: payment.code == picked ? theme.colorScheme.primaryContainer : null,
+        shape: payment.code == picked
+            ? RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(color: theme.colorScheme.primary, width: 2),
+              )
+            : null,
+        child: ListTile(
+          dense: true,
+          title: Text(payment.payerName.isEmpty ? 'M-Pesa payment' : payment.payerName),
+          subtitle: Text.rich(
+            TextSpan(
+              children: [
+                TextSpan(
+                  text: [
+                    payment.code,
+                    if (payment.paidAtText.isNotEmpty)
+                      payment.paidAtText
+                    else if (payment.receivedAt != null)
+                      _time.format(payment.receivedAt!.toLocal()),
+                  ].join(' · '),
+                ),
+                if (payment.amount != null && payment.amount == widget.total)
+                  TextSpan(
+                    text: ' · the sale total',
+                    style: TextStyle(color: Colors.green.shade800, fontWeight: FontWeight.w600),
+                  ),
+              ],
+            ),
+          ),
+          trailing: Text(
+            payment.amount?.format() ?? '?',
+            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          onTap: () {
+            widget.codeController.text = payment.code;
+            setState(() {});
+          },
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final picked = normalizeMpesaCode(widget.codeController.text);
     final payments = _payments;
+    final total = widget.total;
+    final fit = payments == null ? null : tillMatches(payments, total, DateTime.now());
+    final shown = fit == null ? const <TillPayment>[] : [...fit.matches, if (_showOthers) ...fit.others];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          'The customer pays your M-Pesa till or paybill from their phone. Their payment shows here a few seconds after the '
-          'M-Pesa message reaches your shop phone: tap it, then Complete Sale. Needs the internet.',
+          'The customer pays your M-Pesa till or paybill from their phone. When their payment of the sale total reaches your '
+          'shop phone, the sale completes by itself. If two or more payments of that amount have arrived, tap the '
+          "customer's one, then Complete Sale. Needs the internet.",
           style: theme.textTheme.bodySmall,
         ),
         const SizedBox(height: 8),
@@ -184,72 +280,66 @@ class TillPaymentsPanelState extends ConsumerState<TillPaymentsPanel> {
               style: TextStyle(color: theme.colorScheme.error),
             ),
           ),
-        if (payments == null)
+        if (fit == null)
           const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Text('Loading the payments...'))
-        else if (payments.isEmpty)
+        else if (total.cents <= 0)
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 8),
-            child: Text('No new payment yet. It shows here a few seconds after the M-Pesa message reaches the shop phone.'),
+            child: Text('Add items to the sale: the payment of its total shows here.'),
           )
-        else
-          for (final payment in payments)
-            Dismissible(
-              key: Key('till-swipe-${payment.code}'),
-              direction: DismissDirection.endToStart,
-              confirmDismiss: (_) => _confirmArchive(payment),
-              onDismissed: (_) => _archived(payment),
-              background: Container(
-                margin: const EdgeInsets.only(bottom: 6),
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                alignment: Alignment.centerRight,
-                decoration: BoxDecoration(color: theme.colorScheme.error, borderRadius: BorderRadius.circular(12)),
-                child: Text('Archive', style: TextStyle(color: theme.colorScheme.onError, fontWeight: FontWeight.w700)),
-              ),
-              child: Card(
-              key: Key('till-payment-${payment.code}'),
-              margin: const EdgeInsets.only(bottom: 6),
-              color: payment.code == picked ? theme.colorScheme.primaryContainer : null,
-              shape: payment.code == picked
-                  ? RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      side: BorderSide(color: theme.colorScheme.primary, width: 2),
-                    )
-                  : null,
-              child: ListTile(
-                dense: true,
-                title: Text(payment.payerName.isEmpty ? 'M-Pesa payment' : payment.payerName),
-                subtitle: Text.rich(
-                  TextSpan(
-                    children: [
-                      TextSpan(
-                        text: [
-                          payment.code,
-                          if (payment.paidAtText.isNotEmpty)
-                            payment.paidAtText
-                          else if (payment.receivedAt != null)
-                            _time.format(payment.receivedAt!.toLocal()),
-                        ].join(' · '),
-                      ),
-                      if (payment.amount != null && payment.amount == widget.total)
-                        TextSpan(
-                          text: ' · the sale total',
-                          style: TextStyle(color: Colors.green.shade800, fontWeight: FontWeight.w600),
-                        ),
-                    ],
-                  ),
-                ),
-                trailing: Text(
-                  payment.amount?.format() ?? '?',
-                  style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-                ),
-                onTap: () {
-                  widget.codeController.text = payment.code;
-                  setState(() {});
-                },
-              ),
+        else if (fit.matches.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text(
+              'Waiting for a payment of ${total.format()}. It shows here a few seconds after the M-Pesa message reaches the '
+              'shop phone.',
+              key: const Key('till-waiting'),
             ),
+          )
+        else if (fit.matches.length > 1)
+          Container(
+            key: const Key('till-choose'),
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.tertiaryContainer,
+              borderRadius: BorderRadius.circular(12),
             ),
-        if (payments != null && payments.isNotEmpty)
+            child: Text(
+              '${fit.matches.length} payments of ${total.format()} have arrived. Tap the one this customer made, then '
+              'Complete Sale. The others stay here for the next sales.',
+              style: TextStyle(color: theme.colorScheme.onTertiaryContainer),
+            ),
+          )
+        else if (fit.auto == null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              'This payment of ${total.format()} arrived more than ${tillAutoWindow.inMinutes} minutes ago, so it may be an '
+              "earlier customer's. If it is this customer's, tap it, then Complete Sale.",
+              key: const Key('till-older'),
+            ),
+          ),
+        for (var i = 0; i < shown.length; i++) ...[
+          if (fit != null && i == fit.matches.length)
+            Padding(
+              padding: const EdgeInsets.only(top: 4, bottom: 4),
+              child: Text('Payments of other amounts:', style: theme.textTheme.bodySmall),
+            ),
+          _row(theme, shown[i], picked),
+        ],
+        if (fit != null && fit.others.isNotEmpty)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              key: const Key('till-others'),
+              onPressed: () => setState(() => _showOthers = !_showOthers),
+              child: Text(_showOthers
+                  ? 'Hide the payments of other amounts'
+                  : 'Customer paid a different amount? Show the other payments (${fit.others.length})'),
+            ),
+          ),
+        if (shown.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 2),
             child: Text('Swipe a payment to the left to archive it: it is no longer suggested here.', style: theme.textTheme.bodySmall),

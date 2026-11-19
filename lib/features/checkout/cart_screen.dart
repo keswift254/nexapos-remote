@@ -623,6 +623,13 @@ class _CartScreenState extends ConsumerState<CartScreen> {
               codeController: _tillCodeController,
               codeFocus: _tillCodeFocus,
               total: total,
+              // the one new payment of exactly the total completes the sale by itself (never while one is being completed)
+              onAutoPay: (_submitting || cartState.isEmpty || userId == null)
+                  ? null
+                  : (payment) {
+                      _tillCodeController.text = payment.code;
+                      _submitTill(cart, userId);
+                    },
             ),
           ],
           if (cartState.paymentMethod == 'cash') ...[

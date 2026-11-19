@@ -199,6 +199,7 @@ void main() {
           'added_by': 'owner',
           'added_at': '2026-11-17T11:16:00Z',
           'last_message_at': id == 3 ? '2026-11-17T11:52:00Z' : null,
+          'sender_check': id == 3 ? true : 'yes',
         };
 
     test('the list: phones with when they were added and last heard from; rows without a real id are left out', () async {
@@ -215,6 +216,8 @@ void main() {
       expect(result.phones.first.lastMessageAt, DateTime.utc(2026, 11, 17, 11, 52));
       expect(result.phones.last.lastMessageAt, isNull);
       expect(result.phones.first.addedBy, 'owner');
+      expect(result.phones.first.senderCheck, isTrue);
+      expect(result.phones.last.senderCheck, isFalse, reason: 'only a literal true from the shop counts');
     });
 
     test('the most phones defaults to 5 when the shop does not say; an unreadable list is refused', () async {

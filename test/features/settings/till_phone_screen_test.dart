@@ -94,12 +94,13 @@ void main() {
   late _Inbox inbox;
   String? copied;
 
-  Future<void> pump(WidgetTester tester, {UserRole role = UserRole.admin, bool connected = true}) async {
+  Future<void> pump(WidgetTester tester, {UserRole role = UserRole.admin, bool connected = true, List<TillPhone>? phones}) async {
     tester.view.physicalSize = const Size(1000, 2600);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     inbox = _Inbox();
+    if (phones != null) inbox.phoneList = phones;
     copied = null;
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
       if (call.method == 'Clipboard.setData') copied = (call.arguments as Map)['text'] as String?;
@@ -116,6 +117,16 @@ void main() {
     ));
     await tester.pumpAndSettle();
   }
+
+  testWidgets('each phone says whether its sender check is on', (tester) async {
+    await pump(tester, phones: [
+      TillPhone(id: 3, label: "Mama's iPhone", addedBy: 'owner', addedAt: DateTime.utc(2026, 11, 17, 11, 16), senderCheck: true),
+      const TillPhone(id: 4, label: 'Old Shortcut'),
+    ]);
+    expect(tester.widget<Text>(find.byKey(const Key('till-phone-sender-3'))).data, startsWith('Sender check on'));
+    expect(tester.widget<Text>(find.byKey(const Key('till-phone-sender-4'))).data, startsWith('Sender check off'));
+    expect(find.textContaining('add the "sender" field'), findsOneWidget);
+  });
 
   testWidgets('only an administrator gets the page', (tester) async {
     await pump(tester, role: UserRole.cashier);

@@ -285,13 +285,30 @@ class _TillPhoneScreenState extends ConsumerState<TillPhoneScreen> {
                         contentPadding: EdgeInsets.zero,
                         leading: const Icon(Icons.phone_iphone),
                         title: Text(phone.label),
-                        subtitle: Text([
-                          'Added${phone.addedBy.isEmpty ? '' : ' by ${phone.addedBy}'}'
-                              '${phone.addedAt == null ? '' : ' on ${_time.format(phone.addedAt!.toLocal())}'}',
-                          phone.lastMessageAt == null
-                              ? 'No message from this phone yet'
-                              : 'Last message: ${_time.format(phone.lastMessageAt!.toLocal())}',
-                        ].join('\n')),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text([
+                              'Added${phone.addedBy.isEmpty ? '' : ' by ${phone.addedBy}'}'
+                                  '${phone.addedAt == null ? '' : ' on ${_time.format(phone.addedAt!.toLocal())}'}',
+                              phone.lastMessageAt == null
+                                  ? 'No message from this phone yet'
+                                  : 'Last message: ${_time.format(phone.lastMessageAt!.toLocal())}',
+                            ].join('\n')),
+                            Text(
+                              phone.senderCheck
+                                  ? 'Sender check on: a message typed by a person and sent from their own number is never '
+                                      'taken as a payment.'
+                                  : 'Sender check off: add the "sender" field to this phone\'s Shortcut (see the set-up '
+                                      'page, step 2), so a message a person types and sends from their own number is never '
+                                      'taken as a payment.',
+                              key: Key('till-phone-sender-${phone.id}'),
+                              style: TextStyle(
+                                color: phone.senderCheck ? Colors.green.shade800 : theme.colorScheme.error,
+                              ),
+                            ),
+                          ],
+                        ),
                         trailing: OutlinedButton(
                           onPressed: _busy ? null : () => _remove(phone),
                           child: const Text('Remove'),

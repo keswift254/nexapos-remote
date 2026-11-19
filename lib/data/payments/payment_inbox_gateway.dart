@@ -99,7 +99,14 @@ DateTime? _instant(Object? value) {
 
 /// A phone that passes the shop's M-Pesa payment messages on (Settings > M-Pesa Till Phone). Its key is never listed.
 class TillPhone {
-  const TillPhone({required this.id, required this.label, this.addedBy = '', this.addedAt, this.lastMessageAt});
+  const TillPhone({
+    required this.id,
+    required this.label,
+    this.addedBy = '',
+    this.addedAt,
+    this.lastMessageAt,
+    this.senderCheck = false,
+  });
 
   final int id;
   final String label;
@@ -109,12 +116,17 @@ class TillPhone {
   /// When this phone last passed a message on (any message, a payment or not); null when it never has.
   final DateTime? lastMessageAt;
 
+  /// True once the phone's Shortcut passes on who each SMS came from: the shop then refuses a message a person typed and
+  /// sent from their own number (only a literal true from the shop counts).
+  final bool senderCheck;
+
   factory TillPhone.fromJson(Map<String, dynamic> json) => TillPhone(
         id: json['id'] is int ? json['id'] as int : 0,
         label: _text(json['label']),
         addedBy: _text(json['added_by']),
         addedAt: _instant(json['added_at']),
         lastMessageAt: _instant(json['last_message_at']),
+        senderCheck: json['sender_check'] == true,
       );
 }
 
