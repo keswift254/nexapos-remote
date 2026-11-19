@@ -16,7 +16,7 @@ class _Session extends SessionNotifier {
 
 void main() {
   testWidgets(
-    'checkout offers only Cash and M-Pesa Prompt, and ignores retired methods',
+    'checkout offers Cash, M-Pesa Prompt and M-Pesa Till/Paybill, and ignores retired methods',
     (tester) async {
       // CartNotifier now persists every change (see cart_notifier.dart) -
       // an in-memory database keeps this test's several rapid-fire
@@ -41,19 +41,23 @@ void main() {
       );
       expect(find.widgetWithText(ChoiceChip, 'Cash'), findsOneWidget);
       expect(find.widgetWithText(ChoiceChip, 'M-Pesa Prompt'), findsOneWidget);
+      // "M-Pesa Till/Paybill" (1.0.85): the customer paid the shop's own till or paybill, checked with the shop's server.
+      expect(find.widgetWithText(ChoiceChip, 'M-Pesa Till/Paybill'), findsOneWidget);
+      expect(find.byType(ChoiceChip), findsNWidgets(5), reason: 'Retail, Wholesale and the three payment methods - nothing else');
       expect(find.widgetWithText(ChoiceChip, 'IntaSend'), findsNothing);
       expect(find.text('M-Pesa'), findsNothing);
-      expect(find.text('M-Pesa Till'), findsNothing);
       await tester.ensureVisible(find.text('M-Pesa Prompt'));
       await tester.tap(find.text('M-Pesa Prompt'));
       await tester.pump();
       expect(container.read(cartProvider).paymentMethod, 'paystack');
+      // the retired methods cannot be chosen any more
       container.read(cartProvider.notifier).setPaymentMethod('mpesa');
-      expect(container.read(cartProvider).paymentMethod, 'paystack');
-      container.read(cartProvider.notifier).setPaymentMethod('mpesa_manual');
       expect(container.read(cartProvider).paymentMethod, 'paystack');
       container.read(cartProvider.notifier).setPaymentMethod('intasend');
       expect(container.read(cartProvider).paymentMethod, 'paystack');
+      // M-Pesa Till/Paybill can
+      container.read(cartProvider.notifier).setPaymentMethod('mpesa_manual');
+      expect(container.read(cartProvider).paymentMethod, 'mpesa_manual');
     },
   );
 }
