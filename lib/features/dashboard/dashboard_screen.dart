@@ -4,6 +4,7 @@ import '../../core/secure_storage_provider.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:drift/drift.dart' show TableUpdateQuery;
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -90,8 +91,44 @@ Stream<int> dashboardChangeTicker(Ref ref) {
   // Riverpod compares successive values. A void stream emits null every time,
   // suppressing all notifications after the first database change.
   var revision = 0;
-  return ref.watch(appDatabaseProvider).tableUpdates().map((_) => ++revision);
+  final db = ref.watch(appDatabaseProvider);
+  // Only the shop's own data changes the figures. Sync bookkeeping (device_meta: the change counter and the upload
+  // cursor) is written over and over while an upload is refused and retried, and every write used to recompute the
+  // whole dashboard - on a busy shop's old PC, all the time, so the till could hardly be used.
+  final updates = db.tableUpdates(TableUpdateQuery.onAllTables([
+    db.sales,
+    db.saleItems,
+    db.paymentRecords,
+    db.products,
+    db.stockMovements,
+    db.expenses,
+    db.categories,
+    db.users,
+    db.businessSettings,
+  ]));
+  // And a burst of them (a sync applying hundreds of rows) is one refresh, at most one every [dashboardRefreshGap]. A
+  // sale made here refreshes at once anyway: the cart invalidates the figures before it goes back to the dashboard.
+  final controller = StreamController<int>();
+  Timer? waiting;
+  final subscription = updates.listen((_) {
+    waiting ??= Timer(dashboardRefreshGap, () {
+      waiting = null;
+      if (!controller.isClosed) controller.add(++revision);
+    });
+  });
+  ref.onDispose(() {
+    waiting?.cancel();
+    subscription.cancel();
+    controller.close();
+  });
+  return controller.stream;
 }
+
+/// From this window width up the dashboard is laid out for a PC: everything on one screen (see DashboardScreen).
+const wideDashboardWidth = 900.0;
+
+/// The shortest time between two dashboard refreshes caused by changes to the shop's data in the background.
+const dashboardRefreshGap = Duration(seconds: 2);
 
 @Riverpod(keepAlive: true)
 Future<DashboardData> dashboardData(Ref ref) async {
@@ -289,6 +326,35 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     final cartState = ref.watch(cartProvider);
     final homeScreenInstall = ref.watch(homeScreenInstallProvider);
     final isWindows = defaultTargetPlatform == TargetPlatform.windows;
+    // A wide window (a PC or a laptop, or the web POS on one) shows everything on one screen: the buttons at the top,
+    // the four figures in one row. The owner, 2026-11-22: "show all its contents at a glance - I don't have to scroll
+    // down to access New Sale or Inventory". A phone or a narrow window keeps the long page it had.
+    final wide = MediaQuery.sizeOf(context).width >= wideDashboardWidth;
+    final newSaleButton = Tooltip(
+      message: 'New sale (F2)',
+      child: FilledButton.icon(
+        onPressed: () => context.push('/new-sale'),
+        icon: const Icon(Icons.point_of_sale),
+        label: const Text('New Sale'),
+      ),
+    );
+    final managementButtons = <Widget>[
+      FilledButton.tonalIcon(
+        onPressed: () => context.push('/products'),
+        icon: const Icon(Icons.inventory_2),
+        label: const Text('Inventory'),
+      ),
+      FilledButton.tonalIcon(
+        onPressed: () => context.push('/categories'),
+        icon: const Icon(Icons.category),
+        label: const Text('Categories'),
+      ),
+      FilledButton.tonalIcon(
+        onPressed: () => context.push('/expenses'),
+        icon: const Icon(Icons.receipt_long),
+        label: const Text('Expenses'),
+      ),
+    ];
 
     return Scaffold(
       appBar: AppBar(
@@ -391,6 +457,19 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                       ),
                     ],
                   ),
+                  if (wide) ...[
+                    const SizedBox(height: 8),
+                    Wrap(
+                      key: const Key('dashboard-actions-top'),
+                      spacing: 12,
+                      runSpacing: 12,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        newSaleButton,
+                        if (canManageInventory) ...managementButtons,
+                      ],
+                    ),
+                  ],
                   if (cartState.isNotEmpty) ...[
                     const SizedBox(height: 12),
                     Card(
@@ -524,6 +603,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                   ],
                   const SizedBox(height: 20),
                   dataAsync.when(
+                    // While new figures are worked out the ones on screen stay (with the buttons among them):
+                    // swapping them for a spinner on every refresh made the dashboard flicker and the buttons
+                    // vanish under a person's finger.
+                    skipLoadingOnReload: true,
                     loading: () => const Padding(
                       padding: EdgeInsets.symmetric(vertical: 40),
                       child: Center(child: CircularProgressIndicator()),
@@ -535,43 +618,21 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                     data: (data) => _DashboardStats(
                       data: data,
                       canManageInventory: canManageInventory,
+                      wide: wide,
                     ),
                   ),
-                  const SizedBox(height: 24),
-                  Center(
-                    child: Tooltip(
-                      message: 'New sale (F2)',
-                      child: FilledButton.icon(
-                        onPressed: () => context.push('/new-sale'),
-                        icon: const Icon(Icons.point_of_sale),
-                        label: const Text('New Sale'),
+                  if (!wide) ...[
+                    const SizedBox(height: 24),
+                    Center(child: newSaleButton),
+                    if (canManageInventory) ...[
+                      const SizedBox(height: 16),
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 12,
+                        alignment: WrapAlignment.center,
+                        children: managementButtons,
                       ),
-                    ),
-                  ),
-                  if (canManageInventory) ...[
-                    const SizedBox(height: 16),
-                    Wrap(
-                      spacing: 12,
-                      runSpacing: 12,
-                      alignment: WrapAlignment.center,
-                      children: [
-                        FilledButton.tonalIcon(
-                          onPressed: () => context.push('/products'),
-                          icon: const Icon(Icons.inventory_2),
-                          label: const Text('Inventory'),
-                        ),
-                        FilledButton.tonalIcon(
-                          onPressed: () => context.push('/categories'),
-                          icon: const Icon(Icons.category),
-                          label: const Text('Categories'),
-                        ),
-                        FilledButton.tonalIcon(
-                          onPressed: () => context.push('/expenses'),
-                          icon: const Icon(Icons.receipt_long),
-                          label: const Text('Expenses'),
-                        ),
-                      ],
-                    ),
+                    ],
                   ],
                   const SizedBox(height: 16),
                 ],
@@ -605,7 +666,10 @@ class _DashboardStats extends StatefulWidget {
   final DashboardData data;
   final bool canManageInventory;
 
-  const _DashboardStats({required this.data, required this.canManageInventory});
+  /// A wide window: the four figures in one row (see [wideDashboardWidth]).
+  final bool wide;
+
+  const _DashboardStats({required this.data, required this.canManageInventory, this.wide = false});
 
   @override
   State<_DashboardStats> createState() => _DashboardStatsState();
@@ -662,11 +726,7 @@ class _DashboardStatsState extends State<_DashboardStats> {
     final data = widget.data;
     final today = data.today;
     const hiddenValue = '******';
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        AdaptivePair(
-          child: Row(
+    final todayRow = Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Expanded(
@@ -699,11 +759,8 @@ class _DashboardStatsState extends State<_DashboardStats> {
                 ),
               ),
             ],
-          ),
-        ),
-        const SizedBox(height: 12),
-        AdaptivePair(
-          child: Row(
+    );
+    final stockRow = Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Expanded(
@@ -731,8 +788,24 @@ class _DashboardStatsState extends State<_DashboardStats> {
                 ),
               ),
             ],
-          ),
-        ),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (widget.wide)
+          // A wide window: the four figures in one row, so the whole dashboard fits on one screen.
+          IntrinsicHeight(
+            key: const Key('dashboard-figures-one-row'),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [...todayRow.children, const SizedBox(width: 12), ...stockRow.children],
+            ),
+          )
+        else ...[
+          AdaptivePair(child: todayRow),
+          const SizedBox(height: 12),
+          AdaptivePair(child: stockRow),
+        ],
         const SizedBox(height: 12),
         SalesTrendCard(points: data.last7Days, financialsVisible: _financialsVisible),
       ],

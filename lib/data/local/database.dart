@@ -30,6 +30,9 @@ import 'sync_metadata.dart';
 
 part 'database.g.dart';
 
+/// While this row is in local_safety_state, the updated_at backstop triggers stay off (see AppDatabase.keepingUpdatedAt).
+const _keepUpdatedAtFlag = 'keep_updated_at';
+
 /// Tables that use [SyncedColumns] (i.e. everything except [DeviceMeta]).
 /// Used to generate the updatedAt backstop triggers below - this list
 /// must be kept in sync with the `tables:` list on [AppDatabase] minus
@@ -118,7 +121,8 @@ class AppDatabase extends _$AppDatabase {
           // seed rows must survive a retry, and new seed writes are atomic.
           await transaction(() async {
             await m.createAll();
-            await _createUpdatedAtTriggers();
+            // The updated_at triggers are made in beforeOpen (on every open, so an existing install gets today's
+            // version of them too): they read local_safety_state, which beforeOpen makes first.
             await _seedDeviceMeta();
             await _seedRoles();
             await _seedDefaultBusinessSettings();
@@ -161,6 +165,9 @@ class AppDatabase extends _$AppDatabase {
         },
         beforeOpen: (details) async {
           await customStatement('CREATE TABLE IF NOT EXISTS local_safety_state (id TEXT PRIMARY KEY, value TEXT NOT NULL)');
+          // A flag left by a write that never finished must not keep the updated_at backstop off (see keepingUpdatedAt).
+          await customStatement("DELETE FROM local_safety_state WHERE id='$_keepUpdatedAtFlag'");
+          await _createUpdatedAtTriggers();
           for (final table in allTables.where((t) => t.actualTableName != 'device_meta')) {
             for (final operation in ['INSERT', 'UPDATE', 'DELETE']) {
               await customStatement('''CREATE TRIGGER IF NOT EXISTS safety_${table.actualTableName}_$operation
@@ -203,6 +210,22 @@ class AppDatabase extends _$AppDatabase {
         },
       );
 
+  /// Runs [body] in one transaction with the updated_at backstop (see
+  /// [_createUpdatedAtTriggers]) held off: for writes that change only what this
+  /// device keeps for itself - a product's stock count - or a row's change
+  /// number, never what the row says. Such a write must not make the row look
+  /// newly edited to the shop's other devices or to the server.
+  Future<T> keepingUpdatedAt<T>(Future<T> Function() body) => transaction(() async {
+        await customStatement(
+          "INSERT OR REPLACE INTO local_safety_state(id, value) VALUES('$_keepUpdatedAtFlag', '1')",
+        );
+        try {
+          return await body();
+        } finally {
+          await customStatement("DELETE FROM local_safety_state WHERE id='$_keepUpdatedAtFlag'");
+        }
+      });
+
   /// A bare Migrator.addColumn throws "duplicate column name" if the
   /// column is already there, and that is a real state, not a
   /// hypothetical: SQLite records the schema version only after the whole
@@ -241,12 +264,22 @@ class AppDatabase extends _$AppDatabase {
   /// trigger firing, but sync makes updated_at string comparison
   /// cross-device-correctness-load-bearing rather than just a display
   /// value, so it's worth being exactly right now.
+  ///
+  /// Not for a write made inside [keepingUpdatedAt]: a product's stock count or
+  /// a row's change number is not an edit of the row, and stamping it made the
+  /// row look newly edited - to the shop's other devices (they keep the newest
+  /// copy of a row by updated_at, so a price change made elsewhere could be
+  /// dropped as "older") and to the server (a change sent again no longer
+  /// matched the copy it holds, and was refused for good). Dropped and made
+  /// again on every open, so every install has this version.
   Future<void> _createUpdatedAtTriggers() async {
     for (final table in _syncedTableNames) {
+      await customStatement('DROP TRIGGER IF EXISTS trg_${table}_updated_at');
       await customStatement('''
-        CREATE TRIGGER IF NOT EXISTS trg_${table}_updated_at
+        CREATE TRIGGER trg_${table}_updated_at
         AFTER UPDATE ON $table
         WHEN NEW.updated_at = OLD.updated_at
+          AND NOT EXISTS (SELECT 1 FROM local_safety_state WHERE id = '$_keepUpdatedAtFlag')
         BEGIN
           UPDATE $table
           SET updated_at = strftime('%Y-%m-%dT%H:%M:%f', 'now') || '000Z'

@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:drift/drift.dart' show QueryRow, Variable;
+import 'package:drift/drift.dart' show QueryRow, Value, Variable;
 
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
@@ -50,6 +50,25 @@ class _Isolation {
   _Isolation(this.requestsLeft);
   int requestsLeft;
   int quarantinedThisCycle = 0;
+
+  /// Rows given a new change number one at a time this cycle (an older server that names no highest revision).
+  int renumberedThisCycle = 0;
+}
+
+/// One synced row by table, id and change number.
+class _RowRef {
+  const _RowRef(this.table, this.id, this.rev);
+  final String table;
+  final String id;
+  final int rev;
+}
+
+/// The shop server already holds a change number of this device with other content, and said which is the highest
+/// it holds for the device ([serverMax]); see SyncService._renumberAbove.
+class _RevisionClash implements Exception {
+  const _RevisionClash(this.error, this.serverMax);
+  final PaystackException error;
+  final int serverMax;
 }
 
 /// Rows of one table the shop server refused for the same reason.
@@ -686,6 +705,23 @@ class SyncService {
       await _syncMeta.setLastPushedLocalRev(slice.last.json['localRev'] as int);
     } on PaystackException catch (error) {
       if (!_isValidationRefusal(error)) rethrow;
+      // A change number the server already holds with other content is no fault of the row: it gets a new number
+      // (never set aside - that is how 500 set-aside rows once stopped a shop's whole upload).
+      if (error.message.contains(_differentContentReason)) {
+        final serverMax = await _serverMaxRevOf(error);
+        if (serverMax != null) throw _RevisionClash(error, serverMax);
+        // An older server names no highest revision: this one row takes the next number, keeping what it says and
+        // when it was changed, and goes out again in a later batch.
+        if (slice.length == 1) {
+          if (isolation.renumberedThisCycle >= _renumberCycleLimit) rethrow;
+          final change = slice.single;
+          final row = _RowRef(change.tableName, change.json['id'] as String, change.json['localRev'] as int);
+          if (await _renumberRows([row], above: 0) == 1) {
+            isolation.renumberedThisCycle++;
+            return;
+          }
+        }
+      }
       if (slice.length == 1) {
         if (!await _canQuarantineMore(isolation)) rethrow;
         await _quarantine(slice.single, error.message);
@@ -704,6 +740,115 @@ class SyncService {
   }
 
   static const _refusalPrefix = 'Could not record changes: ';
+
+  /// Rows an older server's clashes may renumber one at a time in one cycle.
+  static const _renumberCycleLimit = 200;
+
+  /// The highest change number the server holds for THIS device, when its clash answer says so (servers from
+  /// 2026-11-23 on); null otherwise.
+  Future<int?> _serverMaxRevOf(PaystackException error) async {
+    final body = error.body;
+    if (body == null || body['reason'] != 'revision_clash') return null;
+    final max = body['max_local_rev'];
+    if (max is! int || max < 0) return null;
+    if (body['source_device_id'] != await _syncMeta.deviceId()) return null;
+    return max;
+  }
+
+  /// This device's change numbers clashed with ones the shop server already holds with other content: its counter went
+  /// back (its data was restored from an older copy), or a row changed under a number that had already been sent.
+  /// Every change of this device that has not reached the server, and every one set aside earlier for such a clash,
+  /// gets a new number above [serverMax] and above the device's own counter, in the order it had. What the rows say
+  /// and when they were changed stay as they are, so the shop's other devices still keep whichever copy of a row is
+  /// truly the newest. Returns how many rows moved.
+  Future<int> _renumberAbove(int serverMax) async {
+    final deviceId = await _syncMeta.deviceId();
+    final since = await _syncMeta.lastPushedLocalRev();
+    final rows = <_RowRef>[];
+    final seen = <String>{};
+    for (final adapter in syncTableAdapters.values) {
+      final found = await _db
+          .customSelect(
+            'SELECT id, local_rev FROM "${adapter.tableName}" WHERE created_by_device_id = ? AND local_rev > ?',
+            variables: [Variable<String>(deviceId), Variable<int>(since)],
+          )
+          .get();
+      for (final row in found) {
+        final id = row.read<String>('id');
+        if (seen.add('${adapter.tableName}/$id')) rows.add(_RowRef(adapter.tableName, id, row.read<int>('local_rev')));
+      }
+    }
+    for (final row in await _clashedRows(deviceId)) {
+      if (seen.add('${row.table}/${row.id}')) rows.add(row);
+    }
+    return _renumberRows(rows, above: serverMax, forgetClashes: true);
+  }
+
+  /// Rows of this device set aside for a clash by an earlier version of the app (or by an older server's answer).
+  Future<List<_RowRef>> _clashedRows(String deviceId) async {
+    await _ensureQuarantineTable();
+    final set = await _db
+        .customSelect(
+          'SELECT table_name, row_id, local_rev FROM local_sync_quarantine WHERE reason LIKE ?',
+          variables: [Variable<String>('%$_differentContentReason%')],
+        )
+        .get();
+    final rows = <_RowRef>[];
+    for (final entry in set) {
+      final table = entry.read<String>('table_name');
+      if (!syncTableAdapters.containsKey(table)) continue;
+      final id = entry.read<String>('row_id');
+      final rev = entry.read<int>('local_rev');
+      final still = await _db
+          .customSelect(
+            'SELECT 1 FROM "$table" WHERE id = ? AND local_rev = ? AND created_by_device_id = ?',
+            variables: [Variable<String>(id), Variable<int>(rev), Variable<String>(deviceId)],
+          )
+          .getSingleOrNull();
+      if (still != null) rows.add(_RowRef(table, id, rev));
+    }
+    return rows;
+  }
+
+  /// Gives [rows] new change numbers above [above] and above the device's counter, oldest first, in one transaction;
+  /// only local_rev changes (the updated_at trigger is held off, see AppDatabase.keepingUpdatedAt). [forgetClashes]:
+  /// the set-aside entries of clashed rows go too - those rows are back in the queue.
+  Future<int> _renumberRows(List<_RowRef> rows, {required int above, bool forgetClashes = false}) async {
+    final ordered = [...rows]
+      ..sort((a, b) {
+        final byRev = a.rev.compareTo(b.rev);
+        if (byRev != 0) return byRev;
+        final byTable = a.table.compareTo(b.table);
+        return byTable != 0 ? byTable : a.id.compareTo(b.id);
+      });
+    var moved = 0;
+    await _db.keepingUpdatedAt(() async {
+      final meta = await (_db.select(_db.deviceMeta)..limit(1)).getSingle();
+      var next = meta.nextLocalRev > above ? meta.nextLocalRev : above + 1;
+      for (final row in ordered) {
+        final table = _db.allTables.firstWhere((t) => t.actualTableName == row.table);
+        final updated = await _db.customUpdate(
+          'UPDATE "${row.table}" SET local_rev = ? WHERE id = ? AND local_rev = ?',
+          variables: [Variable<int>(next), Variable<String>(row.id), Variable<int>(row.rev)],
+          updates: {table},
+        );
+        if (updated == 1) {
+          moved++;
+          next++;
+        }
+      }
+      await (_db.update(_db.deviceMeta)..where((t) => t.id.equals(meta.id)))
+          .write(DeviceMetaCompanion(nextLocalRev: Value(next)));
+      if (forgetClashes) {
+        await _ensureQuarantineTable();
+        await _db.customStatement(
+          'DELETE FROM local_sync_quarantine WHERE reason LIKE ?',
+          ['%$_differentContentReason%'],
+        );
+      }
+    });
+    return moved;
+  }
 
   static bool _isValidationRefusal(PaystackException error) =>
       error.statusCode == 422 && error.message.startsWith(_refusalPrefix);
@@ -880,6 +1025,18 @@ class SyncService {
         // the server already holds a different copy of revision N, or it dated
         // the row in the future. Sending the same row again as a new revision
         // cures both, and it uploads on the next normal cycle.
+        if (error.message.contains(_differentContentReason)) {
+          final serverMax = await _serverMaxRevOf(error);
+          if (serverMax != null) {
+            await _renumberAbove(serverMax);
+            return;
+          }
+          final row = _RowRef(change.tableName, change.json['id'] as String, change.json['localRev'] as int);
+          if (await _renumberRows([row], above: 0) == 1) {
+            await _forgetQuarantined(row.table, row.id, row.rev);
+            return;
+          }
+        }
         if (_restampCures(error.message) && await _restamp(change)) {
           await _forgetQuarantined(
             change.tableName,
@@ -992,6 +1149,26 @@ class SyncService {
   }
 
   Future<void> pushLocalChanges(String baseUrl, String apiKey) async {
+    final isolation = _Isolation(_isolationRequestsPerCycle);
+    // Rows an earlier version set aside for a clash go back in the queue under new numbers: a server from 2026-11-23
+    // on takes a product sent again whose stock time alone moved, and any real clash now renumbers (just below).
+    final clashed = await _clashedRows(await _syncMeta.deviceId());
+    if (clashed.isNotEmpty) await _renumberRows(clashed, above: 0, forgetClashes: true);
+    try {
+      await _pushOwnChanges(baseUrl, apiKey, isolation);
+    } on _RevisionClash catch (clash) {
+      await _renumberAbove(clash.serverMax);
+      try {
+        await _pushOwnChanges(baseUrl, apiKey, isolation);
+      } on _RevisionClash catch (again) {
+        // Still clashing straight after: stop here, as an ordinary refusal; the next cycle renumbers again.
+        throw again.error;
+      }
+    }
+    await _afterOwnChanges(baseUrl, apiKey);
+  }
+
+  Future<void> _pushOwnChanges(String baseUrl, String apiKey, _Isolation isolation) async {
     final deviceId = await _syncMeta.deviceId();
     final sinceRev = await _syncMeta.lastPushedLocalRev();
 
@@ -1012,7 +1189,6 @@ class SyncService {
     // cursor after each acknowledged batch: if batch N+1 fails, the
     // next cycle safely resumes there instead of retransmitting every
     // earlier row or skipping anything that was not accepted.
-    final isolation = _Isolation(_isolationRequestsPerCycle);
     for (var offset = 0; offset < pending.length; offset += _pushBatchSize) {
       final end = (offset + _pushBatchSize).clamp(0, pending.length);
       await _pushResolving(
@@ -1022,7 +1198,9 @@ class SyncService {
         isolation,
       );
     }
+  }
 
+  Future<void> _afterOwnChanges(String baseUrl, String apiKey) async {
     // Rows set aside earlier get another chance every few hours. Best-effort
     // like the relay below: this device's new changes are already uploaded, so
     // a failure here must not make the whole upload look failed.
@@ -1410,14 +1588,22 @@ class SyncService {
   /// SQL statement that never touches local_rev/updated_at, or it
   /// manufactures a fake local edit that gets pushed back out and
   /// recomputed again forever.
+  ///
+  /// Held off from the updated_at backstop trigger (AppDatabase.keepingUpdatedAt),
+  /// which otherwise stamped every recounted product as edited "now": the next
+  /// price change from another device then looked older and was dropped here,
+  /// and a product this device sent again no longer matched the server's copy.
   Future<void> _recomputeStockQty(Set<String> productIds) async {
-    for (final productId in productIds) {
-      await _db.customStatement(
-        'UPDATE products SET stock_qty = '
-        '(SELECT COALESCE(SUM(quantity), 0) FROM stock_movements WHERE product_id = ? AND deleted_at IS NULL) '
-        'WHERE id = ?',
-        [productId, productId],
-      );
-    }
+    if (productIds.isEmpty) return;
+    await _db.keepingUpdatedAt(() async {
+      for (final productId in productIds) {
+        await _db.customStatement(
+          'UPDATE products SET stock_qty = '
+          '(SELECT COALESCE(SUM(quantity), 0) FROM stock_movements WHERE product_id = ? AND deleted_at IS NULL) '
+          'WHERE id = ?',
+          [productId, productId],
+        );
+      }
+    });
   }
 }

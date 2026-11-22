@@ -65,7 +65,7 @@ class StockService {
 
     return _db.transaction(() async {
       final now = _clock.now().toIso8601String();
-      final rowsAffected = await _productsDao.applyStockDelta(productId, delta, now);
+      final rowsAffected = await _productsDao.applyStockDelta(productId, delta);
       if (rowsAffected == 0) {
         return Result.failure('Only ${product.stockQty} ${product.name} in stock.');
       }

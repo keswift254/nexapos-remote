@@ -110,7 +110,8 @@ void main() {
       await receiver.applyLanChanges(
         await source.exportLanChanges(await receiver.lanRevisionCursors()),
       );
-      await Future<void>.delayed(const Duration(milliseconds: 50));
+      // the dashboard takes at most one refresh per dashboardRefreshGap from background changes
+      await Future<void>.delayed(dashboardRefreshGap + const Duration(milliseconds: 200));
       await container.read(dashboardDataProvider.future);
       expect(
         recomputations,

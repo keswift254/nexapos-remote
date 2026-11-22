@@ -31,7 +31,8 @@ void main() {
       await LegacyPosMapper('refresh-test')
           .convert(legacyFixture())
           .mergeInto(db);
-      await Future<void>.delayed(const Duration(milliseconds: 50));
+      // background changes refresh the dashboard at most once per dashboardRefreshGap
+      await Future<void>.delayed(dashboardRefreshGap + const Duration(milliseconds: 200));
       expect(
         (await container.read(dashboardDataProvider.future)).stockValue.cents,
         4160,
@@ -42,7 +43,7 @@ void main() {
           variables: [Variable.withInt(quantity)],
           updates: {db.products},
         );
-        await Future<void>.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(dashboardRefreshGap + const Duration(milliseconds: 200));
         expect(
           (await container.read(dashboardDataProvider.future)).stockValue.cents,
           520 * quantity,

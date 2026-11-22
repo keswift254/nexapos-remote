@@ -434,22 +434,19 @@ void main() {
         return (id: row.id, name: row.name, localRev: row.localRev, updatedAt: row.updatedAt);
       }
 
-      test('"different content": new revision and timestamp, same data, uploaded on the next cycle', () async {
+      test('"different content" (an older server naming no highest revision): a new number at once, same data AND same time, never set aside', () async {
         await makeCategories(6);
         final original = await rowAt(2);
         final server = byRevision({original.localRev}, differentContent);
         await server.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
-        expect(await server.service.quarantinedCount(), 1);
-        await age();
-
-        await server.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
+        expect(await server.service.quarantinedCount(), 0, reason: 'a clash is no fault of the row: it is never set aside');
 
         final after = (await db.select(db.categories).get()).firstWhere((c) => c.id == original.id);
         expect(after.localRev, greaterThan(original.localRev), reason: 'a fresh revision number');
         expect(after.localRev, greaterThan(await syncMeta.lastPushedLocalRev()), reason: 'so it is queued like any new change');
-        expect(after.updatedAt.compareTo(original.updatedAt), greaterThan(0), reason: 'and now the newest copy everywhere');
+        expect(after.updatedAt, original.updatedAt,
+            reason: 'its time stays: another device keeps whichever copy is truly newest, never this one just for being re-sent');
         expect(after.name, original.name, reason: 'the data itself is untouched');
-        expect(await server.service.quarantinedCount(), 0, reason: 'nothing left to warn about');
 
         server.requests.clear();
         await server.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
@@ -490,20 +487,29 @@ void main() {
         expect(await server.service.quarantinedCount(), 1);
       });
 
-      test('a row the server accepts on the retry keeps its revision', () async {
+      test('a row an EARLIER version set aside for a clash goes back in the queue at once: new number, same time, uploaded', () async {
         await makeCategories(4);
         final original = await rowAt(1);
-        final refused = {original.localRev};
-        final server = byRevision(refused, differentContent);
+        final server = byRevision({}, differentContent);
         await server.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
-        refused.clear();
-        await age();
+        // What 1.0.65-1.0.89 left behind: the row set aside for a clash, the cursor already past it.
+        await db.customStatement(
+          'INSERT INTO local_sync_quarantine(table_name, row_id, local_rev, reason, quarantined_at) VALUES (?, ?, ?, ?, ?)',
+          ['categories', original.id, original.localRev, 'A source revision was already recorded with different content.', DateTime.now().toUtc().toIso8601String()],
+        );
+        expect(await server.service.quarantinedCount(), 1);
+        server.requests.clear();
 
         await server.service.pushLocalChanges(configured.baseUrl, configured.apiKey);
 
         final after = (await db.select(db.categories).get()).firstWhere((c) => c.id == original.id);
-        expect(after.localRev, original.localRev, reason: 'accepted as it was, nothing re-stamped');
+        expect(after.localRev, greaterThan(original.localRev), reason: 'a new number, so it is sent again');
+        expect(after.updatedAt, original.updatedAt, reason: 'and its own time');
+        expect(server.requests, [
+          [after.localRev],
+        ], reason: 'sent in the same upload, without waiting hours for the retry');
         expect(await server.service.quarantinedCount(), 0);
+        expect((await server.service.health()).pendingChanges, 0);
       });
     });
   });

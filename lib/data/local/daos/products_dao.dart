@@ -61,17 +61,20 @@ class ProductsDao extends DatabaseAccessor<AppDatabase> with _$ProductsDaoMixin 
   /// transaction. Uses the same check-and-guard shape as PHP's
   /// `UPDATE products SET stock_qty = stock_qty - ? WHERE stock_qty >= ?`:
   /// returns the number of rows affected (0 means the guard rejected it).
-  Future<int> applyStockDelta(String id, int delta, String updatedAt) async {
-    final query = customUpdate(
-      'UPDATE products SET stock_qty = stock_qty + ?1, updated_at = ?2 '
-      'WHERE id = ?3 AND stock_qty + ?1 >= 0',
-      variables: [
-        Variable.withInt(delta),
-        Variable.withString(updatedAt),
-        Variable.withString(id),
-      ],
-      updates: {products},
-    );
-    return query;
-  }
+  ///
+  /// The stock count is this device's own figure (worked out from the stock
+  /// movements, which are what sync), so it never changes the product's
+  /// updated_at: a sale is not an edit of the product (see
+  /// AppDatabase.keepingUpdatedAt).
+  Future<int> applyStockDelta(String id, int delta) => attachedDatabase.keepingUpdatedAt(
+        () => customUpdate(
+          'UPDATE products SET stock_qty = stock_qty + ?1 '
+          'WHERE id = ?2 AND stock_qty + ?1 >= 0',
+          variables: [
+            Variable.withInt(delta),
+            Variable.withString(id),
+          ],
+          updates: {products},
+        ),
+      );
 }
