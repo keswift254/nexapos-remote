@@ -91,6 +91,9 @@ class _Inbox extends PaymentInboxGateway {
 
 class _Till implements TillSaleService {
   final calls = <({String code, bool acceptAmount, int items})>[];
+
+  /// The cash part each call was given (null: the till payment was to cover the whole sale).
+  final cash = <int?>[];
   List<TillSaleOutcome> answers = [];
 
   @override
@@ -101,8 +104,10 @@ class _Till implements TillSaleService {
     required String userId,
     required String typedCode,
     bool acceptAmount = false,
+    Money? cashReceived,
   }) async {
     calls.add((code: typedCode, acceptAmount: acceptAmount, items: cart.length));
+    cash.add(cashReceived?.cents);
     return answers.removeAt(0);
   }
 
@@ -484,6 +489,114 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('till-payment-EX4CT10000')), findsOneWidget);
     expect(find.textContaining('could not be archived'), findsOneWidget);
+  });
+
+  group('cash fell short: the rest paid to the till or paybill', () {
+    /// Cash chosen and [typed] typed as the cash received (the sale is 100.00), the cursor still in the cash box.
+    Future<void> shortCash(WidgetTester tester, String typed) async {
+      await tester.tap(find.widgetWithText(ChoiceChip, 'Cash'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.widgetWithText(TextField, 'Cash received (optional)'), typed);
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('the M-Pesa prompt stays the first choice for the rest; Till/Paybill is offered next to it', (tester) async {
+      await pumpCart(tester, payments: const []);
+      await shortCash(tester, '40');
+      expect(find.text('How does the customer pay the rest (KES 60.00)?'), findsOneWidget);
+      expect(tester.widget<ChoiceChip>(find.byKey(const Key('rest-prompt'))).selected, isTrue);
+      expect(find.byKey(const Key('mpesa-phone-split')), findsOneWidget);
+      expect(find.text('Send M-Pesa prompt for KES 60.00'), findsOneWidget);
+      expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Complete Sale')).onPressed, isNull,
+          reason: 'with the prompt chosen, the rest is taken by sending the prompt, not by Complete Sale');
+    });
+
+    testWidgets('Till/Paybill: the ONE new payment of the rest completes the split sale by itself', (tester) async {
+      await pumpCart(tester, payments: [
+        received('R3STPAY000', 6000, 'REST PAYER', ago: Duration.zero),
+        // a payment of the whole 100.00 that is too old to complete the sale by itself before Cash is chosen
+        received('WH0LEPAY00', 10000, 'WHOLE PAYER', ago: const Duration(minutes: 30)),
+      ], answers: [TillSaleDone(soldFor(10000), received('R3STPAY000', 6000, 'REST PAYER'))]);
+      await shortCash(tester, '40');
+      expect(till.calls, isEmpty);
+      await tester.tap(find.byKey(const Key('rest-till')));
+      await tester.pumpAndSettle();
+      expect(till.calls.single.code, 'R3STPAY000', reason: 'the payment of the 60.00 still owed, not of the whole 100.00');
+      expect(till.cash.single, 4000, reason: 'the cash part goes with it');
+      expect(find.text('Receipt sale-1'), findsOneWidget);
+      expect(container.read(cartProvider).isEmpty, isTrue);
+    });
+
+    testWidgets('two payments of the rest: tap the customer\'s one, then Complete Sale', (tester) async {
+      await pumpCart(tester, payments: [
+        received('TW0R3STAAA', 6000, 'FIRST PAYER', ago: Duration.zero),
+        received('TW0R3STBBB', 6000, 'SECOND PAYER', ago: Duration.zero),
+      ], answers: [TillSaleDone(soldFor(10000), received('TW0R3STBBB', 6000, 'SECOND PAYER'))]);
+      await shortCash(tester, '40');
+      await tester.tap(find.byKey(const Key('rest-till')));
+      await tester.pumpAndSettle();
+      expect(till.calls, isEmpty);
+      expect(find.textContaining('2 payments of KES 60.00 have arrived'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('till-payment-TW0R3STBBB')));
+      await tester.pump();
+      await tester.tap(find.widgetWithText(FilledButton, 'Complete Sale'));
+      await tester.pumpAndSettle();
+      expect(till.calls.single.code, 'TW0R3STBBB');
+      expect(till.cash.single, 4000);
+      expect(find.text('Receipt sale-1'), findsOneWidget);
+    });
+
+    testWidgets('F9 completes the split sale too', (tester) async {
+      await pumpCart(tester, payments: [received('F9R3STPAY0', 6000, 'OLD PAYER', ago: const Duration(minutes: 30))],
+          answers: [TillSaleDone(soldFor(10000), received('F9R3STPAY0', 6000, 'OLD PAYER'))]);
+      await shortCash(tester, '40');
+      await tester.tap(find.byKey(const Key('rest-till')));
+      await tester.pumpAndSettle();
+      expect(till.calls, isEmpty, reason: 'an older payment is only suggested');
+      await tester.tap(find.byKey(const Key('till-payment-F9R3STPAY0')));
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.f9);
+      await tester.pumpAndSettle();
+      expect(till.calls.single.code, 'F9R3STPAY0');
+      expect(till.cash.single, 4000);
+    });
+
+    testWidgets('nothing completes by itself while the cash is still being typed', (tester) async {
+      await pumpCart(tester, payments: [received('SEVENTY000', 7000, 'SEVENTY PAYER', ago: Duration.zero)],
+          answers: [TillSaleDone(soldFor(10000), received('SEVENTY000', 7000, 'SEVENTY PAYER'))]);
+      await shortCash(tester, '40');
+      await tester.tap(find.byKey(const Key('rest-till')));
+      await tester.pumpAndSettle();
+      expect(till.calls, isEmpty, reason: '70.00 does not fit the 60.00 still owed');
+      // back in the cash box: 30 typed, so 70.00 is owed - but the cashier may still be typing (3 of 300, say)
+      await tester.enterText(find.widgetWithText(TextField, 'Cash received (optional)'), '30');
+      await tester.pump(const Duration(seconds: 9));
+      await tester.pumpAndSettle();
+      expect(till.calls, isEmpty, reason: 'not while the cursor is in the cash box');
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pumpAndSettle();
+      expect(till.calls.single.code, 'SEVENTY000');
+      expect(till.cash.single, 3000);
+    });
+
+    testWidgets('a bigger payment towards the rest is asked about in words about what is still owed', (tester) async {
+      await pumpCart(tester, payments: const [], answers: [
+        const TillSaleNeedsConfirmation(paid: Money(10000), total: Money(6000), split: true),
+        TillSaleDone(soldFor(10000), received('B1GG3RPAY0', 10000, 'BIG PAYER')),
+      ]);
+      await shortCash(tester, '40');
+      await tester.tap(find.byKey(const Key('rest-till')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byKey(const Key('till-code')), 'B1GG3RPAY0');
+      await tester.tap(find.widgetWithText(FilledButton, 'Complete Sale'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('paid KES 100.00 towards the KES 60.00 still owed'), findsOneWidget);
+      expect(find.textContaining('Give back KES 40.00 in cash'), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, 'Complete the sale'));
+      await tester.pumpAndSettle();
+      expect(till.calls.map((c) => c.acceptAmount), [false, true]);
+      expect(till.cash, [4000, 4000], reason: 'the cash part goes with the second try too');
+    });
   });
 
   testWidgets('no shop phone, no internet, or a device not connected: said plainly, and the code can still be typed', (tester) async {

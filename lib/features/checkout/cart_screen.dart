@@ -61,6 +61,9 @@ class _CartScreenState extends ConsumerState<CartScreen> {
   final _tillPanelKey = GlobalKey<TillPaymentsPanelState>();
   String _query = '';
   bool _submitting = false;
+  // Cash fell short of the total: how the customer pays the rest - 'prompt' (an M-Pesa prompt to their phone) or 'till'
+  // (they pay the shop's own till or paybill, and the cashier picks that payment).
+  String _restBy = 'prompt';
 
   @override
   void initState() {
@@ -70,12 +73,19 @@ class _CartScreenState extends ConsumerState<CartScreen> {
     _cashReceivedController.text = cart.cashReceived.cents == 0 ? '' : cart.cashReceived.toMajorDouble.toStringAsFixed(2);
     _phoneController.text = cart.customerPhone;
     CartShortcuts.register(owner: this, switchPayment: _switchPaymentFromKeyboard, complete: _completeFromKeyboard);
+    // A split sale never completes by itself while the cash is still being typed (see the till panel's onAutoPay).
+    _cashFocus.addListener(_cashFocusChanged);
+  }
+
+  void _cashFocusChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
     CartShortcuts.unregister(this);
     _phoneFocus.dispose();
+    _cashFocus.removeListener(_cashFocusChanged);
     _cashFocus.dispose();
     _tillCodeFocus.dispose();
     _tillCodeController.dispose();
@@ -116,8 +126,15 @@ class _CartScreenState extends ConsumerState<CartScreen> {
     final userId = ref.read(sessionProvider)?.id;
     if (state.isEmpty || userId == null) return;
     if (_isCashShortfall(state)) {
+      if (state.paymentMethod == 'cash' && _restBy == 'till') {
+        _submitTill(ref.read(cartProvider.notifier), userId, cashReceived: state.cashReceived);
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('The cash received is less than the total. Enter enough cash, or send an M-Pesa prompt for the rest.')),
+        const SnackBar(
+          content: Text('The cash received is less than the total. Enter enough cash, or take the rest by a prompt to their '
+              'phone or a payment to your till/paybill.'),
+        ),
       );
       return;
     }
@@ -364,7 +381,8 @@ class _CartScreenState extends ConsumerState<CartScreen> {
 
   /// M-Pesa Till/Paybill: the shop's server is asked to use the customer's code on this sale, then the sale is saved. A
   /// payment bigger than the sale (or one whose amount could not be read) is asked about first.
-  Future<void> _submitTill(CartNotifier cart, String userId, {bool acceptAmount = false}) async {
+  /// [cashReceived]: a split sale - the customer paid that much in cash and the till payment covers the rest.
+  Future<void> _submitTill(CartNotifier cart, String userId, {bool acceptAmount = false, Money? cashReceived}) async {
     setState(() => _submitting = true);
     final state = ref.read(cartProvider);
     final outcome = await ref.read(tillSaleServiceProvider).complete(
@@ -374,6 +392,7 @@ class _CartScreenState extends ConsumerState<CartScreen> {
       userId: userId,
       typedCode: _tillCodeController.text,
       acceptAmount: acceptAmount,
+      cashReceived: cashReceived,
     );
     if (!mounted) return;
     setState(() => _submitting = false);
@@ -381,6 +400,7 @@ class _CartScreenState extends ConsumerState<CartScreen> {
       case TillSaleDone():
         cart.clear();
         _tillCodeController.clear();
+        _restBy = 'prompt';
         ref.invalidate(dashboardDataProvider);
         final messenger = ScaffoldMessenger.of(context);
         context.go('/');
@@ -399,16 +419,19 @@ class _CartScreenState extends ConsumerState<CartScreen> {
             title: Text(paid == null ? 'Amount not read' : 'The customer paid more'),
             content: Text(paid == null
                 ? 'The amount in this M-Pesa message could not be read. Check the message on the shop phone. '
-                    'Did the customer pay at least ${outcome.total.format()}?'
-                : 'The customer paid ${paid.format()} for a sale of ${outcome.total.format()}. '
-                    'Give back ${(paid - outcome.total).format()} in cash and complete the sale?'),
+                    'Did the customer pay at least ${outcome.total.format()}${outcome.split ? ' (what the cash did not cover)' : ''}?'
+                : outcome.split
+                    ? 'The customer paid ${paid.format()} towards the ${outcome.total.format()} still owed. '
+                        'Give back ${(paid - outcome.total).format()} in cash and complete the sale?'
+                    : 'The customer paid ${paid.format()} for a sale of ${outcome.total.format()}. '
+                        'Give back ${(paid - outcome.total).format()} in cash and complete the sale?'),
             actions: [
               TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
               FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Complete the sale')),
             ],
           ),
         );
-        if (goAhead == true && mounted) await _submitTill(cart, userId, acceptAmount: true);
+        if (goAhead == true && mounted) await _submitTill(cart, userId, acceptAmount: true, cashReceived: cashReceived);
       case TillSaleRefused():
         _showError(outcome.message);
         if (outcome.refreshList) _tillPanelKey.currentState?.reload();
@@ -651,31 +674,76 @@ class _CartScreenState extends ConsumerState<CartScreen> {
             ],
             if (cashShortfall) ...[
               const SizedBox(height: 12),
-              TextField(
-                key: const Key('mpesa-phone-split'),
-                controller: _phoneController,
-                decoration: const InputDecoration(
-                  labelText: 'Customer\'s M-Pesa number (for the rest)',
-                  hintText: '0712 345 678',
-                  prefixIcon: Icon(Icons.phone_android),
-                ),
-                keyboardType: TextInputType.phone,
-                onChanged: cart.setCustomerPhone,
+              Text(
+                'How does the customer pay the rest (${(total - cartState.cashReceived).format()})?',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                children: [
+                  ChoiceChip(
+                    key: const Key('rest-prompt'),
+                    label: const Text('Prompt to their phone'),
+                    selected: _restBy == 'prompt',
+                    onSelected: _submitting ? null : (_) => setState(() => _restBy = 'prompt'),
+                  ),
+                  ChoiceChip(
+                    key: const Key('rest-till'),
+                    label: const Text('Paid to till/paybill'),
+                    selected: _restBy == 'till',
+                    onSelected: _submitting
+                        ? null
+                        : (_) {
+                            // the cash is typed: leave its box, so the rest can be matched to a payment
+                            _cashFocus.unfocus();
+                            setState(() => _restBy = 'till');
+                          },
+                  ),
+                ],
               ),
               const SizedBox(height: 12),
-              OutlinedButton.icon(
-                onPressed: _submitting || userId == null
-                    ? null
-                    : () => _submitSplitPaystack(
-                          cart,
-                          userId,
-                          cartState.cashReceived,
-                        ),
-                icon: const Icon(Icons.phone_android),
-                label: Text(
-                  'Send M-Pesa prompt for ${(total - cartState.cashReceived).format()}',
+              if (_restBy == 'till')
+                TillPaymentsPanel(
+                  key: _tillPanelKey,
+                  codeController: _tillCodeController,
+                  codeFocus: _tillCodeFocus,
+                  total: total - cartState.cashReceived,
+                  // the one new payment of exactly the rest completes the sale - never while the cash is still being typed
+                  onAutoPay: (_submitting || userId == null || _cashFocus.hasFocus)
+                      ? null
+                      : (payment) {
+                          _tillCodeController.text = payment.code;
+                          _submitTill(cart, userId, cashReceived: ref.read(cartProvider).cashReceived);
+                        },
+                )
+              else ...[
+                TextField(
+                  key: const Key('mpesa-phone-split'),
+                  controller: _phoneController,
+                  decoration: const InputDecoration(
+                    labelText: 'Customer\'s M-Pesa number (for the rest)',
+                    hintText: '0712 345 678',
+                    prefixIcon: Icon(Icons.phone_android),
+                  ),
+                  keyboardType: TextInputType.phone,
+                  onChanged: cart.setCustomerPhone,
                 ),
-              ),
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: _submitting || userId == null
+                      ? null
+                      : () => _submitSplitPaystack(
+                            cart,
+                            userId,
+                            cartState.cashReceived,
+                          ),
+                  icon: const Icon(Icons.phone_android),
+                  label: Text(
+                    'Send M-Pesa prompt for ${(total - cartState.cashReceived).format()}',
+                  ),
+                ),
+              ],
             ],
           ],
         ],
@@ -695,9 +763,11 @@ class _CartScreenState extends ConsumerState<CartScreen> {
                 child: Tooltip(
                   message: '${cartState.paymentMethod == 'paystack' ? 'Send the M-Pesa prompt' : 'Complete the sale'} (${CartShortcuts.completeHint})',
                   child: FilledButton(
-                  onPressed: (_submitting || cartState.isEmpty || userId == null || cashShortfall)
+                  onPressed: (_submitting || cartState.isEmpty || userId == null || (cashShortfall && _restBy != 'till'))
                       ? null
-                      : () => _submit(cart, cartState.paymentMethod, userId),
+                      : cashShortfall
+                          ? () => _submitTill(cart, userId, cashReceived: cartState.cashReceived)
+                          : () => _submit(cart, cartState.paymentMethod, userId),
                   child: _submitting
                       ? const SizedBox(
                           height: 20,

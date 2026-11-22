@@ -242,4 +242,68 @@ void main() {
     expect(inbox.releases.single, (code: 'SJK2TILL9X', saleId: inbox.claims.single.saleId));
     expect(await salesCount(), 0);
   });
+
+  group('a split sale: part in cash, the rest paid to the till', () {
+    Future<TillSaleOutcome> sellSplit(int cashCents, {bool acceptAmount = false}) => service.complete(
+          cart: sodas(2),
+          discount: const Money.zero(),
+          saleType: 'retail',
+          userId: cashierId,
+          typedCode: 'SJK2TILL9X',
+          acceptAmount: acceptAmount,
+          cashReceived: Money(cashCents),
+        );
+
+    test('the till payment has to cover only the rest; the sale keeps the cash part and one payment record for the rest', () async {
+      final outcome = await sellSplit(5000); // 120.00 sale, 50.00 in cash
+      expect(outcome, isA<TillSaleDone>());
+      final done = outcome as TillSaleDone;
+      expect(inbox.claims.single.amountCents, 7000, reason: 'the shop is asked for the 70.00 the cash did not cover');
+      final saved = (await sales.findById(done.sale.id))!;
+      expect(saved.paymentMethod, 'mpesa_manual');
+      expect(saved.status, 'paid');
+      expect(saved.total, const Money(12000));
+      expect(saved.cashReceived, const Money(5000));
+      expect(saved.isSplitPayment, isTrue);
+      expect(saved.gatewayPortion, const Money(7000));
+      final record = (await payments.forSale(done.sale.id))!;
+      expect(record.method, 'mpesa_manual');
+      expect(record.amount, const Money(7000), reason: 'the payment record is the till part only');
+      expect(record.referenceNote, 'SJK2TILL9X');
+      expect(record.status, 'paid');
+      expect(done.change, const Money.zero());
+      expect(await sodaStock(), 8);
+    });
+
+    test('a bigger till payment asks first; the change is worked out against the rest, not the whole sale', () async {
+      inbox.answer = (claim) => claim.acceptAmount
+          ? TillPayment(code: claim.code, messageReceived: true, amount: const Money(10000))
+          : TillClaimRefused('amount_differs', 'The customer paid a different amount.', paidAmount: const Money(10000));
+      final asked = await sellSplit(5000);
+      expect(asked, isA<TillSaleNeedsConfirmation>());
+      final question = asked as TillSaleNeedsConfirmation;
+      expect(question.paid, const Money(10000));
+      expect(question.total, const Money(7000));
+      expect(question.split, isTrue);
+      final done = await sellSplit(5000, acceptAmount: true) as TillSaleDone;
+      expect(done.change, const Money(3000), reason: '100.00 paid towards the 70.00 still owed');
+    });
+
+    test('a smaller till payment is refused in words about what is still owed', () async {
+      inbox.answer = (claim) => TillClaimRefused('amount_differs', 'The customer paid a different amount.', paidAmount: const Money(6000));
+      final refused = await sellSplit(5000) as TillSaleRefused;
+      expect(refused.message, contains('KES 10.00 less than the KES 70.00 still owed'));
+      expect(await salesCount(), 0);
+    });
+
+    test('a cash part of nothing, or of the whole sale or more, is refused before the shop is asked', () async {
+      for (final cash in [0, 12000, 15000]) {
+        final refused = await sellSplit(cash);
+        expect(refused, isA<TillSaleRefused>(), reason: 'cash $cash');
+        expect((refused as TillSaleRefused).message, contains('more than zero and less than the total'));
+      }
+      expect(inbox.claims, isEmpty);
+      expect(await salesCount(), 0);
+    });
+  });
 }

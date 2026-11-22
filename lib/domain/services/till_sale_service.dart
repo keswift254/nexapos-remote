@@ -36,20 +36,24 @@ class TillSaleDone extends TillSaleOutcome {
   final Sale sale;
   final TillPayment payment;
 
-  /// What to give back in cash when the customer paid more than the sale (zero otherwise).
+  /// What to give back in cash when the customer paid more than the till part of the sale (the whole sale, or what the cash
+  /// did not cover in a split sale); zero otherwise.
   Money get change {
     final paid = payment.amount;
-    if (paid == null || paid.cents <= sale.total.cents) return const Money.zero();
-    return paid - sale.total;
+    final due = sale.gatewayPortion;
+    if (paid == null || paid.cents <= due.cents) return const Money.zero();
+    return paid - due;
   }
 }
 
-/// The customer paid MORE than the sale ([paid] > [total]), or the amount could not be read ([paid] null): nothing is sold
-/// yet. Ask the cashier, then try again with acceptAmount.
+/// The customer paid MORE than the till part ([paid] > [total]), or the amount could not be read ([paid] null): nothing is
+/// sold yet. Ask the cashier, then try again with acceptAmount. [total] is what the till payment had to cover: the whole sale,
+/// or in a split sale ([split]) what the cash did not.
 class TillSaleNeedsConfirmation extends TillSaleOutcome {
-  const TillSaleNeedsConfirmation({required this.paid, required this.total});
+  const TillSaleNeedsConfirmation({required this.paid, required this.total, this.split = false});
   final Money? paid;
   final Money total;
+  final bool split;
 }
 
 /// Nothing is sold; [message] says why in the cashier's words. [refreshList]: the list of payments has changed (the code
@@ -83,6 +87,9 @@ class TillSaleService {
     required String userId,
     required String typedCode,
     bool acceptAmount = false,
+    // A split sale (the cart's "Till/Paybill" for the rest): the cash the customer already paid. The till payment then has
+    // to cover only the rest. Null: the till payment covers the whole sale.
+    Money? cashReceived,
   }) async {
     final code = normalizeMpesaCode(typedCode);
     if (code == null) {
@@ -104,6 +111,10 @@ class TillSaleService {
     if (total.cents < 1) {
       return const TillSaleRefused('The total is zero, so there is nothing to charge.');
     }
+    if (cashReceived != null && (cashReceived.cents < 1 || cashReceived.cents >= total.cents)) {
+      return const TillSaleRefused('The cash part must be more than zero and less than the total.');
+    }
+    final due = cashReceived == null ? total : total - cashReceived;
 
     final saleId = ids.newId();
     final saleNumber = await checkout.generateSaleNumber();
@@ -115,13 +126,13 @@ class TillSaleService {
         code: code,
         saleId: saleId,
         saleNumber: saleNumber,
-        amount: total,
+        amount: due,
         acceptAmount: acceptAmount,
       );
     } on PaystackOfflineException {
       return const TillSaleRefused(offlineMessage);
     } on TillClaimRefused catch (refused) {
-      return _refusal(refused, total);
+      return _refusal(refused, due, split: cashReceived != null);
     } on PaystackException catch (e) {
       // The answer could not be read: the code may be held for this sale or not. Give it back so it can be used again.
       await gateway.release(baseUrl: credentials.baseUrl, apiKey: credentials.apiKey, code: code, saleId: saleId);
@@ -135,6 +146,7 @@ class TillSaleService {
       paymentMethod: 'mpesa_manual',
       referenceNote: code,
       userId: userId,
+      cashReceived: cashReceived,
       saleId: saleId,
       saleNumber: saleNumber,
     );
@@ -148,7 +160,7 @@ class TillSaleService {
     }
   }
 
-  TillSaleOutcome _refusal(TillClaimRefused refused, Money total) {
+  TillSaleOutcome _refusal(TillClaimRefused refused, Money total, {required bool split}) {
     switch (refused.reason) {
       case 'not_received':
         return const TillSaleRefused(
@@ -158,14 +170,15 @@ class TillSaleService {
       case 'amount_differs':
         final paid = refused.paidAmount;
         if (paid != null && paid.cents < total.cents) {
-          return TillSaleRefused(
-            'The customer paid ${paid.format()}, which is ${(total - paid).format()} less than this sale (${total.format()}). '
-            'Use a payment that covers the whole sale.',
-          );
+          return TillSaleRefused(split
+              ? 'The customer paid ${paid.format()}, which is ${(total - paid).format()} less than the ${total.format()} '
+                  'still owed. Use a payment that covers the rest of the sale.'
+              : 'The customer paid ${paid.format()}, which is ${(total - paid).format()} less than this sale (${total.format()}). '
+                  'Use a payment that covers the whole sale.');
         }
-        return TillSaleNeedsConfirmation(paid: paid, total: total);
+        return TillSaleNeedsConfirmation(paid: paid, total: total, split: split);
       case 'amount_unknown':
-        return TillSaleNeedsConfirmation(paid: null, total: total);
+        return TillSaleNeedsConfirmation(paid: null, total: total, split: split);
       case 'used':
         return TillSaleRefused(refused.message, refreshList: true);
       default:

@@ -116,6 +116,13 @@ void main() {
       () async => await shop.mustRefund(split, [await shop.choose(split.id, shop.widgetId, 3)], reason: 'three'),
     ]));
 
+    late Sale splitTill;
+    fresh.add(await scenario('refund_split_cash_and_till_sale_with_discount', 'A discounted sale paid partly in cash and the rest to the shop\'s own till (M-Pesa Till/Paybill): refunded one widget, then the other three; the discount and the cash share come back in proportion, to the cent.', [
+      () async => splitTill = await shop.sellSplitTill([shop.line(shop.widgetId, 'Widget', 10000, 6000, 4)], 10000, discount: 4000),
+      () async => await shop.mustRefund(splitTill, [await shop.choose(splitTill.id, shop.widgetId, 1)], reason: 'one'),
+      () async => await shop.mustRefund(splitTill, [await shop.choose(splitTill.id, shop.widgetId, 3)], reason: 'three'),
+    ]));
+
     late Sale manual;
     fresh.add(await scenario('refund_manual_item', 'A sale with a manual item (no product): refunding it moves no stock.', [
       () async => manual = await shop.sell([

@@ -61,10 +61,13 @@ abstract class Sale with _$Sale {
       changeDue == null ? null : Money(changeDue!.cents.abs());
 
   /// True when part of this sale was pre-collected in cash and the rest
-  /// was charged through Paystack - cart_screen.dart's "Send M-Pesa
-  /// prompt for remaining balance" path, the only way to reach this
-  /// state. A plain Paystack sale never has cashReceived set.
-  bool get isSplitPayment => paymentMethod == 'paystack' && cashReceived != null;
+  /// paid by M-Pesa: through Paystack ('paystack', cart_screen.dart's
+  /// "Send M-Pesa prompt for remaining balance") or to the shop's own
+  /// till or paybill ('mpesa_manual', the cart's "Till/Paybill" for the
+  /// rest). Those are the only ways to reach this state: a plain M-Pesa
+  /// sale never has cashReceived set.
+  bool get isSplitPayment =>
+      (paymentMethod == 'paystack' || paymentMethod == 'mpesa_manual') && cashReceived != null;
 
   /// The amount actually charged to/verified with Paystack - the full
   /// total normally, or just the shortfall for a split sale. Used both

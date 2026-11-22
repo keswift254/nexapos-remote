@@ -179,11 +179,15 @@ class CheckoutService {
     required String paymentMethod,
     String? referenceNote,
     required String userId,
-    // Cash only - how much the customer handed over, purely so the
+    // Cash - how much the customer handed over, purely so the
     // receipt can show change given. Never validated against total:
     // this is a convenience calculator, not a hard gate that could block
     // a cashier from completing a legitimate sale (a partial/rounded
     // payment, a correction, etc.).
+    // M-Pesa Till/Paybill ('mpesa_manual') - the cash part of a SPLIT
+    // sale (the cart's "Till/Paybill" for the rest): more than zero and
+    // less than the total; the till payment covers the rest (see
+    // Sale.isSplitPayment). Ignored for any other method.
     Money? cashReceived,
     // Given only by the M-Pesa Till/Paybill flow (TillSaleService): the shop's server is asked to use the customer's
     // M-Pesa code on THIS sale before it is saved, so the sale's id and number must exist first. Null: made here.
@@ -209,6 +213,10 @@ class CheckoutService {
     final isExternal =
         paymentMethod == 'mpesa' || paymentMethod == 'mpesa_manual';
     final totals = _computeTotals(validated.subtotal, discount);
+    final splitCash = paymentMethod == 'mpesa_manual' ? cashReceived : null;
+    if (splitCash != null && (splitCash.cents < 1 || splitCash.cents >= totals.total.cents)) {
+      return const Result.failure('The cash part of a split sale must be more than zero and less than the total.');
+    }
     final number = saleNumber ?? await generateSaleNumber();
     final id = saleId ?? _idGenerator.newId();
     final trimmedPhone = customerPhone.trim();
@@ -230,7 +238,7 @@ class CheckoutService {
       total: totals.total,
       status: 'paid',
       createdAt: _clock.now(),
-      cashReceived: paymentMethod == 'cash' ? cashReceived : null,
+      cashReceived: paymentMethod == 'cash' ? cashReceived : splitCash,
     );
 
     try {
@@ -244,7 +252,8 @@ class CheckoutService {
               id: '',
               saleId: id,
               method: paymentMethod,
-              amount: totals.total,
+              // a split till sale: the till payment covers only what the cash did not
+              amount: splitCash == null ? totals.total : totals.total - splitCash,
               referenceNote: (trimmedNote == null || trimmedNote.isEmpty)
                   ? null
                   : trimmedNote,

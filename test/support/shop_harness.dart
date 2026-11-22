@@ -207,6 +207,21 @@ class ShopHarness {
     return result.when(ok: (s) => s, failure: (m) => throw StateError(m));
   }
 
+  /// A split sale: [cash] collected up front, the rest paid to the shop's own till or paybill (the cart's "Till/Paybill" for
+  /// the rest, as TillSaleService saves it once the shop let it use the code).
+  Future<Sale> sellSplitTill(List<CartItem> cart, int cash, {int discount = 0}) async {
+    final result = await checkout.checkout(
+      cart: cart,
+      discount: Money(discount),
+      saleType: 'retail',
+      paymentMethod: 'mpesa_manual',
+      referenceNote: 'UKTILL1234',
+      userId: cashier.id,
+      cashReceived: Money(cash),
+    );
+    return result.when(ok: (s) => s, failure: (m) => throw StateError(m));
+  }
+
   /// A split sale: [cash] collected up front, the rest by M-Pesa prompt (as the cart screen does it), then confirmed paid.
   Future<Sale> sellSplit(List<CartItem> cart, int cash, {int discount = 0}) async {
     final begun = await checkout.beginPaystackSale(
