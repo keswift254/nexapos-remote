@@ -127,6 +127,9 @@ Stream<int> dashboardChangeTicker(Ref ref) {
 /// From this window width up the dashboard is laid out for a PC: everything on one screen (see DashboardScreen).
 const wideDashboardWidth = 900.0;
 
+/// The height of the dashboard's New Sale button: well above an ordinary button (40), so it stands out and is easy to hit.
+const newSaleButtonHeight = 64.0;
+
 /// The shortest time between two dashboard refreshes caused by changes to the shop's data in the background.
 const dashboardRefreshGap = Duration(seconds: 2);
 
@@ -329,13 +332,24 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     final isWindows = defaultTargetPlatform == TargetPlatform.windows;
     // A wide window (a PC or a laptop, or the web POS on one) shows everything on one screen: the buttons at the top,
     // the four figures in one row. The owner, 2026-11-22: "show all its contents at a glance - I don't have to scroll
-    // down to access New Sale or Inventory". A phone or a narrow window keeps the long page it had.
+    // down to access New Sale or Inventory". A phone or a narrow window has the figures two by two.
     final wide = MediaQuery.sizeOf(context).width >= wideDashboardWidth;
+    // New Sale is the till's main job: a big raised button at the top of every dashboard, standing apart from the rest.
+    // The owner, 2026-11-23: "I want the new sale button to be outstanding from the others and easily reachable".
     final newSaleButton = Tooltip(
       message: 'New sale (F2)',
       child: FilledButton.icon(
+        key: const Key('dashboard-new-sale'),
         onPressed: () => context.push('/new-sale'),
-        icon: const Icon(Icons.point_of_sale),
+        style: FilledButton.styleFrom(
+          minimumSize: const Size(260, newSaleButtonHeight),
+          padding: const EdgeInsets.symmetric(horizontal: 36, vertical: 16),
+          // the theme's own large title (so the shop's font), made bold
+          textStyle: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+          elevation: 4,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        ),
+        icon: const Icon(Icons.point_of_sale, size: 28),
         label: const Text('New Sale'),
       ),
     );
@@ -388,11 +402,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
           ],
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.bar_chart_outlined),
-            tooltip: 'Reports',
-            onPressed: () => context.push('/reports'),
-          ),
+          // Reports are for the owner and managers only; a cashier has no way in (see canSeeShopFigures).
+          if (seesShopFigures)
+            IconButton(
+              icon: const Icon(Icons.bar_chart_outlined),
+              tooltip: 'Reports',
+              onPressed: () => context.push('/reports'),
+            ),
           if (user != null)
             IconButton(
               icon: const Icon(Icons.settings_outlined),
@@ -458,19 +474,43 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                       ),
                     ],
                   ),
-                  if (wide) ...[
-                    const SizedBox(height: 8),
-                    Wrap(
-                      key: const Key('dashboard-actions-top'),
-                      spacing: 12,
-                      runSpacing: 12,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        newSaleButton,
-                        if (canManageInventory) ...managementButtons,
-                      ],
-                    ),
-                  ],
+                  const SizedBox(height: 8),
+                  // The actions come first on every screen. On a PC New Sale stands on its own at the left and the
+                  // management buttons, smaller, sit at the right; on a phone New Sale is full width with them under it.
+                  KeyedSubtree(
+                    key: const Key('dashboard-actions-top'),
+                    child: wide
+                        ? Row(
+                            children: [
+                              newSaleButton,
+                              const SizedBox(width: 24),
+                              if (canManageInventory)
+                                Expanded(
+                                  child: Wrap(
+                                    alignment: WrapAlignment.end,
+                                    spacing: 12,
+                                    runSpacing: 12,
+                                    children: managementButtons,
+                                  ),
+                                ),
+                            ],
+                          )
+                        : Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              newSaleButton,
+                              if (canManageInventory) ...[
+                                const SizedBox(height: 12),
+                                Wrap(
+                                  alignment: WrapAlignment.center,
+                                  spacing: 12,
+                                  runSpacing: 12,
+                                  children: managementButtons,
+                                ),
+                              ],
+                            ],
+                          ),
+                  ),
                   if (cartState.isNotEmpty) ...[
                     const SizedBox(height: 12),
                     Card(
@@ -625,19 +665,6 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                       wide: wide,
                     ),
                   ),
-                  if (!wide) ...[
-                    const SizedBox(height: 24),
-                    Center(child: newSaleButton),
-                    if (canManageInventory) ...[
-                      const SizedBox(height: 16),
-                      Wrap(
-                        spacing: 12,
-                        runSpacing: 12,
-                        alignment: WrapAlignment.center,
-                        children: managementButtons,
-                      ),
-                    ],
-                  ],
                   const SizedBox(height: 16),
                 ],
               ),

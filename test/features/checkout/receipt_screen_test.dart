@@ -72,9 +72,11 @@ void main() {
       // resuming - a genuine edge case for how the OS/engine restores
       // navigation state), might leave behind. See receipt_screen.dart's
       // PopScope doc comment for why it must not matter which one it is.
+      // (the Inventory SCREEN, by its title: the dashboard itself has an Inventory button at the top since 1.0.93)
+      final inventoryScreen = find.descendant(of: find.byType(AppBar), matching: find.text('Inventory'));
       router.push('/products');
       await tester.pumpAndSettle();
-      expect(find.text('Inventory'), findsOneWidget);
+      expect(inventoryScreen, findsOneWidget);
 
       router.push('/receipt/does-not-exist');
       await tester.pumpAndSettle();
@@ -86,8 +88,9 @@ void main() {
 
       // Must land on the dashboard - never on the '/products' debris,
       // and never stuck back on the receipt itself.
-      expect(find.text('Inventory'), findsNothing);
+      expect(inventoryScreen, findsNothing);
       expect(find.text('Receipt'), findsNothing);
+      expect(find.byKey(const Key('dashboard-new-sale')), findsOneWidget, reason: 'on the dashboard');
 
       router.go('/reports');
       await tester.pumpAndSettle();

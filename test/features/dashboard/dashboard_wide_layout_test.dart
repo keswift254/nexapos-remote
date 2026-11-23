@@ -93,6 +93,15 @@ void main() {
       expect(tops, hasLength(1), reason: 'one row of four cards');
       // the buttons come before the figures
       expect(tester.getTopLeft(find.text('New Sale')).dy, lessThan(tester.getTopLeft(find.text('Sales Today')).dy));
+      // New Sale stands out (2026-11-23): a big button on its own at the left, the others smaller at the right
+      final newSale = tester.getRect(button_('New Sale'));
+      final inventory = tester.getRect(button_('Inventory'));
+      expect(newSale.height, greaterThanOrEqualTo(newSaleButtonHeight));
+      // (an ordinary button measures 48 here: its 40 plus the touch margin Material adds; New Sale is 64 of real button)
+      expect(newSale.height, greaterThan(inventory.height * 1.3), reason: 'clearly bigger than the others');
+      expect(newSale.width, greaterThan(inventory.width));
+      expect(newSale.left, lessThan(40), reason: 'first thing on the left');
+      expect(inventory.left - newSale.right, greaterThan(100), reason: 'set apart from the other buttons');
     });
   }
 
@@ -102,15 +111,32 @@ void main() {
     expect(button_('Inventory'), findsNothing);
   });
 
-  testWidgets('a phone keeps the long page: figures in two rows, the buttons after them', (tester) async {
-    await pumpAt(tester, const Size(400, 800));
-    expect(tester.takeException(), isNull);
-    expect(find.byKey(const Key('dashboard-actions-top')), findsNothing);
-    expect(find.byKey(const Key('dashboard-figures-one-row')), findsNothing);
-    double cardTop(String label) => tester.getTopLeft(find.ancestor(of: find.text(label), matching: find.byType(Card)).first).dy;
-    expect(cardTop('Sales Today'), isNot(cardTop('Low Stock')), reason: 'two rows of figures');
-    await tester.scrollUntilVisible(find.text('New Sale'), 200, scrollable: find.byType(Scrollable).first);
-    expect(tester.getTopLeft(find.text('New Sale')).dy, greaterThan(tester.getTopLeft(find.text('Sales Today')).dy),
-        reason: 'below the figures, as before');
+  for (final phone in [const Size(400, 800), const Size(320, 640)]) {
+    testWidgets('a phone ${phone.width.toInt()} wide: New Sale full width at the top, reachable without scrolling; '
+        'figures two by two', (tester) async {
+      await pumpAt(tester, phone);
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('dashboard-actions-top')), findsOneWidget);
+      expect(find.byKey(const Key('dashboard-figures-one-row')), findsNothing);
+      double cardTop(String label) => tester.getTopLeft(find.ancestor(of: find.text(label), matching: find.byType(Card)).first).dy;
+      expect(cardTop('Sales Today'), isNot(cardTop('Low Stock')), reason: 'two rows of figures');
+      onScreen(tester, button_('New Sale'), phone, 'New Sale');
+      final newSale = tester.getRect(button_('New Sale'));
+      expect(newSale.height, greaterThanOrEqualTo(newSaleButtonHeight));
+      expect(newSale.width, greaterThan(phone.width - 40), reason: 'full width');
+      expect(newSale.bottom, lessThan(cardTop('Sales Today')), reason: 'above the figures');
+      onScreen(tester, button_('Inventory'), phone, 'Inventory');
+      expect(tester.getRect(button_('Inventory')).height, lessThan(newSale.height), reason: 'the others are smaller');
+    });
+  }
+
+  testWidgets('New Sale opens a new sale, and its tooltip names the F2 key', (tester) async {
+    await pumpAt(tester, const Size(1366, 768));
+    expect(find.byTooltip('New sale (F2)'), findsOneWidget);
+    expect(find.byKey(const Key('dashboard-new-sale')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('dashboard-new-sale')));
+    await tester.pump();
+    // no router in this test: the push to /new-sale throws, which shows the button is wired to it
+    expect(tester.takeException().toString(), contains('GoRouter'));
   });
 }

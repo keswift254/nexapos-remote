@@ -142,6 +142,11 @@ Future<String?> _redirectOrThrow(Ref ref, String location) async {
   if (location == '/users' && user.role != UserRole.admin) {
     return '/';
   }
+  // Reports are the shop's money: not for a cashier at all (the owner, 2026-11-23: "I want the reports section
+  // completely removed from cashier user"). See canSeeShopFigures.
+  if (location == '/reports' && !canSeeShopFigures(user.role)) {
+    return '/';
+  }
   const inventoryRoles = {UserRole.admin, UserRole.manager};
   if ((location == '/categories' ||
           location == '/products' ||
