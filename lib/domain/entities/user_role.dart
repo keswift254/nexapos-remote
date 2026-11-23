@@ -25,3 +25,11 @@ enum UserRole {
   /// each permission lists exactly which roles may perform it.
   bool isAtLeast(Set<UserRole> allowed) => allowed.contains(this);
 }
+
+/// Whether [role] sees the shop's money: on the dashboard Sales Today, Net Profit Today, Stock Value and the Last 7 Days
+/// chart; in Reports the totals, the profit, the expenses and the printed or exported report. Admins and managers do. A
+/// cashier does not: the dashboard shows only Low Stock, and Reports only the list of sales and refunds (each with its
+/// own amount, to open a receipt, reprint it or refund it). The owner, 2026-11-23: "make the cashier user not to be able
+/// to see daily sales or profits on the dashboard or stock value", then for Reports: "hide totals and profit". A list
+/// of the roles that may, so a role added later sees nothing until it is put here.
+bool canSeeShopFigures(UserRole role) => role.isAtLeast({UserRole.admin, UserRole.manager});

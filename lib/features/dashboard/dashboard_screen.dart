@@ -666,12 +666,6 @@ Future<void> _handleAddToHomeScreen(
   );
 }
 
-/// Whether [role] sees the shop's money on the dashboard: Sales Today, Net Profit Today, Stock Value and the Last 7 Days
-/// chart. Admins and managers do; a cashier does not and sees only Low Stock. The owner, 2026-11-23: "make the cashier
-/// user not to be able to see daily sales or profits on the dashboard or stock value". A list of the roles that may,
-/// so a role added later sees nothing until it is put here.
-bool canSeeShopFigures(UserRole role) => role.isAtLeast({UserRole.admin, UserRole.manager});
-
 class _DashboardStats extends StatefulWidget {
   final DashboardData data;
   final bool canManageInventory;

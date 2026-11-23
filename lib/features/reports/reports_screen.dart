@@ -11,6 +11,7 @@ import 'package:share_plus/share_plus.dart';
 import '../../core/utils/money.dart';
 import '../../data/printing/thermal_printer_service.dart';
 import '../../domain/entities/business_settings.dart';
+import '../../domain/entities/user_role.dart';
 import '../../domain/services/business_settings_service.dart';
 import '../../domain/services/reports_service.dart';
 import '../../domain/services/session_service.dart';
@@ -304,6 +305,10 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
   Widget build(BuildContext context) {
     final range = _range;
     final dataAsync = ref.watch(reportDataProvider(range.$1, range.$2));
+    // A cashier sees the sales and refunds (to open a receipt, reprint it or refund it) but no totals, profit or
+    // expenses, and cannot print or export the report, which carries them (see canSeeShopFigures).
+    final user = ref.watch(sessionProvider);
+    final showTotals = user != null && canSeeShopFigures(user.role);
     final currency = ref
         .watch(reportBusinessSettingsProvider)
         .maybeWhen(data: (s) => s.currency, orElse: () => 'KES');
@@ -370,11 +375,12 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
                 selected: _mode == 'month',
                 onSelected: (_) => _selectTab('month'),
               ),
-              ChoiceChip(
-                label: const Text('Expenses'),
-                selected: _mode == 'expenses',
-                onSelected: (_) => _selectTab('expenses'),
-              ),
+              if (showTotals)
+                ChoiceChip(
+                  label: const Text('Expenses'),
+                  selected: _mode == 'expenses',
+                  onSelected: (_) => _selectTab('expenses'),
+                ),
               ChoiceChip(
                 label: const Text('Selected Period'),
                 selected: _mode == 'range',
@@ -388,36 +394,38 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
             runSpacing: 8,
             children: [
               FilledButton(onPressed: _apply, child: const Text('View Report')),
-              dataAsync.maybeWhen(
-                data: (data) => OutlinedButton.icon(
-                  onPressed: _printing ? null : () => _print(data),
-                  icon: _printing
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.print_outlined),
-                  label: Text(_printing ? 'Printing...' : 'Print'),
+              if (showTotals) ...[
+                dataAsync.maybeWhen(
+                  data: (data) => OutlinedButton.icon(
+                    onPressed: _printing ? null : () => _print(data),
+                    icon: _printing
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.print_outlined),
+                    label: Text(_printing ? 'Printing...' : 'Print'),
+                  ),
+                  orElse: () => OutlinedButton.icon(
+                    onPressed: null,
+                    icon: const Icon(Icons.print_outlined),
+                    label: const Text('Print'),
+                  ),
                 ),
-                orElse: () => OutlinedButton.icon(
-                  onPressed: null,
-                  icon: const Icon(Icons.print_outlined),
-                  label: const Text('Print'),
+                dataAsync.maybeWhen(
+                  data: (data) => OutlinedButton.icon(
+                    onPressed: () => _exportPdf(data),
+                    icon: const Icon(Icons.picture_as_pdf_outlined),
+                    label: const Text('Export PDF'),
+                  ),
+                  orElse: () => OutlinedButton.icon(
+                    onPressed: null,
+                    icon: const Icon(Icons.picture_as_pdf_outlined),
+                    label: const Text('Export PDF'),
+                  ),
                 ),
-              ),
-              dataAsync.maybeWhen(
-                data: (data) => OutlinedButton.icon(
-                  onPressed: () => _exportPdf(data),
-                  icon: const Icon(Icons.picture_as_pdf_outlined),
-                  label: const Text('Export PDF'),
-                ),
-                orElse: () => OutlinedButton.icon(
-                  onPressed: null,
-                  icon: const Icon(Icons.picture_as_pdf_outlined),
-                  label: const Text('Export PDF'),
-                ),
-              ),
+              ],
             ],
           ),
           const SizedBox(height: 20),
@@ -438,6 +446,7 @@ class _ReportsScreenState extends ConsumerState<ReportsScreen> {
               isMonthly: _isMonthly,
               isMultiDay: _isMultiDay,
               currency: currency,
+              showTotals: showTotals,
             ),
           ),
         ],
@@ -578,11 +587,15 @@ class _ReportBody extends StatelessWidget {
   final bool isMultiDay;
   final String currency;
 
+  /// The totals, profit and expenses (see canSeeShopFigures). Without them: the sales and refunds only.
+  final bool showTotals;
+
   const _ReportBody({
     required this.data,
     required this.isMonthly,
     required this.isMultiDay,
     required this.currency,
+    required this.showTotals,
   });
 
   @override
@@ -592,48 +605,56 @@ class _ReportBody extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: [
-            _MetricTile(
-              label: 'Paid Sales',
-              value: data.salesTotal.format(currency: currency),
-            ),
-            if (data.refunds.isNotEmpty)
+        if (!showTotals)
+          Text(
+            'Tap a receipt to see it, reprint it or refund it.',
+            key: const Key('report-cashier-note'),
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        if (showTotals)
+          Wrap(
+            key: const Key('report-totals'),
+            spacing: 12,
+            runSpacing: 12,
+            children: [
               _MetricTile(
-                label: 'Refunds',
-                value: data.refundsTotal.format(currency: currency),
+                label: 'Paid Sales',
+                value: data.salesTotal.format(currency: currency),
               ),
-            _MetricTile(
-              label: 'Total Cash Received',
-              value: data.cashReceivedTotal.format(currency: currency),
-            ),
-            _MetricTile(
-              label: 'Total Paid by M-Pesa',
-              value: data.mpesaTotal.format(currency: currency),
-            ),
-            _MetricTile(
-              label: 'Total Expenses',
-              value: data.expensesTotal.format(currency: currency),
-            ),
-            if (isMonthly)
+              if (data.refunds.isNotEmpty)
+                _MetricTile(
+                  label: 'Refunds',
+                  value: data.refundsTotal.format(currency: currency),
+                ),
               _MetricTile(
-                label: 'Gross Profit',
-                value: data.grossProfitTotal.format(currency: currency),
+                label: 'Total Cash Received',
+                value: data.cashReceivedTotal.format(currency: currency),
               ),
-            _MetricTile(
-              label: isMonthly ? 'Net Profit' : 'Grand Total',
-              value: (isMonthly ? data.netProfit : data.grandTotal).format(
-                currency: currency,
+              _MetricTile(
+                label: 'Total Paid by M-Pesa',
+                value: data.mpesaTotal.format(currency: currency),
               ),
-            ),
-            _MetricTile(
-              label: 'Transactions',
-              value: '${data.transactionCount}',
-            ),
-          ],
-        ),
+              _MetricTile(
+                label: 'Total Expenses',
+                value: data.expensesTotal.format(currency: currency),
+              ),
+              if (isMonthly)
+                _MetricTile(
+                  label: 'Gross Profit',
+                  value: data.grossProfitTotal.format(currency: currency),
+                ),
+              _MetricTile(
+                label: isMonthly ? 'Net Profit' : 'Grand Total',
+                value: (isMonthly ? data.netProfit : data.grandTotal).format(
+                  currency: currency,
+                ),
+              ),
+              _MetricTile(
+                label: 'Transactions',
+                value: '${data.transactionCount}',
+              ),
+            ],
+          ),
         const SizedBox(height: 20),
         Text('Sales', style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
@@ -714,17 +735,18 @@ class _ReportBody extends StatelessWidget {
             ],
           ),
         ),
-        Align(
-          alignment: Alignment.centerRight,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Text(
-              'Total Paid Sales: ${data.salesTotal.format(currency: currency)}',
-              style: Theme.of(context).textTheme.titleSmall
-                  ?.copyWith(fontWeight: FontWeight.bold),
+        if (showTotals)
+          Align(
+            alignment: Alignment.centerRight,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text(
+                'Total Paid Sales: ${data.salesTotal.format(currency: currency)}',
+                style: Theme.of(context).textTheme.titleSmall
+                    ?.copyWith(fontWeight: FontWeight.bold),
+              ),
             ),
           ),
-        ),
         if (data.refunds.isNotEmpty) ...[
           const SizedBox(height: 20),
           Text('Refunds', key: const Key('report-refunds-heading'), style: Theme.of(context).textTheme.titleMedium),
@@ -781,92 +803,95 @@ class _ReportBody extends StatelessWidget {
               ],
             ),
           ),
+          if (showTotals)
+            Align(
+              alignment: Alignment.centerRight,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Text(
+                  'Total Refunds: ${data.refundsTotal.format(currency: currency)}',
+                  style: Theme.of(context).textTheme.titleSmall
+                      ?.copyWith(fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
+        ],
+        if (showTotals) ...[
+          const SizedBox(height: 20),
+          Text('Expenses', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: DataTable(
+              columns: const [
+                DataColumn(label: Text('Item')),
+                DataColumn(label: Text('Entered by')),
+                DataColumn(label: Text('Total'), numeric: true),
+                DataColumn(label: Text('Time')),
+              ],
+              rows: [
+                for (final expense in data.expenses)
+                  DataRow(
+                    cells: [
+                      DataCell(
+                        Text(
+                          (expense.note ?? '').isEmpty
+                              ? expense.title
+                              : '${expense.title} (${expense.note})',
+                        ),
+                      ),
+                      DataCell(Text(expense.enteredByName)),
+                      DataCell(
+                        Text(
+                          Money(expense.amountCents).format(currency: currency),
+                        ),
+                      ),
+                      DataCell(
+                        Text(
+                          timeFormat.format(
+                            DateTime.parse(expense.createdAt).toLocal(),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                if (data.expenses.isEmpty)
+                  const DataRow(
+                    cells: [
+                      DataCell(Text('No expenses for this period.')),
+                      DataCell(Text('')),
+                      DataCell(Text('')),
+                      DataCell(Text('')),
+                    ],
+                  ),
+              ],
+            ),
+          ),
           Align(
             alignment: Alignment.centerRight,
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Text(
-                'Total Refunds: ${data.refundsTotal.format(currency: currency)}',
+                'Total Expenses: ${data.expensesTotal.format(currency: currency)}',
                 style: Theme.of(context).textTheme.titleSmall
                     ?.copyWith(fontWeight: FontWeight.bold),
               ),
             ),
           ),
-        ],
-        const SizedBox(height: 20),
-        Text('Expenses', style: Theme.of(context).textTheme.titleMedium),
-        const SizedBox(height: 8),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: DataTable(
-            columns: const [
-              DataColumn(label: Text('Item')),
-              DataColumn(label: Text('Entered by')),
-              DataColumn(label: Text('Total'), numeric: true),
-              DataColumn(label: Text('Time')),
-            ],
-            rows: [
-              for (final expense in data.expenses)
-                DataRow(
-                  cells: [
-                    DataCell(
-                      Text(
-                        (expense.note ?? '').isEmpty
-                            ? expense.title
-                            : '${expense.title} (${expense.note})',
-                      ),
-                    ),
-                    DataCell(Text(expense.enteredByName)),
-                    DataCell(
-                      Text(
-                        Money(expense.amountCents).format(currency: currency),
-                      ),
-                    ),
-                    DataCell(
-                      Text(
-                        timeFormat.format(
-                          DateTime.parse(expense.createdAt).toLocal(),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              if (data.expenses.isEmpty)
-                const DataRow(
-                  cells: [
-                    DataCell(Text('No expenses for this period.')),
-                    DataCell(Text('')),
-                    DataCell(Text('')),
-                    DataCell(Text('')),
-                  ],
-                ),
-            ],
-          ),
-        ),
-        Align(
-          alignment: Alignment.centerRight,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Text(
-              'Total Expenses: ${data.expensesTotal.format(currency: currency)}',
-              style: Theme.of(context).textTheme.titleSmall
-                  ?.copyWith(fontWeight: FontWeight.bold),
+          const Divider(height: 32),
+          if (isMonthly)
+            _GrandTotalRow(
+              label: 'Gross Profit',
+              value: data.grossProfitTotal.format(currency: currency),
             ),
-          ),
-        ),
-        const Divider(height: 32),
-        if (isMonthly)
           _GrandTotalRow(
-            label: 'Gross Profit',
-            value: data.grossProfitTotal.format(currency: currency),
+            label: isMonthly ? 'Net Profit' : 'Grand Total',
+            value: (isMonthly ? data.netProfit : data.grandTotal).format(
+              currency: currency,
+            ),
+            bold: true,
           ),
-        _GrandTotalRow(
-          label: isMonthly ? 'Net Profit' : 'Grand Total',
-          value: (isMonthly ? data.netProfit : data.grandTotal).format(
-            currency: currency,
-          ),
-          bold: true,
-        ),
+        ],
       ],
     );
   }
