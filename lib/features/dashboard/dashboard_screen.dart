@@ -319,6 +319,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
     final user = ref.watch(sessionProvider);
     final canManageInventory =
         user != null && {UserRole.admin, UserRole.manager}.contains(user.role);
+    final seesShopFigures = user != null && canSeeShopFigures(user.role);
     final dataAsync = ref.watch(dashboardDataProvider);
     final pendingPaystackSales = ref.watch(pendingPaystackSalesProvider);
     final confirmedOnlineSales = ref.watch(confirmedOnlineSalesProvider);
@@ -616,8 +617,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen>
                       child: Text('Failed to load dashboard: $error'),
                     ),
                     data: (data) => _DashboardStats(
+                      // one per person signed in: amounts someone showed with the eye are hidden again for the next
+                      key: ValueKey('dashboard-stats-${user.id}'),
                       data: data,
                       canManageInventory: canManageInventory,
+                      showShopFigures: seesShopFigures,
                       wide: wide,
                     ),
                   ),
@@ -662,14 +666,29 @@ Future<void> _handleAddToHomeScreen(
   );
 }
 
+/// Whether [role] sees the shop's money on the dashboard: Sales Today, Net Profit Today, Stock Value and the Last 7 Days
+/// chart. Admins and managers do; a cashier does not and sees only Low Stock. The owner, 2026-11-23: "make the cashier
+/// user not to be able to see daily sales or profits on the dashboard or stock value". A list of the roles that may,
+/// so a role added later sees nothing until it is put here.
+bool canSeeShopFigures(UserRole role) => role.isAtLeast({UserRole.admin, UserRole.manager});
+
 class _DashboardStats extends StatefulWidget {
   final DashboardData data;
   final bool canManageInventory;
 
+  /// Sales, profit, stock value and the Last 7 Days chart (see [canSeeShopFigures]). Without them only Low Stock is shown.
+  final bool showShopFigures;
+
   /// A wide window: the four figures in one row (see [wideDashboardWidth]).
   final bool wide;
 
-  const _DashboardStats({required this.data, required this.canManageInventory, this.wide = false});
+  const _DashboardStats({
+    super.key,
+    required this.data,
+    required this.canManageInventory,
+    required this.showShopFigures,
+    this.wide = false,
+  });
 
   @override
   State<_DashboardStats> createState() => _DashboardStatsState();
@@ -726,6 +745,27 @@ class _DashboardStatsState extends State<_DashboardStats> {
     final data = widget.data;
     final today = data.today;
     const hiddenValue = '******';
+    final lowStockCard = _StatCard(
+      label: 'Low Stock',
+      value: '${data.lowStockCount}',
+      subtitle: data.lowStockCount == 1
+          ? 'product at/below reorder level'
+          : 'products at/below reorder level',
+      onTap: widget.canManageInventory
+          ? () => context.push('/products?lowStockOnly=true')
+          : null,
+    );
+    if (!widget.showShopFigures) {
+      // A cashier: no sales, profit, stock value or chart - not even as stars - only how many products are running low.
+      return Align(
+        key: const Key('dashboard-cashier-figures'),
+        alignment: Alignment.topLeft,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: lowStockCard,
+        ),
+      );
+    }
     final todayRow = Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -763,18 +803,7 @@ class _DashboardStatsState extends State<_DashboardStats> {
     final stockRow = Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Expanded(
-                child: _StatCard(
-                  label: 'Low Stock',
-                  value: '${data.lowStockCount}',
-                  subtitle: data.lowStockCount == 1
-                      ? 'product at/below reorder level'
-                      : 'products at/below reorder level',
-                  onTap: widget.canManageInventory
-                      ? () => context.push('/products?lowStockOnly=true')
-                      : null,
-                ),
-              ),
+              Expanded(child: lowStockCard),
               const SizedBox(width: 12),
               Expanded(
                 child: _StatCard(
