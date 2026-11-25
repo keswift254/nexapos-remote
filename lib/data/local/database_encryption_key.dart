@@ -2,7 +2,10 @@ import 'dart:math';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-const _encryptionKeyStorageKey = 'nexapos.db.encryptionKey';
+/// The secure-storage entry holding the database key. The Windows key-file guard protects it: a copy of the file
+/// without it never replaces one with it (see installSecureStorageGuard in main.dart).
+const databaseEncryptionKeyName = 'nexapos.db.encryptionKey';
+const _encryptionKeyStorageKey = databaseEncryptionKeyName;
 
 /// An encrypted database is already on disk but its key is nowhere to be
 /// found. Minting a fresh key here would silently orphan that database for

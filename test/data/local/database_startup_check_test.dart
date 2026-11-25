@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage_platform_interface.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nexapos_mobile/core/secure_storage_guard_io.dart';
 import 'package:nexapos_mobile/data/local/database_encryption.dart';
 import 'package:nexapos_mobile/data/local/database_connection_native.dart';
 import 'package:nexapos_mobile/data/local/database_encryption_key.dart';
@@ -12,6 +13,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
 
 import '../../support/fake_secure_storage.dart';
+import '../../support/plugin_like_secure_storage.dart';
 
 class _UnreadableStorage extends FlutterSecureStoragePlatform {
   @override
@@ -163,6 +165,96 @@ void main() {
       final before = await file.readAsBytes();
       await checkDatabaseStartup(storage: storage, documents: dir);
       expect(await file.readAsBytes(), before);
+    });
+  });
+
+  // 2026-11-25: the owner's PC showed "NexaPOS can't open its saved data". The store held one licence entry, the backup
+  // the same, and the real database key was only in the three copies the guard had set aside as unreadable (they were
+  // fine). The start-up check now looks there itself before asking a person.
+  group('the key is recovered from the copies the guard kept', () {
+    const otherKey = 'b1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f91';
+    late Directory keys;
+    late SecureStorageFileGuard guard;
+    late FlutterSecureStoragePlatform original;
+    const guarded = FlutterSecureStorage();
+
+    setUp(() async {
+      keys = await Directory(p.join(dir.path, 'appdata')).create();
+      guard = SecureStorageFileGuard(keys, protectedKeys: const [keyName], decode: decodePlainStore);
+      original = FlutterSecureStoragePlatform.instance;
+      FlutterSecureStoragePlatform.instance = GuardedSecureStoragePlatform(PluginLikePlatform(guard.primary), guard);
+    });
+
+    tearDown(() => FlutterSecureStoragePlatform.instance = original);
+
+    File setAside(int stamp, Map<String, String> entries) {
+      final file = File(p.join(keys.path, '$secureStorageFileName.corrupt-$stamp'));
+      writePlainStore(file, entries);
+      return file;
+    }
+
+    Map<String, String> store() => decodePlainStore(guard.primary.readAsBytesSync())!;
+
+    test('the 2026-11-25 state: started normally with the real key back, the licence entry kept, nothing deleted',
+        () async {
+      final db = encryptedDb(goodKey);
+      writePlainStore(guard.primary, {'nexapos.license.validUntil': 'kept'});
+      writePlainStore(guard.backup, {'nexapos.license.validUntil': 'kept'});
+      setAside(1000, {keyName: goodKey, 'nexapos.platform.apiKey': 'API-1', 'nexapos.license.validUntil': 'older'});
+      setAside(2000, {keyName: goodKey, 'nexapos.platform.apiKey': 'API-1', 'nexapos.license.validUntil': 'old'});
+      final dbBefore = await db.readAsBytes();
+
+      expect(await checkDatabaseStartup(storage: guarded, documents: dir, guard: guard), isNull,
+          reason: 'safe to start: no recovery screen');
+
+      expect(store()[keyName], goodKey);
+      expect(store()['nexapos.platform.apiKey'], 'API-1', reason: 'the other secrets come back too');
+      expect(store()['nexapos.license.validUntil'], 'kept', reason: 'what the emptied store held is newer and is kept');
+      expect(decodePlainStore(guard.backup.readAsBytesSync())![keyName], goodKey, reason: 'and the backup holds it');
+      expect(keys.listSync().where((e) => p.basename(e.path).contains('.corrupt-')), hasLength(3),
+          reason: 'both copies are still there, plus the emptied store, kept aside');
+      expect(await db.readAsBytes(), dbBefore, reason: 'the shop data file is never changed');
+    });
+
+    test('a copy whose key does not open THIS data file is never used: the person is still asked', () async {
+      encryptedDb(goodKey);
+      writePlainStore(guard.primary, {'nexapos.license.validUntil': 'x'});
+      setAside(1000, {keyName: otherKey});
+
+      final problem = await checkDatabaseStartup(storage: guarded, documents: dir, guard: guard);
+
+      expect(problem?.kind, DatabaseProblemKind.keyMissing);
+      expect(store(), {'nexapos.license.validUntil': 'x'}, reason: 'the store is left as it was');
+    });
+
+    test('a wrong key in the store and the right one in the backup: recovered, and the wrong key is not written back',
+        () async {
+      encryptedDb(goodKey);
+      writePlainStore(guard.primary, {keyName: otherKey, 'nexapos.session.userId': 'u-new'});
+      writePlainStore(guard.backup, {keyName: goodKey, 'nexapos.session.userId': 'u-old'});
+      await guard.primary.setLastModified(DateTime.now().add(const Duration(seconds: 5)));
+
+      expect(await checkDatabaseStartup(storage: guarded, documents: dir, guard: guard), isNull);
+
+      expect(store()[keyName], goodKey);
+      expect(store()['nexapos.session.userId'], 'u-new');
+    });
+
+    test('of several copies, the newest whose key opens the file is used', () async {
+      encryptedDb(goodKey);
+      setAside(1000, {keyName: goodKey, 'marker': 'oldest'});
+      setAside(2000, {keyName: otherKey, 'marker': 'wrong key'});
+      setAside(3000, {keyName: goodKey, 'marker': 'newest good'});
+
+      expect(await checkDatabaseStartup(storage: guarded, documents: dir, guard: guard), isNull);
+
+      expect(store()['marker'], 'newest good');
+    });
+
+    test('no copies at all: the person is asked, as before', () async {
+      encryptedDb(goodKey);
+      final problem = await checkDatabaseStartup(storage: guarded, documents: dir, guard: guard);
+      expect(problem?.kind, DatabaseProblemKind.keyMissing);
     });
   });
 

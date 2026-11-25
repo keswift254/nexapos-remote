@@ -3,7 +3,25 @@
 #include <windows.h>
 
 #include "flutter_window.h"
+#include "single_instance.h"
 #include "utils.h"
+
+namespace {
+
+// Brings the running NexaPOS window to the front. False when there is none
+// (yet).
+bool ShowExistingWindow() {
+  HWND existing = ::FindWindow(L"FLUTTER_RUNNER_WIN32_WINDOW", L"NexaPOS");
+  if (!existing) return false;
+  DWORD process_id = 0;
+  ::GetWindowThreadProcessId(existing, &process_id);
+  ::AllowSetForegroundWindow(process_id);
+  if (::IsIconic(existing)) ::ShowWindow(existing, SW_RESTORE);
+  ::SetForegroundWindow(existing);
+  return true;
+}
+
+}  // namespace
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
@@ -12,15 +30,17 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   if (arguments.size() == 1 &&
       (arguments[0] == "nexapos://checkout-return" ||
        arguments[0] == "nexapos://checkout-return/")) {
-    HWND existing = ::FindWindow(L"FLUTTER_RUNNER_WIN32_WINDOW", L"NexaPOS");
-    if (existing) {
-      DWORD process_id = 0;
-      ::GetWindowThreadProcessId(existing, &process_id);
-      ::AllowSetForegroundWindow(process_id);
-      if (::IsIconic(existing)) ::ShowWindow(existing, SW_RESTORE);
-      ::SetForegroundWindow(existing);
-      return EXIT_SUCCESS;
-    }
+    if (ShowExistingWindow()) return EXIT_SUCCESS;
+  }
+
+  // NexaPOS already running: show it instead of starting a second copy (see
+  // single_instance.h).
+  bool already_running = false;
+  HANDLE single_instance =
+      TakeSingleInstanceLock(kSingleInstanceName, &already_running);
+  if (already_running) {
+    ShowExistingWindow();
+    return EXIT_SUCCESS;
   }
   // Attach to console when present (e.g., 'flutter run') or create a
   // new console when running with a debugger.
@@ -64,5 +84,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   }
 
   ::CoUninitialize();
+  if (single_instance != nullptr) ::CloseHandle(single_instance);
   return EXIT_SUCCESS;
 }

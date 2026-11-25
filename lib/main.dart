@@ -7,6 +7,7 @@ import 'app.dart';
 import 'core/checkout_return_bridge.dart';
 import 'core/secure_storage_guard.dart';
 import 'core/tls_trusted_roots.dart';
+import 'data/local/database_encryption_key.dart';
 import 'data/local/database_startup_check.dart';
 import 'features/recovery/database_recovery_app.dart';
 
@@ -23,8 +24,9 @@ void main() {
       // Windows 7 one, typically) whose own certificate store lacks them.
       installExtraTrustedRoots();
       // Before anything reads a secret: keeps a second copy of the Windows
-      // secure-storage file so one bad read cannot lose the database key.
-      await installSecureStorageGuard();
+      // secure-storage file so one bad read cannot lose the database key - and
+      // never lets a copy without the database key replace one with it.
+      await installSecureStorageGuard(protectedKeys: const [databaseEncryptionKeyName]);
       await CheckoutReturnBridge.initialize();
       void startApp() => runApp(const ProviderScope(child: NexaPosApp()));
       // An encrypted database whose key is gone must never be silently

@@ -53,9 +53,13 @@ Name: "{commonprograms}\NexaPOS\NexaPOS"; Filename: "{app}\nexapos_mobile.exe"; 
 [Run]
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""NexaPOS LAN Sync"""; Flags: runhidden waituntilterminated
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""NexaPOS LAN Sync"" dir=in action=allow program=""{app}\nexapos_mobile.exe"" enable=yes profile=any"; Flags: runhidden waituntilterminated
-; Always start NexaPOS after setup completes, including silent in-app updates.
-; runasoriginaluser prevents the elevated installer from starting the POS as admin.
-Filename: "{app}\nexapos_mobile.exe"; WorkingDir: "{app}"; Flags: nowait runasoriginaluser
+; Always start NexaPOS after setup completes, including silent in-app updates,
+; and never as administrator. runasoriginaluser alone is not enough: the in-app
+; update starts Setup already elevated, so its "original user" IS the
+; administrator - on 2026-11-25 such a copy kept running beside a normal one and
+; the two emptied the shared key file. Explorer hands the start to the user's own
+; desktop, which runs without administrator rights.
+Filename: "{win}\explorer.exe"; Parameters: """{app}\nexapos_mobile.exe"""; Flags: nowait runasoriginaluser
 
 [UninstallRun]
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""NexaPOS LAN Sync"""; Flags: runhidden waituntilterminated
