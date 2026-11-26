@@ -3,11 +3,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../data/payments/payment_inbox_gateway.dart';
 import '../../data/payments/platform_http_client.dart';
+import '../../data/payments/sms_forwarding.dart';
 import '../../domain/entities/paystack_credentials.dart';
 import '../../domain/entities/user_role.dart';
 import '../../domain/services/paystack_credentials_service.dart';
@@ -120,7 +122,9 @@ class _TillPhoneScreenState extends ConsumerState<TillPhoneScreen> {
 
   // ---- set a phone up -----------------------------------------------------------------------------------------------------
 
-  Future<void> _setUp() async {
+  /// [thisPhone]: the phone being set up is the one in hand (Android): its key goes straight to "M-Pesa messages from
+  /// this phone" instead of being copied over.
+  Future<void> _setUp({bool thisPhone = false}) async {
     final user = ref.read(sessionProvider);
     if (user == null) return;
     final answer = await showDialog<({String label, String password})>(
@@ -142,6 +146,7 @@ class _TillPhoneScreenState extends ConsumerState<TillPhoneScreen> {
       if (!mounted) return;
       setState(() => _newKey = key);
       unawaited(_load(quiet: true));
+      if (thisPhone) unawaited(context.push('/sms-forwarding', extra: key.key));
     } catch (e) {
       _say(_words(e));
     } finally {
@@ -327,6 +332,21 @@ class _TillPhoneScreenState extends ConsumerState<TillPhoneScreen> {
                     icon: const Icon(Icons.add),
                     label: const Text('Set up a phone'),
                   ),
+                  // On an Android phone that itself gets the till's messages: set it up and switch passing on on here.
+                  if (smsForwardingSupported) ...[
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      key: const Key('till-phone-use-this-phone'),
+                      onPressed: (_busy || full || phones == null) ? null : () => _setUp(thisPhone: true),
+                      icon: const Icon(Icons.sms_outlined),
+                      label: const Text('Use this phone (Android)'),
+                    ),
+                    TextButton(
+                      key: const Key('till-phone-this-phone-status'),
+                      onPressed: () => context.push('/sms-forwarding'),
+                      child: const Text('M-Pesa messages from this phone'),
+                    ),
+                  ],
                 ],
               ),
             ),

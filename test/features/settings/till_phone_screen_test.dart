@@ -1,7 +1,9 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:nexapos_mobile/core/utils/money.dart';
 import 'package:nexapos_mobile/data/payments/payment_inbox_gateway.dart';
 import 'package:nexapos_mobile/data/payments/platform_http_client.dart';
@@ -191,6 +193,57 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text(_key), findsNothing);
     expect(find.byKey(const Key('till-phone-key-card')), findsNothing);
+  });
+
+  // 2026-11-25: Android phones pass the till's messages on from NexaPOS itself.
+  testWidgets('on an Android phone, "Use this phone" sets this phone up and opens passing on with its key', (tester) async {
+    tester.view.physicalSize = const Size(1000, 2600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    debugDefaultTargetPlatformOverride = TargetPlatform.android;
+    inbox = _Inbox();
+    String? handedOver;
+    final router = GoRouter(routes: [
+      GoRoute(path: '/', builder: (_, _) => const TillPhoneScreen()),
+      GoRoute(
+        path: '/sms-forwarding',
+        builder: (_, state) {
+          handedOver = state.extra as String?;
+          return const Scaffold(body: Text('passing on'));
+        },
+      ),
+    ]);
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        sessionProvider.overrideWith(() => _Session(UserRole.admin)),
+        paystackCredentialsServiceProvider.overrideWithValue(_Credentials(true)),
+        paymentInboxGatewayProvider.overrideWithValue(inbox),
+      ],
+      child: MaterialApp.router(routerConfig: router),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('till-phone-use-this-phone')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('till-phone-label')), 'Shop Android');
+    await tester.enterText(find.byKey(const Key('till-phone-password')), 'my-own-password');
+    await tester.tap(find.byKey(const Key('till-phone-create')));
+    await tester.pumpAndSettle();
+
+    expect(inbox.added.single, (label: 'Shop Android', userId: 'admin-1', password: 'my-own-password'),
+        reason: 'the same set-up as any phone: the shop checks the password');
+    expect(handedOver, _key, reason: "the new key goes straight to this phone's passing on");
+    expect(find.text('passing on'), findsOneWidget);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('not an Android phone: no "Use this phone" (a PC or an iPhone cannot read text messages itself)', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    await pump(tester);
+    expect(find.byKey(const Key('till-phone-use-this-phone')), findsNothing);
+    expect(find.byKey(const Key('till-phone-set-up')), findsOneWidget);
+    debugDefaultTargetPlatformOverride = null;
   });
 
   testWidgets('the scan code opens the phone set-up page with the key after the #', (tester) async {

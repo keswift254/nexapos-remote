@@ -11,6 +11,7 @@ import '../../domain/services/license_service.dart';
 import '../../core/providers.dart';
 import '../../data/payments/platform_http_client.dart';
 import '../../data/payments/platform_onboarding_gateway.dart';
+import '../../data/payments/sms_forwarding.dart';
 import '../../domain/entities/paystack_credentials.dart';
 import '../../domain/services/paystack_credentials_service.dart';
 import 'activation_update_notice.dart';
@@ -479,6 +480,16 @@ class _ActivationScreenState extends ConsumerState<ActivationScreen> {
                     icon: const Icon(Icons.group_add_outlined),
                     label: const Text('Join an existing shop'),
                   ),
+                  // An Android phone that only gets the till's M-Pesa messages needs no shop of its own.
+                  if (smsForwardingSupported) ...[
+                    const SizedBox(height: 8),
+                    TextButton.icon(
+                      key: const Key('activation-sms-forwarding'),
+                      onPressed: _submitting ? null : () => context.push('/sms-forwarding'),
+                      icon: const Icon(Icons.sms_outlined),
+                      label: const Text('This phone only passes on M-Pesa messages'),
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   FutureBuilder<bool>(
                     future: ref.read(licenseServiceProvider).membershipBlocked,

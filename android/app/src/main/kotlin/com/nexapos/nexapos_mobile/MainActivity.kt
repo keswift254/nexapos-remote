@@ -1,6 +1,8 @@
 package com.nexapos.nexapos_mobile
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
@@ -9,7 +11,10 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -20,6 +25,8 @@ class MainActivity : FlutterFragmentActivity() {
     private var appInfoChannel: MethodChannel? = null
     private var updatePermissionChannel: MethodChannel? = null
     private var soundChannel: MethodChannel? = null
+    private var smsChannel: MethodChannel? = null
+    private var smsPermissionResult: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -94,6 +101,65 @@ class MainActivity : FlutterFragmentActivity() {
             }
         }
 
+        // This phone passing the till's payment messages on (see SmsForwarding.kt).
+        smsChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.nexapos/sms_forwarding")
+        smsChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "status" -> {
+                    val snapshot = HashMap<String, Any?>(SmsForwardingStore.snapshot(this))
+                    snapshot["permission"] = smsPermissionGranted()
+                    snapshot["sdk"] = Build.VERSION.SDK_INT
+                    Thread {
+                        val waiting = try {
+                            WorkManager.getInstance(applicationContext)
+                                .getWorkInfosByTag(SmsForwardingStore.WORK_TAG).get()
+                                .count { it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.BLOCKED }
+                        } catch (e: Exception) {
+                            0
+                        }
+                        snapshot["waiting"] = waiting
+                        runOnUiThread { result.success(snapshot) }
+                    }.start()
+                }
+                "enable" -> {
+                    val key = SmsForwardRules.keyFrom(call.argument<String>("key"))
+                    val address = call.argument<String>("address")
+                    if (key == null || address.isNullOrBlank()) {
+                        result.success(false)
+                    } else {
+                        SmsForwardingStore.enable(this, key, address)
+                        result.success(true)
+                    }
+                }
+                "disable" -> {
+                    SmsForwardingStore.disable(this)
+                    result.success(true)
+                }
+                "requestPermission" -> {
+                    if (smsPermissionGranted()) {
+                        result.success(true)
+                    } else if (smsPermissionResult != null) {
+                        result.success(false)
+                    } else {
+                        smsPermissionResult = result
+                        ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECEIVE_SMS), SMS_PERMISSION_REQUEST)
+                    }
+                }
+                "openAppSettings" -> {
+                    try {
+                        startActivity(
+                            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.success(false)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
+
         downloadChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.nexapos/download_service")
         downloadChannel?.setMethodCallHandler { call, result ->
             when (call.method) {
@@ -111,6 +177,23 @@ class MainActivity : FlutterFragmentActivity() {
                 else -> result.notImplemented()
             }
         }
+    }
+
+    private fun smsPermissionGranted(): Boolean =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED
+
+    @Deprecated("Deprecated in Java")
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == SMS_PERMISSION_REQUEST) {
+            val answer = smsPermissionResult
+            smsPermissionResult = null
+            answer?.success(smsPermissionGranted())
+        }
+    }
+
+    companion object {
+        private const val SMS_PERMISSION_REQUEST = 4207
     }
 
     private fun le16(b: ByteArray, at: Int): Int = (b[at].toInt() and 0xFF) or ((b[at + 1].toInt() and 0xFF) shl 8)

@@ -90,3 +90,10 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // Passing the till's payment messages on (SmsForwarding.kt): each message waits for internet and is tried again
+    // later - also after a restart - when the shop cannot be reached.
+    implementation("androidx.work:work-runtime:2.10.0")
+    testImplementation("junit:junit:4.13.2")
+}

@@ -44,6 +44,7 @@ import 'features/settings/device_management_screen.dart'
 import 'features/settings/device_sync_screen.dart';
 import 'features/settings/license_screen.dart';
 import 'features/settings/region_time_screen.dart';
+import 'features/settings/sms_forwarding_screen.dart';
 import 'features/settings/till_phone_screen.dart';
 import 'features/settings/settings_menu_screen.dart';
 import 'features/settings/update_screen.dart';
@@ -101,7 +102,8 @@ Future<String?> _redirect(Ref ref, String location) async {
 Future<String?> _redirectOrThrow(Ref ref, String location) async {
   final hasLicense = await ref.read(hasCachedLicenseProvider.future);
   if (!hasLicense) {
-    return location == '/activate' || location == '/join-shop'
+    // A phone that only passes the till's M-Pesa messages on needs no shop of its own (it uses the till phone's key).
+    return location == '/activate' || location == '/join-shop' || location == '/sms-forwarding'
         ? null
         : '/activate';
   }
@@ -237,6 +239,11 @@ GoRouter router(Ref ref) {
       GoRoute(
         path: '/till-phone',
         builder: (context, state) => const TillPhoneScreen(),
+      ),
+      GoRoute(
+        // An Android phone passing the till's payment messages on; extra: a key to fill in.
+        path: '/sms-forwarding',
+        builder: (context, state) => SmsForwardingScreen(initialKey: state.extra is String ? state.extra as String : null),
       ),
       GoRoute(
         path: '/business-settings',

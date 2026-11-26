@@ -29,6 +29,12 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- The till's M-Pesa / bank payment messages: when this phone is set up to pass them on
+         (Settings > M-Pesa Till Phone, or "This phone only passes on M-Pesa messages" on the
+         first screen), PaymentSmsReceiver sends each payment message from a NAMED sender to
+         the shop, like the iPhone Shortcut does. Messages from phone numbers never leave the
+         phone. Asked for only when the person switches passing on on. -->
+    <uses-permission android:name="android.permission.RECEIVE_SMS"/>
     <!-- allowBackup off: left unset, Android defaults it ON, so Auto Backup
          would copy this app's SQLite file - including its device_meta
          device id and sync cursors - into the owner's Google account and
@@ -73,6 +79,15 @@
                 <data android:scheme="nexapos" android:host="checkout-return" />
             </intent-filter>
         </activity>
+        <!-- Only the system may deliver to it (BROADCAST_SMS), so no app can feed it a fake message. -->
+        <receiver
+            android:name=".PaymentSmsReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
         <service
             android:name=".DownloadForegroundService"
             android:exported="false"
