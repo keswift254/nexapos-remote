@@ -306,4 +306,137 @@ void main() {
       expect(await salesCount(), 0);
     });
   });
+
+  group('the customer paid in two or more payments (say 200, then 50)', () {
+    // A 120.00 sale (two sodas) paid as 80.00, then 40.00.
+    const first = 'SJK2TILL9X';
+    const second = 'SJK3TILL8Y';
+    const third = 'SJK4TILL7Z';
+    final amounts = {first: const Money(8000), second: const Money(4000), third: const Money(1000)};
+
+    Future<TillSaleOutcome> sellWith(String codes,
+            {bool acceptAmount = false, Money? cash, Map<String, Money>? known}) =>
+        service.complete(
+          cart: sodas(2),
+          discount: const Money.zero(),
+          saleType: 'retail',
+          userId: cashierId,
+          typedCode: codes,
+          acceptAmount: acceptAmount,
+          cashReceived: cash,
+          knownAmounts: known ?? amounts,
+        );
+
+    test('each code is used on THIS sale for exactly its own amount; the sale is saved once, with every code', () async {
+      final done = await sellWith('$first, $second') as TillSaleDone;
+
+      expect(inbox.claims.map((c) => (c.code, c.amountCents, c.acceptAmount)), [(first, 8000, false), (second, 4000, false)]);
+      expect(inbox.claims.map((c) => c.saleId).toSet(), {done.sale.id}, reason: 'both on the very sale that was saved');
+      expect(inbox.claims.map((c) => c.saleNumber).toSet(), {done.sale.saleNumber});
+      expect(await salesCount(), 1);
+      final saved = (await sales.findById(done.sale.id))!;
+      expect((saved.paymentMethod, saved.status, saved.total), ('mpesa_manual', 'paid', const Money(12000)));
+      final record = (await payments.forSale(done.sale.id))!;
+      expect((record.amount, record.referenceNote), (const Money(12000), '$first, $second'),
+          reason: 'one payment record, as for any till sale, naming both payments');
+      expect(done.paid, const Money(12000));
+      expect(done.change, const Money.zero());
+      expect(await sodaStock(), 8);
+      expect(inbox.releases, isEmpty);
+    });
+
+    test('codes may be typed with a plus or a comma, in any case, each one only once', () async {
+      final done = await sellWith(' sjk2 till-9x + SJK3TILL8Y,sjk2till9x ') as TillSaleDone;
+      expect(inbox.claims.map((c) => c.code), [first, second]);
+      expect((await payments.forSale(done.sale.id))!.referenceNote, '$first, $second');
+    });
+
+    test('payments that add up to less than the sale are refused before anything is used', () async {
+      final refused = await sellWith('$first, $third') as TillSaleRefused;
+      expect(refused.message, contains('add up to KES 90.00, which is KES 30.00 less than this sale (KES 120.00)'));
+      expect(inbox.claims, isEmpty);
+      expect(await salesCount(), 0);
+    });
+
+    test('a payment the sale does not need is refused (a slip of the finger), naming it', () async {
+      final refused = await sellWith('$first, $second, $third') as TillSaleRefused;
+      expect(refused.message, contains('without $third'));
+      expect(inbox.claims, isEmpty);
+    });
+
+    test('more than the sale asks first; going ahead works out the change, and no code is sent as a different amount',
+        () async {
+      final more = {...amounts, second: const Money(5000)};
+      final asked = await sellWith('$first, $second', known: more) as TillSaleNeedsConfirmation;
+      expect((asked.paid, asked.total, asked.payments), (const Money(13000), const Money(12000), 2));
+      expect(inbox.claims, isEmpty);
+
+      final done = await sellWith('$first, $second', known: more, acceptAmount: true) as TillSaleDone;
+      expect(done.change, const Money(1000));
+      expect(inbox.claims.map((c) => (c.amountCents, c.acceptAmount)), [(8000, false), (5000, false)]);
+      expect((await payments.forSale(done.sale.id))!.amount, const Money(12000), reason: 'the record is for the sale');
+    });
+
+    test('a code that is not in the list of payments is refused: its amount is not known', () async {
+      final refused = await sellWith('$first, SJK9TILL1Q') as TillSaleRefused;
+      expect(refused.message, contains('SJK9TILL1Q is not one of the payments in the list'));
+      expect(refused.refreshList, isTrue);
+      expect(inbox.claims, isEmpty);
+    });
+
+    test('when the shop refuses one code (another sale used it), the codes already used are given back', () async {
+      inbox.answer = (claim) => claim.code == second
+          ? const TillClaimRefused('used', 'This M-Pesa code was already used on sale S-0007.')
+          : TillPayment(code: claim.code, messageReceived: true, amount: Money(claim.amountCents));
+      final refused = await sellWith('$first, $second') as TillSaleRefused;
+      expect(refused.message, 'This M-Pesa code was already used on sale S-0007.');
+      expect(inbox.releases, [(code: first, saleId: inbox.claims.first.saleId)]);
+      expect(await salesCount(), 0);
+      expect(await sodaStock(), 10);
+    });
+
+    test('no internet half-way: nothing is sold and the code already used is given back', () async {
+      inbox.answer = (claim) => claim.code == second
+          ? const PaystackOfflineException()
+          : TillPayment(code: claim.code, messageReceived: true, amount: Money(claim.amountCents));
+      final refused = await sellWith('$first, $second') as TillSaleRefused;
+      expect(refused.message, TillSaleService.offlineMessage);
+      expect(inbox.releases.map((r) => r.code), [first]);
+      expect(await salesCount(), 0);
+    });
+
+    test('the sale could not be saved after the codes were used: every code is given back', () async {
+      inbox.answer = (claim) {
+        if (claim.code == second) stock.applyMovement(productId: productId, movementType: 'adjustment', delta: -9);
+        return TillPayment(code: claim.code, messageReceived: true, amount: Money(claim.amountCents));
+      };
+      final refused = await sellWith('$first, $second') as TillSaleRefused;
+      expect(refused.message, contains('the M-Pesa payments can still be used'));
+      expect(inbox.releases.map((r) => r.code), [first, second]);
+      expect(await salesCount(), 0);
+    });
+
+    test('cash first, then two till payments for the rest', () async {
+      // 120.00 sale: 20.00 cash, then 80.00 and 20.00 to the till.
+      final split = {first: const Money(8000), second: const Money(2000)};
+      final done = await sellWith('$first, $second', cash: const Money(2000), known: split) as TillSaleDone;
+      final saved = (await sales.findById(done.sale.id))!;
+      expect((saved.cashReceived, saved.gatewayPortion), (const Money(2000), const Money(10000)));
+      final record = (await payments.forSale(done.sale.id))!;
+      expect((record.amount, record.referenceNote), (const Money(10000), '$first, $second'));
+    });
+
+    test('at most five payments for one sale', () async {
+      final six = List.generate(6, (i) => 'SJK${i}TILL0A').join(', ');
+      final refused = await sellWith(six) as TillSaleRefused;
+      expect(refused.message, contains('at most 5'));
+      expect(inbox.claims, isEmpty);
+    });
+
+    test('one code still works exactly as before (the shop checks its amount against the sale)', () async {
+      final done = await sellWith(first, known: const {}) as TillSaleDone;
+      expect(inbox.claims.single.amountCents, 12000);
+      expect(done.payments.single.code, first);
+    });
+  });
 }

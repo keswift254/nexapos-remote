@@ -9,13 +9,15 @@ import '../../data/payments/payment_inbox_gateway.dart';
 import '../../data/payments/platform_http_client.dart';
 import '../../domain/services/paystack_credentials_service.dart';
 import '../../domain/services/till_matches.dart';
+import '../../domain/services/till_sale_service.dart' show maxTillPaymentsPerSale, mpesaCodesIn;
 
 /// "M-Pesa Till/Paybill" in the cart: the payments the shop phone passed on that no sale has used yet, refreshed by itself
 /// every few seconds while it is on screen. Only the ones of exactly the sale total are shown (newest first); the ONLY one
 /// of that amount, if it is new, is handed to [onAutoPay] so the sale completes by itself (see [tillMatches]). Two or more
 /// are for the cashier to choose from: a tap puts that payment's M-Pesa code in [codeController], and the rest stay
-/// suggested for the next sales until used or archived. Payments of other amounts are shown only when asked for. The code
-/// can also be typed.
+/// suggested for the next sales until used or archived. Payments of other amounts are shown only when asked for. A
+/// customer who paid in two or more payments (200, then 50 for a sale of 250): each is tapped, and their codes go in
+/// [codeController] together, with what they add up to shown. The code can also be typed.
 class TillPaymentsPanel extends ConsumerStatefulWidget {
   const TillPaymentsPanel({
     super.key,
@@ -73,6 +75,67 @@ class TillPaymentsPanelState extends ConsumerState<TillPaymentsPanel> {
 
   void _codeChanged() {
     if (mounted) setState(() {});
+  }
+
+  /// The amounts of the payments in the list, by code (for a sale paid with two or more of them).
+  Map<String, Money> get amounts => {
+        for (final payment in _payments ?? const <TillPayment>[])
+          if (payment.amount != null) payment.code: payment.amount!,
+      };
+
+  /// A tap on a payment. One of exactly the sale total is the customer's whole payment: it alone is picked (a tap on it
+  /// when it is the only one picked leaves it out again). Any other is a part: it is added to the parts picked, or left
+  /// out again when it was picked.
+  void _tap(TillPayment payment) {
+    final picked = mpesaCodesIn(widget.codeController.text) ?? <String>[];
+    final whole = payment.amount != null && payment.amount == widget.total;
+    final List<String> next;
+    if (whole) {
+      next = picked.length == 1 && picked.single == payment.code ? <String>[] : [payment.code];
+    } else if (picked.contains(payment.code)) {
+      next = [for (final code in picked) if (code != payment.code) code];
+    } else {
+      // A payment of the whole total picked before is not one of the parts.
+      final wholeCodes = {for (final p in _payments ?? const <TillPayment>[]) if (p.amount == widget.total) p.code};
+      next = [for (final code in picked) if (!wholeCodes.contains(code)) code, payment.code];
+      if (next.length > maxTillPaymentsPerSale) {
+        _say('One sale can be paid with at most $maxTillPaymentsPerSale M-Pesa payments.');
+        return;
+      }
+    }
+    widget.codeController.text = next.join(', ');
+    setState(() {});
+  }
+
+  /// What the picked payments add up to against the sale (shown when two or more are picked, or one of another amount).
+  Widget? _pickedSummary(ThemeData theme, List<String> picked) {
+    if (picked.isEmpty) return null;
+    final known = amounts;
+    if (picked.length == 1 && known[picked.single] == widget.total) return null;
+    final parts = [for (final code in picked) known[code]];
+    final String text;
+    Color? color;
+    if (parts.any((amount) => amount == null)) {
+      text = 'Picked ${picked.length}: the amount of ${picked.where((c) => known[c] == null).join(', ')} is not in the list.';
+      color = theme.colorScheme.error;
+    } else {
+      final paid = Money(parts.fold(0, (sum, amount) => sum + amount!.cents));
+      final sum = '${parts.map((amount) => amount!.format()).join(' + ')}'
+          '${parts.length > 1 ? ' = ${paid.format()}' : ''} of ${widget.total.format()}';
+      if (paid.cents < widget.total.cents) {
+        text = 'Picked: $sum. ${(widget.total - paid).format()} still owed: tap the customer\'s other payment.';
+        color = theme.colorScheme.error;
+      } else if (paid.cents > widget.total.cents) {
+        text = 'Picked: $sum. ${(paid - widget.total).format()} more than the sale: give it back in cash.';
+      } else {
+        text = 'Picked: $sum. Paid in full: Complete Sale.';
+        color = Colors.green.shade800;
+      }
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 4),
+      child: Text(text, key: const Key('till-picked'), style: TextStyle(color: color, fontWeight: FontWeight.w600)),
+    );
   }
 
   void _autoPayLater() => WidgetsBinding.instance.addPostFrameCallback((_) => _autoPay());
@@ -178,7 +241,10 @@ class TillPaymentsPanelState extends ConsumerState<TillPaymentsPanel> {
   }
 
   void _archived(TillPayment payment) {
-    if (normalizeMpesaCode(widget.codeController.text) == payment.code) widget.codeController.clear();
+    final picked = mpesaCodesIn(widget.codeController.text);
+    if (picked != null && picked.contains(payment.code)) {
+      widget.codeController.text = [for (final code in picked) if (code != payment.code) code].join(', ');
+    }
     setState(() => _payments = [for (final p in _payments ?? const <TillPayment>[]) if (p.code != payment.code) p]);
     _say('Archived: ${payment.payerName.isEmpty ? payment.code : payment.payerName}. It is no longer suggested here.');
   }
@@ -188,7 +254,8 @@ class TillPaymentsPanelState extends ConsumerState<TillPaymentsPanel> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  Widget _row(ThemeData theme, TillPayment payment, String? picked) {
+  Widget _row(ThemeData theme, TillPayment payment, List<String> picked) {
+    final isPicked = picked.contains(payment.code);
     return Dismissible(
       key: Key('till-swipe-${payment.code}'),
       direction: DismissDirection.endToStart,
@@ -204,8 +271,8 @@ class TillPaymentsPanelState extends ConsumerState<TillPaymentsPanel> {
       child: Card(
         key: Key('till-payment-${payment.code}'),
         margin: const EdgeInsets.only(bottom: 6),
-        color: payment.code == picked ? theme.colorScheme.primaryContainer : null,
-        shape: payment.code == picked
+        color: isPicked ? theme.colorScheme.primaryContainer : null,
+        shape: isPicked
             ? RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
                 side: BorderSide(color: theme.colorScheme.primary, width: 2),
@@ -238,10 +305,7 @@ class TillPaymentsPanelState extends ConsumerState<TillPaymentsPanel> {
             payment.amount?.format() ?? '?',
             style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
           ),
-          onTap: () {
-            widget.codeController.text = payment.code;
-            setState(() {});
-          },
+          onTap: () => _tap(payment),
         ),
       ),
     );
@@ -250,18 +314,23 @@ class TillPaymentsPanelState extends ConsumerState<TillPaymentsPanel> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final picked = normalizeMpesaCode(widget.codeController.text);
+    final picked = mpesaCodesIn(widget.codeController.text) ?? const <String>[];
     final payments = _payments;
     final total = widget.total;
     final fit = payments == null ? null : tillMatches(payments, total, DateTime.now());
-    final shown = fit == null ? const <TillPayment>[] : [...fit.matches, if (_showOthers) ...fit.others];
+    // A payment picked as a part (another amount) stays in sight while the other amounts are hidden.
+    final shown = fit == null
+        ? const <TillPayment>[]
+        : [...fit.matches, for (final p in fit.others) if (_showOthers || picked.contains(p.code)) p];
+    final summary = _pickedSummary(theme, picked);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
           'The customer pays your M-Pesa till or paybill from their phone. When their payment of the sale total reaches your '
           'shop phone, the sale completes by itself. If two or more payments of that amount have arrived, tap the '
-          "customer's one, then Complete Sale. Needs the internet.",
+          "customer's one, then Complete Sale. Paid in two or more payments (say 200, then 50)? Tap each of them. "
+          'Needs the internet.',
           style: theme.textTheme.bodySmall,
         ),
         const SizedBox(height: 8),
@@ -328,6 +397,7 @@ class TillPaymentsPanelState extends ConsumerState<TillPaymentsPanel> {
             ),
           _row(theme, shown[i], picked),
         ],
+        ?summary,
         if (fit != null && fit.others.isNotEmpty)
           Align(
             alignment: Alignment.centerLeft,
@@ -336,7 +406,7 @@ class TillPaymentsPanelState extends ConsumerState<TillPaymentsPanel> {
               onPressed: () => setState(() => _showOthers = !_showOthers),
               child: Text(_showOthers
                   ? 'Hide the payments of other amounts'
-                  : 'Customer paid a different amount? Show the other payments (${fit.others.length})'),
+                  : 'Paid a different amount, or in two or more payments? Show the other payments (${fit.others.length})'),
             ),
           ),
         if (shown.isNotEmpty)
@@ -362,7 +432,7 @@ class TillPaymentsPanelState extends ConsumerState<TillPaymentsPanel> {
           enableSuggestions: false,
           decoration: const InputDecoration(
             labelText: 'M-Pesa code',
-            hintText: 'Tap a payment above, or type the code',
+            hintText: 'Tap a payment above, or type the code (two or more: put a comma between them)',
             prefixIcon: Icon(Icons.receipt_long),
           ),
         ),

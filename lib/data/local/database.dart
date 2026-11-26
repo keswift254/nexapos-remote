@@ -33,6 +33,14 @@ part 'database.g.dart';
 /// While this row is in local_safety_state, the updated_at backstop triggers stay off (see AppDatabase.keepingUpdatedAt).
 const _keepUpdatedAtFlag = 'keep_updated_at';
 
+/// While this row is in local_safety_state, rows are being written as another device sent them (see
+/// AppDatabase.applyingShopChanges): the revision-owner triggers leave them alone.
+const _applyingShopChangesFlag = 'applying_shop_changes';
+
+/// In local_safety_state once a device has nothing left from before the revision-owner triggers to send (see
+/// SyncService._sendEditsMadeBeforeRevisionOwners): a new database, a device that joined a shop, or one that sent them.
+const editsBeforeRevisionOwnersSentFlag = 'sent_edits_of_other_devices_rows';
+
 /// Tables that use [SyncedColumns] (i.e. everything except [DeviceMeta]).
 /// Used to generate the updatedAt backstop triggers below - this list
 /// must be kept in sync with the `tables:` list on [AppDatabase] minus
@@ -129,6 +137,10 @@ class AppDatabase extends _$AppDatabase {
           });
         },
         onUpgrade: (m, from, to) async {
+          // An upgrade step may add tables and columns, never change existing rows: a row's content, time, change
+          // number and device must stay exactly what the shop server and the other devices hold for it
+          // (test/data/local/upgrade_keeps_rows_test.dart). A change an update must make to the shop's data is made like
+          // any other change - a new revision that syncs.
           if (from < 2) {
             // Sync cursors (Phase 2) - both default to 0, meaning "never
             // pushed/pulled anything yet", correct for an existing
@@ -165,9 +177,19 @@ class AppDatabase extends _$AppDatabase {
         },
         beforeOpen: (details) async {
           await customStatement('CREATE TABLE IF NOT EXISTS local_safety_state (id TEXT PRIMARY KEY, value TEXT NOT NULL)');
-          // A flag left by a write that never finished must not keep the updated_at backstop off (see keepingUpdatedAt).
-          await customStatement("DELETE FROM local_safety_state WHERE id='$_keepUpdatedAtFlag'");
+          // A flag left by a write that never finished must not keep the updated_at backstop off (see keepingUpdatedAt),
+          // nor the revision owner (see applyingShopChanges).
+          await customStatement(
+            "DELETE FROM local_safety_state WHERE id IN ('$_keepUpdatedAtFlag', '$_applyingShopChangesFlag')",
+          );
           await _createUpdatedAtTriggers();
+          await _createRevisionOwnerTriggers();
+          if (details.wasCreated) {
+            // Made with the revision-owner triggers in place: no change of this device can be under another's name.
+            await customStatement(
+              "INSERT OR IGNORE INTO local_safety_state(id, value) VALUES('$editsBeforeRevisionOwnersSentFlag', 'new')",
+            );
+          }
           for (final table in allTables.where((t) => t.actualTableName != 'device_meta')) {
             for (final operation in ['INSERT', 'UPDATE', 'DELETE']) {
               await customStatement('''CREATE TRIGGER IF NOT EXISTS safety_${table.actualTableName}_$operation
@@ -226,6 +248,21 @@ class AppDatabase extends _$AppDatabase {
         }
       });
 
+  /// Runs [body] in one transaction that writes rows exactly as another device sent them (the shop server's changes,
+  /// a till's changes over the LAN, the first download of a shop): each row keeps the device and change number it came
+  /// with. Every other write is this device's own, and the revision-owner triggers (see [_createRevisionOwnerTriggers])
+  /// make the row this device's revision.
+  Future<T> applyingShopChanges<T>(Future<T> Function() body) => transaction(() async {
+        await customStatement(
+          "INSERT OR REPLACE INTO local_safety_state(id, value) VALUES('$_applyingShopChangesFlag', '1')",
+        );
+        try {
+          return await body();
+        } finally {
+          await customStatement("DELETE FROM local_safety_state WHERE id='$_applyingShopChangesFlag'");
+        }
+      });
+
   /// A bare Migrator.addColumn throws "duplicate column name" if the
   /// column is already there, and that is a real state, not a
   /// hypothetical: SQLite records the schema version only after the whole
@@ -275,14 +312,42 @@ class AppDatabase extends _$AppDatabase {
   Future<void> _createUpdatedAtTriggers() async {
     for (final table in _syncedTableNames) {
       await customStatement('DROP TRIGGER IF EXISTS trg_${table}_updated_at');
+      // Nor when only the device a row belongs to changes (see _createRevisionOwnerTriggers): that is no edit either.
       await customStatement('''
         CREATE TRIGGER trg_${table}_updated_at
         AFTER UPDATE ON $table
         WHEN NEW.updated_at = OLD.updated_at
+          AND NEW.created_by_device_id = OLD.created_by_device_id
           AND NOT EXISTS (SELECT 1 FROM local_safety_state WHERE id = '$_keepUpdatedAtFlag')
         BEGIN
           UPDATE $table
           SET updated_at = strftime('%Y-%m-%dT%H:%M:%f', 'now') || '000Z'
+          WHERE id = NEW.id;
+        END;
+      ''');
+    }
+  }
+
+  /// A change this device makes to a row another device made (a price changed on the PC for an item added on a phone,
+  /// a password changed on a phone, an expense removed) takes this device's next change number, so it must also be
+  /// this device's revision: created_by_device_id says whose numbering a row's local_rev belongs to, and the upload
+  /// sends only this device's revisions. Until 1.0.96 the row kept the other device's name with THIS device's number:
+  /// the change never went up, never counted as waiting, and over the LAN it travelled as the other device's revision
+  /// under a number that device may have used for something else ("already recorded with different content"; the other
+  /// device then skipped its own real revision of that number). Rows written as another device sent them are left
+  /// alone (see [applyingShopChanges]). Dropped and made again on every open, so every install has this version.
+  Future<void> _createRevisionOwnerTriggers() async {
+    for (final table in _syncedTableNames) {
+      await customStatement('DROP TRIGGER IF EXISTS trg_${table}_revision_owner');
+      await customStatement('''
+        CREATE TRIGGER trg_${table}_revision_owner
+        AFTER UPDATE OF local_rev ON $table
+        WHEN NEW.local_rev <> OLD.local_rev
+          AND NEW.created_by_device_id <> (SELECT device_id FROM device_meta LIMIT 1)
+          AND NOT EXISTS (SELECT 1 FROM local_safety_state WHERE id = '$_applyingShopChangesFlag')
+        BEGIN
+          UPDATE $table
+          SET created_by_device_id = (SELECT device_id FROM device_meta LIMIT 1)
           WHERE id = NEW.id;
         END;
       ''');

@@ -1,4 +1,8 @@
+import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -61,6 +65,15 @@ class _CartScreenState extends ConsumerState<CartScreen> {
   final _tillPanelKey = GlobalKey<TillPaymentsPanelState>();
   String _query = '';
   bool _submitting = false;
+  // The search stays at the top while the cart scrolls under it. A product already in the cart, picked in the search, is
+  // shown in the cart instead of being added again: its line is brought into sight, marked for a moment, and given the
+  // cursor (on its +). These find each product's line and its + button.
+  final _searchFocus = FocusNode();
+  final _cartScroll = ScrollController();
+  final _lineKeys = <String, GlobalKey>{};
+  final _linePlusFocus = <String, FocusNode>{};
+  String? _shownProductId;
+  Timer? _shownTimer;
   // Cash fell short of the total: how the customer pays the rest - 'prompt' (an M-Pesa prompt to their phone) or 'till'
   // (they pay the shop's own till or paybill, and the cashier picks that payment).
   String _restBy = 'prompt';
@@ -84,6 +97,12 @@ class _CartScreenState extends ConsumerState<CartScreen> {
   @override
   void dispose() {
     CartShortcuts.unregister(this);
+    _shownTimer?.cancel();
+    _searchFocus.dispose();
+    _cartScroll.dispose();
+    for (final focus in _linePlusFocus.values) {
+      focus.dispose();
+    }
     _phoneFocus.dispose();
     _cashFocus.removeListener(_cashFocusChanged);
     _cashFocus.dispose();
@@ -233,6 +252,133 @@ class _CartScreenState extends ConsumerState<CartScreen> {
     setState(() => _query = '');
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('Added "${product.name}".'), duration: const Duration(seconds: 1)),
+    );
+  }
+
+  /// [product] is already in the cart: rather than adding it a second time, its line is brought into sight, marked for a
+  /// moment, and given the cursor - on its + button, so Enter adds one more if that is what the customer wants.
+  void _showInCart(Product product) {
+    _searchController.clear();
+    _shownTimer?.cancel();
+    setState(() {
+      _query = '';
+      _shownProductId = product.id;
+    });
+    _shownTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) setState(() => _shownProductId = null);
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final line = _lineKeys[product.id]?.currentContext;
+      if (line == null || !mounted) return;
+      await Scrollable.ensureVisible(line, duration: const Duration(milliseconds: 250), alignment: 0.3);
+      if (mounted) _linePlusFocus[product.id]?.requestFocus();
+    });
+  }
+
+  /// The search box, made to stand out, and what it found right under it: both stay at the top of the screen while the
+  /// cart scrolls under them.
+  Widget _searchBar(BuildContext context, CartNotifier cart, CartState cartState, List<Product> matches) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    OutlineInputBorder border(double width) => OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide(color: scheme.primary, width: width),
+        );
+    final inCart = <String, int>{};
+    for (final item in cartState.items) {
+      final id = item.productId;
+      if (id != null) inCart[id] = (inCart[id] ?? 0) + item.quantity;
+    }
+    return Material(
+      key: const Key('cart-search-bar'),
+      elevation: 3,
+      color: theme.scaffoldBackgroundColor,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    key: const Key('cart-search'),
+                    controller: _searchController,
+                    focusNode: _searchFocus,
+                    autofocus: true,
+                    style: theme.textTheme.titleMedium,
+                    decoration: InputDecoration(
+                      hintText: 'Search by name, or scan a barcode...',
+                      prefixIcon: Icon(Icons.search, color: scheme.primary),
+                      filled: true,
+                      fillColor: scheme.primaryContainer.withValues(alpha: 0.35),
+                      border: border(2),
+                      enabledBorder: border(2),
+                      focusedBorder: border(3),
+                      suffixIcon: _query.isEmpty
+                          ? null
+                          : IconButton(
+                              tooltip: 'Clear the search',
+                              icon: const Icon(Icons.close),
+                              onPressed: () {
+                                _searchController.clear();
+                                setState(() => _query = '');
+                                _searchFocus.requestFocus();
+                              },
+                            ),
+                    ),
+                    // Not digits-only (unlike a plain barcode field) -
+                    // this doubles as a live name search, which needs
+                    // letters. A real barcode scan still works the same
+                    // way regardless: it types digits then Enter, handled
+                    // below by onSubmitted's exact-match lookup.
+                    textInputAction: TextInputAction.search,
+                    onChanged: (value) => setState(() => _query = value),
+                    onSubmitted: _handleSearchSubmitted,
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.playlist_add),
+                  tooltip: 'Add manual item',
+                  onPressed: () => showAddManualItemDialog(context, ref),
+                ),
+              ],
+            ),
+            if (_query.trim().isNotEmpty) ...[
+              const SizedBox(height: 6),
+              if (matches.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8),
+                  child: Text('No products found.'),
+                )
+              else
+                ConstrainedBox(
+                  constraints: BoxConstraints(maxHeight: math.min(360, MediaQuery.sizeOf(context).height * 0.4)),
+                  child: ListView(
+                    key: const Key('cart-search-results'),
+                    shrinkWrap: true,
+                    padding: EdgeInsets.zero,
+                    children: [
+                      for (final product in matches)
+                        Card(
+                          margin: const EdgeInsets.only(bottom: 4),
+                          child: ListTile(
+                            key: Key('cart-search-result-${product.id}'),
+                            dense: true,
+                            title: Text(product.name),
+                            subtitle: Text(product.retailPrice.format()),
+                            trailing: _SearchPlace(productId: product.id, inCart: inCart[product.id], stock: product.stockQty),
+                            onTap: () => inCart.containsKey(product.id) ? _showInCart(product) : _addFromSearch(cart, product),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 
@@ -393,6 +539,7 @@ class _CartScreenState extends ConsumerState<CartScreen> {
       typedCode: _tillCodeController.text,
       acceptAmount: acceptAmount,
       cashReceived: cashReceived,
+      knownAmounts: _tillPanelKey.currentState?.amounts ?? const {},
     );
     if (!mounted) return;
     setState(() => _submitting = false);
@@ -408,11 +555,12 @@ class _CartScreenState extends ConsumerState<CartScreen> {
         if (outcome.change.cents > 0) {
           messenger.showSnackBar(SnackBar(
             duration: const Duration(seconds: 10),
-            content: Text('The customer paid ${outcome.payment.amount!.format()}. Give back ${outcome.change.format()} in cash.'),
+            content: Text('The customer paid ${outcome.paid!.format()}. Give back ${outcome.change.format()} in cash.'),
           ));
         }
       case TillSaleNeedsConfirmation():
         final paid = outcome.paid;
+        final paidWords = outcome.payments > 1 ? 'The customer\'s ${outcome.payments} payments add up to' : 'The customer paid';
         final goAhead = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
@@ -421,9 +569,9 @@ class _CartScreenState extends ConsumerState<CartScreen> {
                 ? 'The amount in this M-Pesa message could not be read. Check the message on the shop phone. '
                     'Did the customer pay at least ${outcome.total.format()}${outcome.split ? ' (what the cash did not cover)' : ''}?'
                 : outcome.split
-                    ? 'The customer paid ${paid.format()} towards the ${outcome.total.format()} still owed. '
+                    ? '$paidWords ${paid.format()} towards the ${outcome.total.format()} still owed. '
                         'Give back ${(paid - outcome.total).format()} in cash and complete the sale?'
-                    : 'The customer paid ${paid.format()} for a sale of ${outcome.total.format()}. '
+                    : '$paidWords ${paid.format()} for a sale of ${outcome.total.format()}. '
                         'Give back ${(paid - outcome.total).format()} in cash and complete the sale?'),
             actions: [
               TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
@@ -465,57 +613,17 @@ class _CartScreenState extends ConsumerState<CartScreen> {
         title: const Text('Cart & Checkout'),
         actions: const [HeldSalesButton()],
       ),
-      body: ListView(
+      body: Column(
+        children: [
+          _searchBar(context, cart, cartState, searchMatches),
+          Expanded(
+            child: ListView(
+        controller: _cartScroll,
+        // Every line is built, also out of sight, so a line picked in the search can be scrolled to (a list only builds
+        // what is in sight, and a line that is not built cannot be found). A cart is never so long that this costs.
+        scrollCacheExtent: const ScrollCacheExtent.pixels(1000000),
         padding: const EdgeInsets.all(16),
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _searchController,
-                  autofocus: true,
-                  decoration: const InputDecoration(
-                    hintText: 'Search by name, or scan a barcode...',
-                    prefixIcon: Icon(Icons.search),
-                    isDense: true,
-                  ),
-                  // Not digits-only (unlike a plain barcode field) -
-                  // this doubles as a live name search, which needs
-                  // letters. A real barcode scan still works the same
-                  // way regardless: it types digits then Enter, handled
-                  // below by onSubmitted's exact-match lookup.
-                  textInputAction: TextInputAction.search,
-                  onChanged: (value) => setState(() => _query = value),
-                  onSubmitted: _handleSearchSubmitted,
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.playlist_add),
-                tooltip: 'Add manual item',
-                onPressed: () => showAddManualItemDialog(context, ref),
-              ),
-            ],
-          ),
-          if (_query.trim().isNotEmpty) ...[
-            const SizedBox(height: 4),
-            if (searchMatches.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 8),
-                child: Text('No products found.'),
-              )
-            else
-              for (final product in searchMatches)
-                Card(
-                  margin: const EdgeInsets.only(bottom: 4),
-                  child: ListTile(
-                    dense: true,
-                    title: Text(product.name),
-                    subtitle: Text(product.retailPrice.format()),
-                    onTap: () => _addFromSearch(cart, product),
-                  ),
-                ),
-          ],
-          const SizedBox(height: 12),
           if (cartState.isEmpty) const Text('Your cart is empty.'),
           if (cartState.isEmpty && heldCount > 0)
             Padding(
@@ -531,6 +639,18 @@ class _CartScreenState extends ConsumerState<CartScreen> {
             ),
           for (var i = 0; i < cartState.items.length; i++)
             Card(
+              key: cartState.items[i].productId == null
+                  ? null
+                  : _lineKeys.putIfAbsent(cartState.items[i].productId!, GlobalKey.new),
+              color: cartState.items[i].productId != null && cartState.items[i].productId == _shownProductId
+                  ? Theme.of(context).colorScheme.primaryContainer
+                  : null,
+              shape: cartState.items[i].productId != null && cartState.items[i].productId == _shownProductId
+                  ? RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      side: BorderSide(color: Theme.of(context).colorScheme.primary, width: 2),
+                    )
+                  : null,
               child: ListTile(
                 title: Text(cartState.items[i].name),
                 subtitle: Text('${cartState.items[i].unitPrice.format()} each'),
@@ -544,6 +664,13 @@ class _CartScreenState extends ConsumerState<CartScreen> {
                   children: [
                     Text('${cartState.items[i].quantity}'),
                     IconButton(
+                      key: cartState.items[i].productId == null
+                          ? null
+                          : Key('cart-line-plus-${cartState.items[i].productId}'),
+                      focusNode: cartState.items[i].productId == null
+                          ? null
+                          : _linePlusFocus.putIfAbsent(cartState.items[i].productId!, FocusNode.new),
+                      tooltip: 'One more',
                       icon: const Icon(Icons.add_circle_outline),
                       onPressed: () => cart.updateQuantity(
                         i,
@@ -747,6 +874,9 @@ class _CartScreenState extends ConsumerState<CartScreen> {
             ],
           ],
         ],
+            ),
+          ),
+        ],
       ),
       bottomNavigationBar: SafeArea(
         child: Padding(
@@ -810,6 +940,36 @@ class _ChangeDueRow extends StatelessWidget {
         Text(short ? 'Still owed' : 'Change due', style: style),
         Text((short ? Money(-change.cents) : change).format(), style: style),
       ],
+    );
+  }
+}
+
+/// The small label on a search result: the product is already in the cart (how many), or only in the inventory (how many
+/// in stock).
+class _SearchPlace extends StatelessWidget {
+  const _SearchPlace({required this.productId, required this.inCart, required this.stock});
+  final String productId;
+  final int? inCart;
+  final int stock;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final there = inCart != null;
+    return Container(
+      key: Key(there ? 'cart-search-in-cart-$productId' : 'cart-search-in-inventory-$productId'),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: there ? scheme.primary : scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        there ? 'In cart × $inCart' : 'In inventory · ${stock > 0 ? '$stock in stock' : 'none in stock'}',
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: there ? scheme.onPrimary : (stock > 0 ? scheme.onSurfaceVariant : scheme.error),
+              fontWeight: FontWeight.w600,
+            ),
+      ),
     );
   }
 }

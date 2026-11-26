@@ -238,6 +238,10 @@ class SyncService {
     await _db.customStatement(
       "DELETE FROM local_safety_state WHERE id='sync_snapshot'",
     );
+    // Everything here comes from the shop: no change of this device is waiting under another device's name.
+    await _db.customStatement(
+      "INSERT OR REPLACE INTO local_safety_state(id, value) VALUES('$editsBeforeRevisionOwnersSentFlag', 'joined')",
+    );
     await _db.delete(_db.businessSettings).go();
     final meta = await _db.select(_db.deviceMeta).getSingle();
     await _syncMeta.setLastPushedLocalRev(meta.nextLocalRev - 1);
@@ -577,7 +581,9 @@ class SyncService {
       // record to the local database), which is why it still climbs from
       // there for a big enough shop, unlike the pure regression this was.
       _progress('Applying shop records', completed: total, total: total);
-      await _db.transaction(() async {
+      // The whole shop at once, so a missing parent means the download itself is incomplete: it is refused and fetched
+      // again (unlike a later page of changes, see _applyShopChanges).
+      await _db.applyingShopChanges(() async {
         await _db.customStatement('PRAGMA defer_foreign_keys=ON');
         var applied = 0;
         final products = <String>{};
@@ -1148,7 +1154,57 @@ class SyncService {
     );
   }
 
+  /// Done once per device: [_sendEditsMadeBeforeRevisionOwners].
+  static const _sentOldEditsFlag = editsBeforeRevisionOwnersSentFlag;
+
+  /// Tables where one device changes rows another device made (an item's price, a person's password, the shop's
+  /// details, an expense removed). Sales and their payments are only ever changed by the device that made them.
+  static const _tablesEditedAcrossDevices = ['roles', 'users', 'categories', 'products', 'expenses', 'business_settings'];
+
+  /// Until 1.0.96 a change this device made to a row another device made kept that device's name (see
+  /// AppDatabase._createRevisionOwnerTriggers), so it never went up: such an edit is still only here. Which of those
+  /// rows were edited HERE cannot be told any more, so once, every row made elsewhere and changed since it was made
+  /// goes up again as this device's revision - with what it says and when it was changed kept exactly. For a row edited
+  /// here, that is the missing change; for any other it is the same copy again, which the shop's devices take or leave
+  /// by its time like any other, so nothing is overwritten with something older.
+  Future<void> _sendEditsMadeBeforeRevisionOwners() async {
+    final done = await _db
+        .customSelect("SELECT 1 FROM local_safety_state WHERE id = '$_sentOldEditsFlag'")
+        .getSingleOrNull();
+    if (done != null) return;
+    final deviceId = await _syncMeta.deviceId();
+    await _db.keepingUpdatedAt(() async {
+      final meta = await (_db.select(_db.deviceMeta)..limit(1)).getSingle();
+      var next = meta.nextLocalRev;
+      for (final table in _tablesEditedAcrossDevices) {
+        final info = _db.allTables.firstWhere((t) => t.actualTableName == table);
+        final rows = await _db
+            .customSelect(
+              'SELECT id FROM "$table" WHERE created_by_device_id <> ? AND updated_at <> created_at '
+              'ORDER BY updated_at, id',
+              variables: [Variable<String>(deviceId)],
+            )
+            .get();
+        for (final row in rows) {
+          await _db.customUpdate(
+            'UPDATE "$table" SET created_by_device_id = ?, local_rev = ? WHERE id = ?',
+            variables: [Variable<String>(deviceId), Variable<int>(next), Variable<String>(row.read<String>('id'))],
+            updates: {info},
+          );
+          next++;
+        }
+      }
+      await (_db.update(_db.deviceMeta)..where((t) => t.id.equals(meta.id)))
+          .write(DeviceMetaCompanion(nextLocalRev: Value(next)));
+      await _db.customStatement(
+        "INSERT OR REPLACE INTO local_safety_state(id, value) VALUES('$_sentOldEditsFlag', ?)",
+        [DateTime.now().toUtc().toIso8601String()],
+      );
+    });
+  }
+
   Future<void> pushLocalChanges(String baseUrl, String apiKey) async {
+    await _sendEditsMadeBeforeRevisionOwners();
     final isolation = _Isolation(_isolationRequestsPerCycle);
     // Rows an earlier version set aside for a clash go back in the queue under new numbers: a server from 2026-11-23
     // on takes a product sent again whose stock time alone moved, and any real clash now renumbers (just below).
@@ -1347,7 +1403,8 @@ class SyncService {
       await _ensureLanTables();
       final ownDeviceId = await _syncMeta.deviceId();
       final touchedProducts = <String>{};
-      await _db.transaction(() async {
+      await _applyShopChanges(() async {
+        touchedProducts.clear();
         await _db.customStatement('PRAGMA defer_foreign_keys=ON');
         for (final change in changes) {
           final adapter = syncTableAdapters[change.tableName];
@@ -1430,6 +1487,7 @@ class SyncService {
 
   Future<void> _pushLanRelayOutbox(String baseUrl, String apiKey) async {
     await _ensureLanTables();
+    final isolation = _Isolation(_isolationRequestsPerCycle);
     while (true) {
       final rows = await _db
           .customSelect(
@@ -1449,53 +1507,68 @@ class SyncService {
         continue;
       } on PaystackException catch (e) {
         if (e.statusCode != 422) rethrow;
-      }
-      // Whether the server accepts a relayed change depends on its SOURCE
-      // device (is it still an active client of this shop?), a single
-      // fact shared by every row from that source - never a fact about
-      // an individual row. Retrying per row here previously meant a
-      // source inactive for a while, with hundreds of rows queued up
-      // after days of testing, cost one HTTP round trip PER ROW to
-      // rediscover the same fact hundreds of times - easily minutes, and
-      // exactly what made leaving a shop on a device with such a backlog
-      // look permanently stuck. Grouping by source bounds this to one
-      // extra request per DISTINCT source device instead - typically a
-      // handful, never hundreds.
-      final bySource = <String, List<QueryRow>>{};
-      for (final row in rows) {
-        (bySource[row.data['source_device_id'] as String] ??= []).add(row);
-      }
-      if (bySource.length == 1) {
-        // The whole batch was already this one source and we just learned
-        // it's rejected - no need to ask again. Drop every row queued for
-        // it, not just this LIMIT-sized slice, so a large backlog clears
-        // in this one extra request instead of being rediscovered (and
-        // paid for again) batch after batch.
-        await _db.customStatement(
-          'DELETE FROM local_lan_relay_outbox WHERE source_device_id = ?',
-          [bySource.keys.single],
-        );
-        continue;
-      }
-      for (final group in bySource.values) {
-        try {
-          await _gateway.pushChanges(
-            baseUrl: baseUrl,
-            apiKey: apiKey,
-            changes: _relayChangesOf(group),
-          );
-          await _deleteRelayOutboxRows(
-            group.map((row) => row.data['rowid'] as int),
-          );
-        } on PaystackException catch (single) {
-          if (single.statusCode != 422) rethrow;
-          await _db.customStatement(
-            'DELETE FROM local_lan_relay_outbox WHERE source_device_id = ?',
-            [group.first.data['source_device_id'] as String],
-          );
-        }
+        // Out of requests for this cycle: what is left goes on the next one.
+        if (!await _relayRefused(baseUrl, apiKey, rows, e, isolation)) return;
       }
     }
+  }
+
+  /// The server's words when the device a relayed change came from has left the shop or been disabled.
+  static const _inactiveSourceReason = 'Relayed source device is not active in this shop';
+
+  /// The server refused [rows] (relayed changes) as one batch with [error]. Some refusals are about the SOURCE device
+  /// (it left the shop or was disabled), a fact shared by every row from it: that source's whole queue goes, at the
+  /// cost of one request per source, never one per row (asking row by row once made leaving a shop with a backlog of
+  /// hundreds look stuck for minutes). Others are about one ROW - a change number the server already holds with other
+  /// content (the source sent its own copy), a time more than a day ahead (the source's clock): only that row goes. It
+  /// used to take every queued change of its source with it, so the sales of a till that only ever reaches the shop
+  /// over the LAN never reached the cloud. Whatever is dropped stays on its source device, which sends it itself when
+  /// it is online. Returns false when this cycle's requests ran out; the rows still queued wait for the next one.
+  Future<bool> _relayRefused(
+    String baseUrl,
+    String apiKey,
+    List<QueryRow> rows,
+    PaystackException error,
+    _Isolation isolation,
+  ) async {
+    Future<bool> retry(List<QueryRow> part) async {
+      if (isolation.requestsLeft <= 0) return false;
+      isolation.requestsLeft--;
+      try {
+        await _gateway.pushChanges(baseUrl: baseUrl, apiKey: apiKey, changes: _relayChangesOf(part));
+        await _deleteRelayOutboxRows(part.map((row) => row.data['rowid'] as int));
+        return true;
+      } on PaystackException catch (again) {
+        if (again.statusCode != 422) rethrow;
+        return _relayRefused(baseUrl, apiKey, part, again, isolation);
+      }
+    }
+
+    final bySource = <String, List<QueryRow>>{};
+    for (final row in rows) {
+      (bySource[row.data['source_device_id'] as String] ??= []).add(row);
+    }
+    if (bySource.length > 1) {
+      for (final group in bySource.values) {
+        if (!await retry(group)) return false;
+      }
+      return true;
+    }
+    if (error.message.contains(_inactiveSourceReason)) {
+      // Every row queued for this source, not just this batch: a large backlog clears with this one answer.
+      await _db.customStatement(
+        'DELETE FROM local_lan_relay_outbox WHERE source_device_id = ?',
+        [bySource.keys.single],
+      );
+      return true;
+    }
+    if (rows.length == 1) {
+      await _deleteRelayOutboxRows([rows.single.data['rowid'] as int]);
+      return true;
+    }
+    // In order (a parent before its children): the first half, then the second.
+    final middle = rows.length ~/ 2;
+    return await retry(rows.sublist(0, middle)) && await retry(rows.sublist(middle));
   }
 
   /// Pages through pull_changes in ascending id order, applying each
@@ -1522,7 +1595,7 @@ class SyncService {
       }
       if (result.changes.isEmpty) break;
 
-      await _db.transaction(() async {
+      await _applyShopChanges(() async {
         touchedProductIds.clear();
         await _db.customStatement('PRAGMA defer_foreign_keys=ON');
         for (final change in result.changes) {
@@ -1552,6 +1625,29 @@ class SyncService {
       if (!result.hasMore) break;
     }
   }
+
+  /// Writes rows as other devices sent them, each keeping the device and change number it came with (see
+  /// [AppDatabase.applyingShopChanges]), in one transaction that [body] may be run in twice. A row whose parent this
+  /// device does not hold (say a sale line whose sale the shop server refused) failed the whole page when it was saved,
+  /// every time: the download stopped at that page for good, and nothing the shop did afterwards ever arrived. Such a
+  /// page is now saved without the link check, so the shop's changes keep coming; the row links up when its parent
+  /// arrives.
+  Future<void> _applyShopChanges(Future<void> Function() body) async {
+    try {
+      await _db.applyingShopChanges(body);
+      return;
+    } on Object catch (error) {
+      if (!'$error'.contains(_missingParentReason)) rethrow;
+    }
+    await _db.customStatement('PRAGMA foreign_keys=OFF');
+    try {
+      await _db.applyingShopChanges(body);
+    } finally {
+      await _db.customStatement('PRAGMA foreign_keys=ON');
+    }
+  }
+
+  static const _missingParentReason = 'FOREIGN KEY constraint failed';
 
   Future<void> _applyWithLastWriteWins(
     SyncTableAdapter adapter,
